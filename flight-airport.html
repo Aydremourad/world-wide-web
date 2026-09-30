@@ -30,8 +30,9 @@ white-space:nowrap;
 overflow:hidden
 }
 .boardtabs a{
-display:inline-block;
-width:148px;
+display:block;
+float:left;
+width:50%;
 height:32px;
 line-height:32px;
 text-align:center;
@@ -46,7 +47,8 @@ text-shadow:0 1px 0 #fff
 -webkit-border-top-left-radius:8px;
 -webkit-border-bottom-left-radius:8px;
 border-top-left-radius:8px;
-border-bottom-left-radius:8px
+border-bottom-left-radius:8px;
+border-right:1px solid #c5cbd1
 }
 .boardtabs a:last-child{
 -webkit-border-top-right-radius:8px;
@@ -74,7 +76,19 @@ padding:9px 10px 8px;
 border-bottom:1px solid #cfd3d7;
 background:#fff
 }
-.flightrow:last-child{border-bottom:0}
+.flightrow:first-child{
+-webkit-border-top-left-radius:8px;
+-webkit-border-top-right-radius:8px;
+border-top-left-radius:8px;
+border-top-right-radius:8px
+}
+.flightrow:last-child{
+border-bottom:0;
+-webkit-border-bottom-left-radius:8px;
+-webkit-border-bottom-right-radius:8px;
+border-bottom-left-radius:8px;
+border-bottom-right-radius:8px
+}
 .flighttop{height:21px;line-height:21px;white-space:nowrap}
 .ftime{float:left;font-size:17px;font-weight:bold;color:#222}
 .fnum{float:right;font-size:14px;font-weight:bold;color:#385487}
@@ -88,7 +102,9 @@ font-size:13px;
 line-height:18px;
 text-align:center;
 color:#666;
-background:#fff
+background:#fff;
+-webkit-border-radius:8px;
+border-radius:8px
 }
 .statusline{
 font-size:10px;
