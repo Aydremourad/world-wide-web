@@ -9,8 +9,8 @@
 .boardbox{
 background:#fff;
 border:1px solid #7f8790;
--webkit-border-radius:10px;
-border-radius:10px;
+-webkit-border-radius:11px;
+border-radius:11px;
 padding:10px;
 margin-bottom:10px;
 -webkit-box-shadow:0 1px 2px rgba(0,0,0,.20),inset 0 1px 0 #fff;
@@ -53,6 +53,26 @@ font-size:10px;
 color:#66717c;
 text-align:center;
 padding:0 0 6px;
+text-shadow:0 1px 0 #fff
+}
+.boardnav{
+height:34px;
+margin:0 0 7px;
+white-space:nowrap;
+text-align:center
+}
+.boardnav button{
+height:30px;
+min-width:88px;
+margin:0 4px;
+padding:0 10px;
+font:bold 12px Helvetica,Arial,sans-serif;
+color:#385487;
+border:1px solid #7b8792;
+-webkit-border-radius:7px;
+border-radius:7px;
+background:#eceff2;
+background:-webkit-gradient(linear,left top,left bottom,from(#fff),to(#d6dbe0));
 text-shadow:0 1px 0 #fff
 }
 #boardwindow{
@@ -98,6 +118,11 @@ function cleanAirport(v){
  if(v.length==4 && v.charAt(0)=='K'){v=v.substring(1);}
  return v;
 }
+function moveBoard(amount){
+ var w=document.getElementById('boardwindow');
+ if(w){w.scrollLeft=w.scrollLeft+amount;}
+ return false;
+}
 function showBoard(type){
  var a=document.getElementById('arrtab');
  var d=document.getElementById('deptab');
@@ -113,7 +138,7 @@ function init(){
  var dest=cleanAirport(getParam('dest'));
  if(!airport.match(/^[A-Z0-9]{3}$/)){
   document.getElementById('titlecode').innerHTML='Airport';
-  document.getElementById('boardwrap').innerHTML='<div class="boardbox"><b>Airport code not recognized.</b><p>Return to Flight Track and enter a three-letter airport code such as FWA.</p></div>';
+  document.getElementById('boardarea').innerHTML='<div class="boardbox"><b>Airport code not recognized.</b><p>Return to Flight Track and enter a three-letter airport code such as FWA.</p></div>';
   return;
  }
  document.title=airport+' Airport Board';
@@ -136,11 +161,14 @@ function init(){
 <p>Live arrivals and departures.</p>
 </div>
 
+<div id="boardarea">
 <div id="routehint" class="boardbox" style="display:none"></div>
 <div class="boardtabs"><a id="arrtab" class="sel" href="#" onclick="return showBoard('arrivals')">Arrivals</a><a id="deptab" href="#" onclick="return showBoard('departures')">Departures</a></div>
-<div class="scrollhint">Slide the board left or right to see all flight details.</div>
+<div class="scrollhint">Use the buttons to move across the flight details.</div>
+<div class="boardnav"><button type="button" onclick="return moveBoard(-210)">&#9664; Left</button><button type="button" onclick="return moveBoard(210)">Right &#9654;</button></div>
 <div id="boardwindow">
 <div id="boardcanvas"><iframe id="boardframe" frameborder="0" scrolling="yes" title="Live airport board"></iframe></div>
+</div>
 </div>
 
 <div class="group">
