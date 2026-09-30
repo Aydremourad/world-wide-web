@@ -1,0 +1,10 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=320"><title>Old Search</title><link rel="stylesheet" href="style.css"><script>
+function goSearch(){var q=document.getElementById('q').value;if(!q){return false;}window.location='https://www.google.com/search?q='+encodeURIComponent(q);return false;}
+</script></head><body><div class="page">
+<div class="top"><a class="back" href="portal-next.html">WWW</a>Old Search</div>
+<div class="content">
+<div class="hero"><h1>Web Search</h1><p>A deliberately simple search page for the World Wide Web portal.</p></div>
+<div class="group"><div class="group-title">Search the web</div><div class="hero"><form onsubmit="return goSearch()"><div class="row"><input id="q" type="text" placeholder="Search"><button type="submit">Go</button></div></form></div></div>
+<div class="group"><div class="group-title">Classic destinations</div><div class="list"><a href="https://www.google.com/" target="_blank">Google</a><a href="https://search.yahoo.com/" target="_blank">Yahoo Search</a><a href="https://web.archive.org/" target="_blank">Internet Archive</a></div></div>
+<div class="note">The search box uses a plain URL redirect so it stays lightweight and avoids any modern JavaScript framework.</div>
+</div><div class="footer">Old Search · World Wide Web</div></div></body></html>
