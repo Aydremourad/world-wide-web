@@ -1,17 +1,73 @@
-<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=320"><title>Flight Track</title><link rel="stylesheet" href="style.css"><script>
-function track(){
-var v=document.getElementById('flight').value.replace(/\s+/g,'').toUpperCase();
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320">
+<title>Flight Track</title>
+<link rel="stylesheet" href="style.css">
+<script>
+function clean(v){return v.replace(/\s+/g,'').toUpperCase();}
+function trackFlight(){
+var v=clean(document.getElementById('flight').value);
 if(!v){return false;}
 var m=v.match(/^([A-Z0-9]{2,3})([0-9]{1,4}[A-Z]?)$/);
 if(!m){alert('Enter a flight like AA123 or UA456.');return false;}
-window.location='https://www.flightview.com/flight-tracker/'+m[1]+'/'+m[2];
+window.location='https://www.flightstats.com/v2/flight-tracker/'+m[1]+'/'+m[2];
 return false;
 }
-</script></head><body><div class="page">
+function airportBoard(){
+var a=clean(document.getElementById('airport').value);
+var b=document.getElementById('board').value;
+if(!a || !a.match(/^[A-Z]{3}$/)){alert('Enter a 3-letter airport code like FWA, ORD, ATL, or LAX.');return false;}
+window.location='https://www.flightstats.com/v2/flight-tracker/'+b+'/'+a;
+return false;
+}
+</script>
+</head>
+<body>
+<div class="page">
 <div class="top"><a class="back" href="index.html">WWW</a>Flight Track</div>
 <div class="content">
-<div class="hero"><h1>Flight Track</h1><p>Enter an airline and flight number to follow a flight.</p></div>
-<div class="group"><div class="group-title">Flight number</div><div class="hero"><form onsubmit="return track()"><div class="row"><input id="flight" type="text" autocapitalize="characters" autocorrect="off" placeholder="AA123"><button type="submit">Track</button></div></form><div class="small" style="margin-top:7px">Examples: AA123, DL456, UA789</div></div></div>
-<div class="group"><div class="group-title">Quick links</div><div class="list"><a href="https://www.flightview.com/flight-tracker/" target="_blank">FlightView</a><a href="https://www.flightstats.com/v2/flight-tracker/search" target="_blank">FlightStats</a></div></div>
 
-</div><div class="footer">Flight Track</div></div></body></html>
+<div class="hero"><h1>Flight Track</h1><p>Track a known flight, or use an airport board to find the flight number first.</p></div>
+
+<div class="group">
+<div class="group-title">By flight number</div>
+<div class="hero">
+<form onsubmit="return trackFlight()">
+<div class="row"><input id="flight" type="text" autocapitalize="characters" autocorrect="off" placeholder="AA123"><button type="submit">Track</button></div>
+</form>
+<div class="small" style="margin-top:7px">Examples: AA123, DL456, UA789</div>
+</div>
+</div>
+
+<div class="group">
+<div class="group-title">By airport</div>
+<div class="hero">
+<form onsubmit="return airportBoard()">
+<div style="white-space:nowrap">
+<input id="airport" type="text" autocapitalize="characters" autocorrect="off" maxlength="3" placeholder="FWA" style="width:88px">
+<select id="board" style="height:36px;font-size:14px;vertical-align:top;margin-left:4px">
+<option value="departures">Departures</option>
+<option value="arrivals">Arrivals</option>
+</select>
+<button type="submit" style="margin-left:4px">View</button>
+</div>
+</form>
+<div class="small" style="margin-top:7px">Use a 3-letter airport code. The board lists current flights and their flight numbers.</div>
+</div>
+</div>
+
+<div class="group">
+<div class="group-title">More options</div>
+<div class="list">
+<a href="https://tracker.flightview.com/CustomerSetup/RoutesOnline/General/Tracker/">Track by Route</a>
+<a href="https://www.flightstats.com/v2/flight-tracker/search">Flight Search</a>
+</div>
+</div>
+
+</div>
+<div class="footer">Flight Track</div>
+</div>
+</body>
+</html>
