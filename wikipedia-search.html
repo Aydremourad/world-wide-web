@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, initial-scale=1.0">
+<title>Wikipedia Search</title>
+<style>
+*{-webkit-box-sizing:border-box;box-sizing:border-box}
+html,body{margin:0;padding:0;background:#f6f6f6;color:#202122;font-family:Arial,Helvetica,sans-serif;font-size:13px;-webkit-text-size-adjust:none}
+#page{width:320px;margin:0 auto;min-height:480px}
+#top{height:44px;line-height:44px;text-align:center;background:#fff;border-bottom:1px solid #aaa;font-family:Georgia,"Times New Roman",serif;font-size:20px;position:relative}
+#back{position:absolute;left:8px;top:7px;height:29px;line-height:28px;padding:0 10px;border:1px solid #888;-webkit-border-radius:6px;border-radius:6px;background:#eee;background:-webkit-gradient(linear,left top,left bottom,from(#fff),to(#ccc));font:bold 11px Arial;color:#333;text-decoration:none}
+#search{padding:10px 9px;background:#e9e9e9;border-bottom:1px solid #aaa;white-space:nowrap}
+#q{width:236px;height:31px;border:2px solid #7d858d;-webkit-border-radius:7px;border-radius:7px;padding:4px 6px;font-size:15px;background:#fff}
+#go{height:31px;width:58px;margin-left:4px;border:1px solid #777;-webkit-border-radius:6px;border-radius:6px;background:#ddd;background:-webkit-gradient(linear,left top,left bottom,from(#f7f7f7),to(#c9c9c9));font:bold 11px Arial}
+#content{padding:11px 9px 20px}
+.heading{font-family:Georgia,"Times New Roman",serif;font-size:19px;margin:0 0 9px}
+.results{border:2px solid #78818a;-webkit-border-radius:10px;border-radius:10px;overflow:hidden;background:#fff}
+.result{display:block;padding:10px;border-bottom:1px solid #d5d5d5;background:#fff;color:#202122;text-decoration:none}
+.result:last-child{border-bottom:0}
+.rtitle{font-size:15px;color:#0645ad;font-weight:bold;line-height:18px}
+.rtext{font-size:11px;color:#555;line-height:15px;margin-top:3px}
+.msg{border:2px solid #78818a;-webkit-border-radius:10px;border-radius:10px;background:#fff;padding:13px;color:#555;line-height:18px}
+.footer{text-align:center;color:#777;font-size:9px;padding:15px}
+</style>
+<script>
+function param(n){var a=location.search.substring(1).split('&'),i,p;for(i=0;i<a.length;i++){p=a[i].split('=');if(p[0]==n)return decodeURIComponent((p[1]||'').replace(/\+/g,' '));}return '';}
+function esc(s){s=''+(s==null?'':s);return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function strip(s){var d=document.createElement('div');d.innerHTML=s||'';return d.textContent||d.innerText||'';}
+function searchWiki(){
+ var q=param('q');
+ document.getElementById('q').value=q;
+ if(!q){document.getElementById('results').innerHTML='<div class="msg">Enter something to search Wikipedia.</div>';return;}
+ document.getElementById('title').innerHTML='Search: '+esc(q);
+ var src='https://en.wikipedia.org/w/api.php?action=query&list=search&srnamespace=0&srlimit=12&format=json&formatversion=2&utf8=1&callback=wikiSearchCallback&srsearch='+encodeURIComponent(q);
+ var s=document.createElement('script');s.src=src;document.getElementsByTagName('head')[0].appendChild(s);
+}
+function wikiSearchCallback(data){
+ var a=(data&&data.query&&data.query.search)?data.query.search:[];
+ var h='',i,x;
+ for(i=0;i<a.length;i++){
+  x=a[i];
+  h+='<a class="result" href="wikipedia-article.html?title='+encodeURIComponent(x.title)+'"><div class="rtitle">'+esc(x.title)+'</div><div class="rtext">'+esc(strip(x.snippet))+'</div></a>';
+ }
+ if(!h)h='<div class="msg">No Wikipedia results found.</div>';
+ document.getElementById('results').innerHTML=h;
+}
+</script>
+</head>
+<body onload="searchWiki()">
+<div id="page">
+<div id="top"><a id="back" href="wikipedia.html">Wikipedia</a>Search</div>
+<div id="search"><form action="wikipedia-search.html" method="get"><input id="q" name="q" type="text"><input id="go" type="submit" value="Search"></form></div>
+<div id="content"><div id="title" class="heading">Search Wikipedia</div><div id="results"><div class="msg">Loading...</div></div></div>
+<div class="footer">Wikipedia · The Free Encyclopedia</div>
+</div>
+</body>
+</html>
