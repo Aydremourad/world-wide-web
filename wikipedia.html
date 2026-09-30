@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html manifest="cache.manifest">
+<head>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Wikipedia">
+<link rel="apple-touch-icon" href="https://raw.githubusercontent.com/Aydremourad/Aydre/main/internet/icons/wikipedia.png">
+<meta charset="UTF-8">
+<title>Wikipedia</title>
+<style>
+body{margin:0;padding:0;background:#fff;color:#222;font-family:Arial,Helvetica,sans-serif;font-size:13px;}
+#page{width:300px;margin:0 auto;padding-bottom:25px;}
+#head{text-align:center;padding:16px 0 10px 0;border-bottom:1px solid #aaa;}
+#logo{font-family:Georgia,"Times New Roman",serif;font-size:24px;font-weight:bold;}
+#tag{font-size:10px;color:#555;margin-top:2px;}
+#search{padding:10px 0;background:#eee;border-bottom:1px solid #aaa;text-align:center;}
+#box{width:210px;height:27px;border:1px solid #777;font-size:15px;padding:2px 6px;box-sizing:border-box;-webkit-box-sizing:border-box;}
+.btn{height:29px;margin-left:3px;vertical-align:top;border:1px solid #777;background:#ddd;font-size:11px;}
+.section{padding:8px 9px;background:#d8e8f3;border-top:1px solid #8da7b8;border-bottom:1px solid #8da7b8;font-weight:bold;color:#234;}
+.item{display:block;padding:9px;border-bottom:1px solid #ccc;color:#0645ad;text-decoration:none;font-size:13px;}
+.item:active{background:#ddd;}
+.text{padding:10px 9px;line-height:17px;}
+.small{font-size:10px;color:#666;}
+</style>
+</head>
+<body>
+<div id="page">
+<div id="head">
+<div id="logo">Wikipedia</div>
+<div id="tag">The Free Encyclopedia</div>
+</div>
+<div id="search">
+<form action="https://en.wikipedia.org/wiki/Special:Search" method="get">
+<input id="box" name="search" type="text" value="">
+<input class="btn" type="submit" value="Search">
+</form>
+</div>
+<div class="section">English Wikipedia</div>
+<a class="item" href="https://en.wikipedia.org/wiki/Main_Page">Main Page ›</a>
+<a class="item" href="https://en.wikipedia.org/wiki/Special:Random">Random Article ›</a>
+<a class="item" href="https://en.wikipedia.org/wiki/Portal:Current_events">Current Events ›</a>
+<a class="item" href="https://en.wikipedia.org/wiki/Wikipedia:Featured_articles">Featured Articles ›</a>
+<div class="section">Browse</div>
+<a class="item" href="https://en.wikipedia.org/wiki/Special:RecentChanges">Recent Changes ›</a>
+<a class="item" href="https://en.wikipedia.org/wiki/Wikipedia:Contents">Contents ›</a>
+<div class="text">Wikipedia's mobile-specific English site was introduced in 2007. This lightweight page keeps that early mobile spirit while linking to the live encyclopedia.</div>
+<div class="text small">Wikipedia is a registered trademark of the Wikimedia Foundation.</div>
+</div>
+</body>
+</html>
