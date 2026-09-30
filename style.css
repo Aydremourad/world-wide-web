@@ -81,7 +81,8 @@ font-weight:bold;
 line-height:19px;
 -webkit-tap-highlight-color:rgba(0,0,0,0)
 }
-.list a:last-child{border-bottom:0}
+.list a:first-child{-webkit-border-top-left-radius:8px;-webkit-border-top-right-radius:8px;border-top-left-radius:8px;border-top-right-radius:8px}
+.list a:last-child{border-bottom:0;-webkit-border-bottom-left-radius:8px;-webkit-border-bottom-right-radius:8px;border-bottom-left-radius:8px;border-bottom-right-radius:8px}
 .list a:active{background:#e5e5e5}
 .list a:after{
 content:"›";
