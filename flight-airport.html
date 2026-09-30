@@ -1,0 +1,115 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320">
+<title>Airport Board</title>
+<link rel="stylesheet" href="style.css">
+<style>
+.boardtabs{
+border:1px solid #47637f;
+-webkit-border-radius:7px;
+border-radius:7px;
+overflow:hidden;
+height:34px;
+margin-bottom:10px;
+white-space:nowrap;
+background:#d8dde2
+}
+.boardtabs a{
+display:inline-block;
+width:50%;
+height:34px;
+line-height:34px;
+text-align:center;
+font-size:13px;
+font-weight:bold;
+text-decoration:none;
+color:#385487;
+background:#eef1f4
+}
+.boardtabs a.sel{
+color:#fff;
+background:#417eaf;
+background:-webkit-gradient(linear,left top,left bottom,from(#6da1cd),to(#2e6d9f));
+text-shadow:0 -1px 0 #31536e
+}
+#boardframe{
+display:block;
+width:300px;
+height:560px;
+border:0;
+margin:0;
+padding:0;
+background:#fff
+}
+.loading{
+height:560px;
+background:#fff;
+font-size:13px;
+color:#666;
+text-align:center;
+padding-top:25px
+}
+</style>
+<script>
+var airport='';
+function getParam(name){
+ var s=window.location.search.substring(1).split('&');
+ var i,p;
+ for(i=0;i<s.length;i++){
+  p=s[i].split('=');
+  if(p[0]==name){return decodeURIComponent((p[1]||'').replace(/\+/g,' '));}
+ }
+ return '';
+}
+function cleanAirport(v){
+ v=(v||'').replace(/\s+/g,'').toUpperCase();
+ if(v.length==4 && v.charAt(0)=='K'){v=v.substring(1);}
+ return v;
+}
+function showBoard(type){
+ var a=document.getElementById('arrtab');
+ var d=document.getElementById('deptab');
+ if(type=='departures'){a.className='';d.className='sel';}
+ else{a.className='sel';d.className='';type='arrivals';}
+ var frame=document.getElementById('boardframe');
+ frame.src='https://www.avionio.com/widget/en/'+airport.toLowerCase()+'/'+type+'?style=3';
+ return false;
+}
+function init(){
+ airport=cleanAirport(getParam('airport'));
+ if(!airport.match(/^[A-Z0-9]{3}$/)){
+  document.getElementById('titlecode').innerHTML='Airport';
+  document.getElementById('boardwrap').innerHTML='<div class="hero"><b>Airport code not recognized.</b><p>Return to Flight Track and enter a three-letter airport code such as FWA.</p></div>';
+  return;
+ }
+ document.title=airport+' Airport Board';
+ document.getElementById('titlecode').innerHTML=airport+' Airport Board';
+ document.getElementById('airportname').innerHTML=airport+' live flight board';
+ showBoard('arrivals');
+}
+</script>
+</head>
+<body onload="init()">
+<div class="page">
+<div class="top"><a class="back" href="index.html">WWW</a><span id="titlecode">Airport Board</span></div>
+<div class="content">
+<div class="hero">
+<h1 id="airportname">Airport Board</h1>
+<p>Live arrivals and departures.</p>
+</div>
+
+<div id="boardwrap">
+<div class="boardtabs"><a id="arrtab" class="sel" href="#" onclick="return showBoard('arrivals')">Arrivals</a><a id="deptab" href="#" onclick="return showBoard('departures')">Departures</a></div>
+<iframe id="boardframe" frameborder="0" scrolling="yes" title="Live airport board"></iframe>
+</div>
+
+<div class="group">
+<div class="list"><a href="flight-track.html">New Flight Search</a></div>
+</div>
+</div>
+<div class="footer">Flight Track</div>
+</div>
+</body>
+</html>
