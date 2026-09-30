@@ -1,7 +1,7 @@
 <!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=320"><title>Flight Track</title><link rel="stylesheet" href="style.css"><script>
 function track(){var v=document.getElementById('flight').value.replace(/\s+/g,'').toUpperCase();if(!v){return false;}window.location='https://www.flightaware.com/live/flight/'+encodeURIComponent(v);return false;}
 </script></head><body><div class="page">
-<div class="top"><a class="back" href="portal-next.html">WWW</a>Flight Track</div>
+<div class="top"><a class="back" href="index.html">WWW</a>Flight Track</div>
 <div class="content">
 <div class="hero"><h1>Flight Track</h1><p>Enter an airline and flight number to follow a flight.</p></div>
 <div class="group"><div class="group-title">Flight number</div><div class="hero"><form onsubmit="return track()"><div class="row"><input id="flight" type="text" autocapitalize="characters" autocorrect="off" placeholder="AA123"><button type="submit">Track</button></div></form><div class="small" style="margin-top:7px">Examples: AA123, DL456, UA789</div></div></div>
