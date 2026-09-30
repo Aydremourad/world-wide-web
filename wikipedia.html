@@ -32,24 +32,24 @@ body{margin:0;padding:0;background:#f6f6f6;color:#202122;font-family:Arial,Helve
 <div id="page">
 <div id="head"><div id="logo">Wikipedia</div><div id="tag">The Free Encyclopedia</div></div>
 <div id="search">
-<form action="https://en.wikipedia.org/wiki/Special:Search" method="get">
-<input id="box" name="search" type="text" value=""><input class="btn" type="submit" value="Search">
+<form action="wikipedia-search.html" method="get">
+<input id="box" name="q" type="text" value=""><input class="btn" type="submit" value="Search">
 </form>
 </div>
 
 <div class="section">English Wikipedia</div>
 <div class="box">
-<a class="item" href="https://en.wikipedia.org/wiki/Main_Page">Main Page</a>
-<a class="item" href="https://en.wikipedia.org/wiki/Special:Random">Random Article</a>
-<a class="item" href="https://en.wikipedia.org/wiki/Portal:Current_events">Current Events</a>
-<a class="item" href="https://en.wikipedia.org/wiki/Wikipedia:Featured_articles">Featured Articles</a>
+<a class="item" href="wikipedia-article.html?title=Main%20Page">Main Page</a>
+<a class="item" href="wikipedia-article.html?random=1">Random Article</a>
+<a class="item" href="wikipedia-article.html?title=Portal%3ACurrent%20events">Current Events</a>
+<a class="item" href="wikipedia-article.html?title=Wikipedia%3AFeatured%20articles">Featured Articles</a>
 </div>
 
 <div class="section">Browse</div>
 <div class="box">
-<a class="item" href="https://en.wikipedia.org/wiki/Wikipedia:Contents">Contents</a>
-<a class="item" href="https://en.wikipedia.org/wiki/Special:RecentChanges">Recent Changes</a>
-<a class="item" href="https://en.wikipedia.org/wiki/Portal:Contents/Portals">Portals</a>
+<a class="item" href="wikipedia-article.html?title=Wikipedia%3AContents">Contents</a>
+<a class="item" href="wikipedia-recent.html">Recent Changes</a>
+<a class="item" href="wikipedia-article.html?title=Portal%3AContents%2FPortals">Portals</a>
 </div>
 
 <div class="text">Search above or choose a section to open the live encyclopedia.</div>
