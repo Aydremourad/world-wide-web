@@ -27,7 +27,7 @@ function airportBoard(){
  if(!a){return false;}
  if(a.match(/^[A-Z]{3}$/)){a='K'+a;}
  if(!a.match(/^[A-Z]{4}$/)){alert('Enter FWA or a 4-letter ICAO code like KFWA.');return false;}
- window.location='https://www.flightaware.com/live/airport/'+encodeURIComponent(a);
+ window.location='flight-airport.html?airport='+encodeURIComponent(a.length==4?a.substring(1):a);
  return false;
 }
 function routeSearch(){
