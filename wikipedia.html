@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html manifest="cache.manifest">
+<html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -9,43 +9,51 @@
 <meta charset="UTF-8">
 <title>Wikipedia</title>
 <style>
-body{margin:0;padding:0;background:#fff;color:#222;font-family:Arial,Helvetica,sans-serif;font-size:13px;}
-#page{width:300px;margin:0 auto;padding-bottom:25px;}
-#head{text-align:center;padding:16px 0 10px 0;border-bottom:1px solid #aaa;}
-#logo{font-family:Georgia,"Times New Roman",serif;font-size:24px;font-weight:bold;}
-#tag{font-size:10px;color:#555;margin-top:2px;}
-#search{padding:10px 0;background:#eee;border-bottom:1px solid #aaa;text-align:center;}
-#box{width:210px;height:27px;border:1px solid #777;font-size:15px;padding:2px 6px;box-sizing:border-box;-webkit-box-sizing:border-box;}
-.btn{height:29px;margin-left:3px;vertical-align:top;border:1px solid #777;background:#ddd;font-size:11px;}
-.section{padding:8px 9px;background:#d8e8f3;border-top:1px solid #8da7b8;border-bottom:1px solid #8da7b8;font-weight:bold;color:#234;}
-.item{display:block;padding:9px;border-bottom:1px solid #ccc;color:#0645ad;text-decoration:none;font-size:13px;}
-.item:active{background:#ddd;}
-.text{padding:10px 9px;line-height:17px;}
-.small{font-size:10px;color:#666;}
+body{margin:0;padding:0;background:#f6f6f6;color:#202122;font-family:Arial,Helvetica,sans-serif;font-size:13px;-webkit-text-size-adjust:none}
+#page{width:300px;margin:0 auto;padding-bottom:20px}
+#head{text-align:center;padding:17px 0 12px;background:#fff;border-bottom:1px solid #aaa}
+#logo{font-family:Georgia,"Times New Roman",serif;font-size:30px;font-weight:normal;letter-spacing:-1px}
+#tag{font-family:Georgia,"Times New Roman",serif;font-size:11px;color:#555;margin-top:1px}
+#search{padding:10px 8px;background:#e9e9e9;border-bottom:1px solid #aaa;text-align:center;white-space:nowrap}
+#box{width:205px;height:29px;border:1px solid #777;font-size:15px;padding:3px 6px;-webkit-box-sizing:border-box;box-sizing:border-box}
+.btn{height:29px;margin-left:3px;vertical-align:top;border:1px solid #777;background:#ddd;background:-webkit-gradient(linear,left top,left bottom,from(#f5f5f5),to(#ccc));font-size:11px}
+.section{margin:12px 0 5px;padding:0 8px;font-size:12px;font-weight:bold;color:#555}
+.box{border:1px solid #aaa;background:#fff;-webkit-border-radius:7px;border-radius:7px;overflow:hidden}
+.item{display:block;padding:10px 27px 10px 10px;border-bottom:1px solid #d6d6d6;color:#0645ad;text-decoration:none;font-size:13px;position:relative;background:#fff}
+.item:first-child{-webkit-border-top-left-radius:6px;-webkit-border-top-right-radius:6px}
+.item:last-child{border-bottom:0;-webkit-border-bottom-left-radius:6px;-webkit-border-bottom-right-radius:6px}
+.item:after{content:"›";position:absolute;right:9px;top:4px;color:#888;font-size:24px;font-weight:bold}
+.item:active{background:#e8e8e8}
+.text{margin-top:12px;padding:9px 10px;border:1px solid #bbb;background:#fff;-webkit-border-radius:7px;border-radius:7px;line-height:17px;color:#444}
+.small{font-size:10px;color:#666;text-align:center;margin-top:12px}
 </style>
 </head>
 <body>
 <div id="page">
-<div id="head">
-<div id="logo">Wikipedia</div>
-<div id="tag">The Free Encyclopedia</div>
-</div>
+<div id="head"><div id="logo">Wikipedia</div><div id="tag">The Free Encyclopedia</div></div>
 <div id="search">
 <form action="https://en.wikipedia.org/wiki/Special:Search" method="get">
-<input id="box" name="search" type="text" value="">
-<input class="btn" type="submit" value="Search">
+<input id="box" name="search" type="text" value=""><input class="btn" type="submit" value="Search">
 </form>
 </div>
+
 <div class="section">English Wikipedia</div>
-<a class="item" href="https://en.wikipedia.org/wiki/Main_Page">Main Page ›</a>
-<a class="item" href="https://en.wikipedia.org/wiki/Special:Random">Random Article ›</a>
-<a class="item" href="https://en.wikipedia.org/wiki/Portal:Current_events">Current Events ›</a>
-<a class="item" href="https://en.wikipedia.org/wiki/Wikipedia:Featured_articles">Featured Articles ›</a>
+<div class="box">
+<a class="item" href="https://en.wikipedia.org/wiki/Main_Page">Main Page</a>
+<a class="item" href="https://en.wikipedia.org/wiki/Special:Random">Random Article</a>
+<a class="item" href="https://en.wikipedia.org/wiki/Portal:Current_events">Current Events</a>
+<a class="item" href="https://en.wikipedia.org/wiki/Wikipedia:Featured_articles">Featured Articles</a>
+</div>
+
 <div class="section">Browse</div>
-<a class="item" href="https://en.wikipedia.org/wiki/Special:RecentChanges">Recent Changes ›</a>
-<a class="item" href="https://en.wikipedia.org/wiki/Wikipedia:Contents">Contents ›</a>
-<div class="text">Wikipedia's mobile-specific English site was introduced in 2007. This lightweight page keeps that early mobile spirit while linking to the live encyclopedia.</div>
-<div class="text small">Wikipedia is a registered trademark of the Wikimedia Foundation.</div>
+<div class="box">
+<a class="item" href="https://en.wikipedia.org/wiki/Wikipedia:Contents">Contents</a>
+<a class="item" href="https://en.wikipedia.org/wiki/Special:RecentChanges">Recent Changes</a>
+<a class="item" href="https://en.wikipedia.org/wiki/Portal:Contents/Portals">Portals</a>
+</div>
+
+<div class="text">Search above or choose a section to open the live encyclopedia.</div>
+<div class="small">Wikipedia is a trademark of the Wikimedia Foundation.</div>
 </div>
 </body>
 </html>
