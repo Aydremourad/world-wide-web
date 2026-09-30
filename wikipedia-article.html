@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, initial-scale=1.0">
+<title>Wikipedia Article</title>
+<style>
+*{-webkit-box-sizing:border-box;box-sizing:border-box}
+html,body{margin:0;padding:0;background:#f6f6f6;color:#202122;font-family:Arial,Helvetica,sans-serif;font-size:13px;-webkit-text-size-adjust:none}
+#page{width:320px;margin:0 auto;min-height:480px}
+#top{height:44px;line-height:44px;text-align:center;background:#fff;border-bottom:1px solid #aaa;font-family:Georgia,"Times New Roman",serif;font-size:20px;position:relative}
+#back{position:absolute;left:8px;top:7px;height:29px;line-height:28px;padding:0 9px;border:1px solid #888;-webkit-border-radius:6px;border-radius:6px;background:#eee;background:-webkit-gradient(linear,left top,left bottom,from(#fff),to(#ccc));font:bold 11px Arial;color:#333;text-decoration:none}
+#content{padding:10px 9px 20px}
+.article{background:#fff;border:2px solid #78818a;-webkit-border-radius:10px;border-radius:10px;padding:11px;-webkit-box-shadow:0 1px 1px rgba(0,0,0,.15)}
+h1{font-family:Georgia,"Times New Roman",serif;font-size:24px;font-weight:normal;line-height:27px;margin:0 0 7px;padding-bottom:6px;border-bottom:1px solid #aaa}
+h2{font-family:Georgia,"Times New Roman",serif;font-size:19px;font-weight:normal;line-height:22px;margin:17px 0 6px;padding-bottom:3px;border-bottom:1px solid #ccc}
+h3{font-size:15px;margin:14px 0 5px}
+p{font-size:12px;line-height:18px;margin:8px 0}
+#thumb{text-align:center;margin:8px 0 11px}
+#thumb img{max-width:258px;height:auto;border:1px solid #bbb;padding:2px;background:#fff}
+.actions{margin:11px 0 0;border:2px solid #78818a;-webkit-border-radius:9px;border-radius:9px;overflow:hidden;background:#fff}
+.actions a{display:block;padding:10px 11px;color:#0645ad;text-decoration:none;font-weight:bold;border-bottom:1px solid #d5d5d5}
+.actions a:last-child{border-bottom:0}
+.msg{font-size:13px;line-height:18px;color:#555}
+.footer{text-align:center;color:#777;font-size:9px;padding:14px 3px}
+</style>
+<script>
+var title='',full=false;
+function param(n){var a=location.search.substring(1).split('&'),i,p;for(i=0;i<a.length;i++){p=a[i].split('=');if(p[0]==n)return decodeURIComponent((p[1]||'').replace(/\+/g,' '));}return '';}
+function esc(s){s=''+(s==null?'':s);return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function addScript(src){var s=document.createElement('script');s.type='text/javascript';s.src=src;document.getElementsByTagName('head')[0].appendChild(s);}
+function init(){
+ title=param('title');full=param('full')=='1';
+ if(param('random')=='1'){addScript('https://en.wikipedia.org/w/api.php?action=query&list=random&rnnamespace=0&rnlimit=1&format=json&formatversion=2&callback=wikiRandomCallback');return;}
+ if(!title){document.getElementById('article').innerHTML='<div class="msg">No article was selected.</div>';return;}
+ loadArticle();
+}
+function wikiRandomCallback(data){
+ if(data&&data.query&&data.query.random&&data.query.random[0]){title=data.query.random[0].title;loadArticle();}
+ else{document.getElementById('article').innerHTML='<div class="msg">Could not choose a random article.</div>';}
+}
+function loadArticle(){
+ var ex=full?'':'&exintro=1';
+ var src='https://en.wikipedia.org/w/api.php?action=query&prop=extracts%7Cpageimages&redirects=1&explaintext=1&exsectionformat=wiki&pithumbsize=260&pilicense=free&format=json&formatversion=2&callback=wikiArticleCallback&titles='+encodeURIComponent(title)+ex;
+ addScript(src);
+}
+function formatText(t){
+ var lines=(t||'').replace(/\r/g,'').split('\n'),h='',p='',i,line,m;
+ function flush(){if(p){h+='<p>'+esc(p)+'</p>';p='';}}
+ for(i=0;i<lines.length;i++){
+  line=lines[i];
+  m=line.match(/^(={2,4})\s*(.*?)\s*\1$/);
+  if(m){flush();h+=(m[1].length==2?'<h2>':'<h3>')+esc(m[2])+(m[1].length==2?'</h2>':'</h3>');}
+  else if(!line.replace(/\s/g,'')){flush();}
+  else{p+=(p?' ':'')+line;}
+ }
+ flush();return h;
+}
+function wikiArticleCallback(data){
+ var pages=(data&&data.query&&data.query.pages)?data.query.pages:[];
+ var p=pages[0];
+ if(!p||p.missing){document.getElementById('article').innerHTML='<div class="msg">Wikipedia article not found.</div>';return;}
+ title=p.title||title;
+ document.title=title+' - Wikipedia';
+ var h='<h1>'+esc(title)+'</h1>';
+ if(p.thumbnail&&p.thumbnail.source){h+='<div id="thumb"><img src="'+esc(p.thumbnail.source)+'" alt=""></div>';}
+ h+=formatText(p.extract||'');
+ if(!h){h='<div class="msg">No readable article text was returned.</div>';}
+ document.getElementById('article').innerHTML=h;
+ var actions='<a href="wikipedia-search.html?q='+encodeURIComponent(title)+'">Search related articles</a>';
+ if(!full){actions='<a href="wikipedia-article.html?title='+encodeURIComponent(title)+'&full=1">Read Full Article</a>'+actions;}
+ actions+='<a href="wikipedia.html">Wikipedia Home</a>';
+ document.getElementById('actions').innerHTML=actions;
+}
+</script>
+</head>
+<body onload="init()">
+<div id="page">
+<div id="top"><a id="back" href="wikipedia.html">Wikipedia</a>Article</div>
+<div id="content">
+<div id="article" class="article"><div class="msg">Loading article...</div></div>
+<div id="actions" class="actions"><a href="wikipedia.html">Wikipedia Home</a></div>
+</div>
+<div class="footer">Text from Wikipedia · CC BY-SA</div>
+</div>
+</body>
+</html>
