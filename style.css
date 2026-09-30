@@ -139,3 +139,8 @@ vertical-align:top
 .row{white-space:nowrap}
 .row input{width:205px;margin-right:5px;vertical-align:top}
 .row button{vertical-align:top}
+
+.world-title{font-family:Georgia,"Times New Roman",Times,serif;font-style:italic;letter-spacing:.2px}
+.top.world-title{font-size:21px;font-weight:normal}
+.hero h1.world-title{font-size:23px;font-weight:normal}
+.footer.world-title{font-weight:normal}
