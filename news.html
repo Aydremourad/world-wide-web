@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html manifest="cache.manifest">
+<html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -8,46 +8,61 @@
 <meta charset="UTF-8">
 <title>News</title>
 <style>
-body{margin:0;padding:0;background:#111;color:#fff;font-family:Georgia,"Times New Roman",serif;font-size:13px;}
-#page{width:300px;margin:0 auto;}
-#mast{padding:15px 0 8px 0;text-align:center;border-bottom:3px double #aaa;}
-#mast h1{font-size:29px;font-weight:normal;margin:0;}
-#date{font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#aaa;margin-top:3px;}
-.section{font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:bold;padding:7px 8px;background:#333;border-bottom:1px solid #555;}
-.story{display:block;padding:10px 8px;border-bottom:1px solid #333;color:#fff;text-decoration:none;}
-.story:active{background:#222;}
-.kicker{font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#bbb;text-transform:uppercase;}
-.headline{font-size:15px;line-height:18px;margin-top:2px;}
-.desc{font-size:11px;color:#bbb;line-height:15px;margin-top:3px;}
-.sources{padding:5px 8px;background:#eee;}
-.src{display:block;padding:8px 4px;border-bottom:1px solid #ccc;color:#1545a0;font-family:Arial,Helvetica,sans-serif;font-size:12px;text-decoration:none;}
-.search{padding:9px 8px;background:#222;font-family:Arial,Helvetica,sans-serif;}
-.search input{width:205px;height:26px;box-sizing:border-box;-webkit-box-sizing:border-box;}
-.search input[type=submit]{width:68px;margin-left:3px;}
-.note{padding:10px 8px;color:#999;font-family:Arial,Helvetica,sans-serif;font-size:9px;line-height:13px;}
+body{margin:0;padding:0;background:#111;color:#fff;font-family:Georgia,"Times New Roman",serif;font-size:13px;-webkit-text-size-adjust:none}
+#page{width:300px;margin:0 auto;padding-bottom:20px}
+#mast{padding:15px 0 8px;text-align:center;border-bottom:3px double #aaa}
+#mast h1{font-size:29px;font-weight:normal;margin:0}
+#date{font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#aaa;margin-top:3px}
+.section{font-family:Arial,Helvetica,sans-serif;font-size:11px;font-weight:bold;padding:7px 8px;background:#333;border-bottom:1px solid #555}
+.story{display:block;padding:10px 8px;border-bottom:1px solid #333;color:#fff;text-decoration:none}
+.story:active{background:#222}
+.kicker{font-family:Arial,Helvetica,sans-serif;font-size:9px;color:#bbb;text-transform:uppercase}
+.headline{font-size:15px;line-height:18px;margin-top:2px}
+.desc{font-size:11px;color:#bbb;line-height:15px;margin-top:3px}
+.sources{padding:5px 8px;background:#eee}
+.src{display:block;padding:9px 4px;border-bottom:1px solid #ccc;color:#1545a0;font-family:Arial,Helvetica,sans-serif;font-size:12px;text-decoration:none}
+.search{padding:9px 8px;background:#222;font-family:Arial,Helvetica,sans-serif;white-space:nowrap}
+.search input{height:28px;-webkit-box-sizing:border-box;box-sizing:border-box}
+.search input[type=text]{width:202px}
+.search input[type=submit]{width:68px;margin-left:3px}
 </style>
 </head>
 <body>
 <div id="page">
-<div id="mast"><h1>News</h1><div id="date">THE WORLD · THE UNITED STATES · BUSINESS · SPORTS</div></div>
-<div class="section">Top Stories</div>
-<a class="story" href="https://news.google.com/"><div class="kicker">Google News</div><div class="headline">Latest headlines from around the world</div><div class="desc">Open the live news page from this lightweight news front end.</div></a>
-<a class="story" href="https://apnews.com/"><div class="kicker">Associated Press</div><div class="headline">AP News</div><div class="desc">National and international reporting.</div></a>
-<a class="story" href="https://www.bbc.com/news"><div class="kicker">BBC News</div><div class="headline">BBC News</div><div class="desc">World and United Kingdom news.</div></a>
-<a class="story" href="https://www.reuters.com/"><div class="kicker">Reuters</div><div class="headline">Reuters</div><div class="desc">World, business and financial news.</div></a>
-<div class="section">Sections</div>
+<div id="mast"><h1>News</h1><div id="date">WORLD · U.S. · BUSINESS · TECHNOLOGY · SPORTS</div></div>
+
+<div class="section">Headlines</div>
+<a class="story" href="https://www.lunar-project.org/lunar-news/">
+<div class="kicker">Lunar News</div>
+<div class="headline">Current headlines in a classic-browser format</div>
+<div class="desc">Top stories with short summaries and simple article pages.</div>
+</a>
+<a class="story" href="http://68k.news/">
+<div class="kicker">68k.news</div>
+<div class="headline">Basic HTML news</div>
+<div class="desc">Current headlines arranged for vintage browsers.</div>
+</a>
+<a class="story" href="https://www.cbc.ca/lite/news">
+<div class="kicker">CBC Lite</div>
+<div class="headline">CBC News — Lite</div>
+<div class="desc">A low-bandwidth text-focused news site.</div>
+</a>
+
+<div class="section">Lunar Sections</div>
 <div class="sources">
-<a class="src" href="https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSkwyMHZNREZ6TVRFMU5VTm9MVlV4T1dKQ0FBUAE">U.S. News ›</a>
-<a class="src" href="https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSkwyMHZNRGQ1T0RFMU5VTm9MVlV4T1dKQ0FBUAE">World News ›</a>
-<a class="src" href="https://news.google.com/topics/CAAqJggKIiBDQkFTRWdvSkwyMHZNREZ6TVRFMU5VTm9MVlV4T1dKQ0FBUAE">Business ›</a>
-<a class="src" href="https://news.google.com/">More News ›</a>
+<a class="src" href="https://www.lunar-project.org/lunar-news/index.php?loc=US&amp;section=nation">U.S. News ›</a>
+<a class="src" href="https://www.lunar-project.org/lunar-news/index.php?loc=US&amp;section=world">World News ›</a>
+<a class="src" href="https://www.lunar-project.org/lunar-news/index.php?loc=US&amp;section=business">Business ›</a>
+<a class="src" href="https://www.lunar-project.org/lunar-news/index.php?loc=US&amp;section=technology">Technology ›</a>
+<a class="src" href="https://www.lunar-project.org/lunar-news/index.php?loc=US&amp;section=sports">Sports ›</a>
 </div>
+
+<div class="section">Search</div>
 <div class="search">
-<form action="https://news.google.com/search" method="get">
+<form action="https://html.duckduckgo.com/html/" method="get">
 <input name="q" type="text" value=""><input type="submit" value="Search">
 </form>
 </div>
-<div class="note">This page is a lightweight news portal for the iPhone 2G. The stories and headlines are supplied by the linked news services.</div>
 </div>
 </body>
 </html>
