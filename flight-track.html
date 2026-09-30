@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="style.css">
 <script>
 function clean(v){return v.replace(/\s+/g,'').toUpperCase();}
-function flightDate(offset){
+function dateCode(offset){
  var d=new Date();
  d.setDate(d.getDate()+offset);
  var m=d.getMonth()+1,day=d.getDate();
@@ -18,19 +18,35 @@ function trackFlight(){
  if(!v){return false;}
  var m=v.match(/^([A-Z0-9]{2,3})([0-9]{1,4}[A-Z]?)$/);
  if(!m){alert('Enter a flight like AA123 or UA456.');return false;}
- var offset=parseInt(document.getElementById('fdate').value,10);
- var url='https://mobile.flightview.com/TrackByRoute.aspx?view=detail&al='+encodeURIComponent(m[1])+'&fn='+encodeURIComponent(m[2])+'&dpdat='+flightDate(offset);
- window.location=url;
+ var off=parseInt(document.getElementById('fdate').value,10);
+ window.location='https://mobile.flightview.com/TrackByRoute.aspx?view=detail&al='+encodeURIComponent(m[1])+'&fn='+encodeURIComponent(m[2])+'&dpdat='+dateCode(off);
+ return false;
+}
+function airportBoard(){
+ var a=clean(document.getElementById('airport').value);
+ if(!a){return false;}
+ if(a.match(/^[A-Z]{3}$/)){a='K'+a;}
+ if(!a.match(/^[A-Z]{4}$/)){alert('Enter FWA or a 4-letter ICAO code like KFWA.');return false;}
+ window.location='https://www.flightaware.com/live/airport/'+encodeURIComponent(a);
+ return false;
+}
+function routeSearch(){
+ var d=clean(document.getElementById('dep').value);
+ var a=clean(document.getElementById('arr').value);
+ if(!d.match(/^[A-Z]{3,4}$/) || !a.match(/^[A-Z]{3,4}$/)){alert('Enter airport codes like FWA and ORD.');return false;}
+ if(d.length==3){d='K'+d;}
+ if(a.length==3){a='K'+a;}
+ window.location='https://www.flightaware.com/live/findflight?origin='+encodeURIComponent(d)+'&destination='+encodeURIComponent(a);
  return false;
 }
 </script>
 </head>
-<body ontouchstart="">
+<body>
 <div class="page">
 <div class="top"><a class="back" href="index.html">WWW</a>Flight Track</div>
 <div class="content">
 
-<div class="hero"><h1>Flight Track</h1><p>Track a flight directly, or use the route finder when you do not know the flight number.</p></div>
+<div class="hero"><h1>Flight Track</h1><p>Track a known flight, check an airport board, or find flights between two airports.</p></div>
 
 <div class="group">
 <div class="group-title">By flight number</div>
@@ -50,16 +66,36 @@ function trackFlight(){
 </div>
 
 <div class="group">
-<div class="group-title">Don't know the flight number?</div>
-<div class="list">
-<a href="https://fvmobile.flightview.com/flyags/TrackByRoute.aspx">Find by Departure &amp; Arrival Airport</a>
-<a href="https://mobile.flightview.com/TrackByFlight.aspx?loc=tbf">Legacy Mobile Flight Search</a>
+<div class="group-title">Airport board</div>
+<div class="hero">
+<form onsubmit="return airportBoard()">
+<div class="row"><input id="airport" type="text" autocapitalize="characters" autocorrect="off" maxlength="4" placeholder="FWA"><button type="submit">View</button></div>
+</form>
+<div class="small" style="margin-top:7px">Example: FWA. Shows arrivals, departures, and scheduled flights.</div>
 </div>
 </div>
 
+<div class="group">
+<div class="group-title">Find by route</div>
 <div class="hero">
-<b>Tip</b>
-<p>For route search, enter the three-letter departure and arrival airport codes, such as FWA and ORD. The results page will show matching flights so you can choose one.</p>
+<form onsubmit="return routeSearch()">
+<div style="white-space:nowrap">
+<input id="dep" type="text" autocapitalize="characters" autocorrect="off" maxlength="4" placeholder="FWA" style="width:82px">
+<span style="font-size:13px;padding:0 3px">to</span>
+<input id="arr" type="text" autocapitalize="characters" autocorrect="off" maxlength="4" placeholder="ORD" style="width:82px">
+<button type="submit" style="margin-left:4px">Find</button>
+</div>
+</form>
+<div class="small" style="margin-top:7px">Examples: FWA to ORD, ATL, DTW, or DFW.</div>
+</div>
+</div>
+
+<div class="group">
+<div class="group-title">More</div>
+<div class="list">
+<a href="https://mobile.flightview.com/TrackByFlight.aspx?loc=tbf">FlightView Mobile Search</a>
+<a href="https://mobile.flightview.com/AirportDelayList.aspx">Airport Delay List</a>
+</div>
 </div>
 
 </div>
