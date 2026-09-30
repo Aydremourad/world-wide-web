@@ -59,13 +59,14 @@ padding:4px 9px 6px;
 text-transform:none
 }
 .list{
-border:1px solid #7f8790;
--webkit-border-radius:9px;
-border-radius:9px;
+border:0;
+padding:1px;
+-webkit-border-radius:10px;
+border-radius:10px;
 overflow:hidden;
-background:#fff;
--webkit-box-shadow:0 1px 2px rgba(0,0,0,.35),inset 0 1px 0 #fff;
-box-shadow:0 1px 2px rgba(0,0,0,.35),inset 0 1px 0 #fff
+background:#747d87;
+-webkit-box-shadow:0 1px 2px rgba(0,0,0,.38),0 0 1px #5f6871,inset 0 1px 0 rgba(255,255,255,.65);
+box-shadow:0 1px 2px rgba(0,0,0,.38),0 0 1px #5f6871,inset 0 1px 0 rgba(255,255,255,.65)
 }
 .list a{
 display:block;
@@ -83,7 +84,7 @@ line-height:19px;
 }
 .list a:first-child{-webkit-border-top-left-radius:8px;-webkit-border-top-right-radius:8px;border-top-left-radius:8px;border-top-right-radius:8px}
 .list a:last-child{border-bottom:0;-webkit-border-bottom-left-radius:8px;-webkit-border-bottom-right-radius:8px;border-bottom-left-radius:8px;border-bottom-right-radius:8px}
-.list a:active{background:#2d79bd;background:-webkit-gradient(linear,left top,left bottom,from(#5aa9e9),to(#176db0));color:#fff;text-shadow:0 -1px 0 #174a70}
+.list a:active{background:#2476b9;background:-webkit-gradient(linear,left top,left bottom,from(#5aa8e5),color-stop(.5,#3184c7),to(#1769aa));color:#fff;text-shadow:0 -1px 0 #174a70}
 .list a:active:after{color:#fff}
 .list a:after{
 content:"›";
