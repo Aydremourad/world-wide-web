@@ -1,0 +1,26 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=320, initial-scale=1.0"><title>Wikipedia Recent Changes</title>
+<style>
+*{-webkit-box-sizing:border-box;box-sizing:border-box}
+html,body{margin:0;padding:0;background:#f6f6f6;color:#202122;font-family:Arial,Helvetica,sans-serif;font-size:13px;-webkit-text-size-adjust:none}
+#page{width:320px;margin:0 auto;min-height:480px}
+#top{height:44px;line-height:44px;text-align:center;background:#fff;border-bottom:1px solid #aaa;font-family:Georgia,"Times New Roman",serif;font-size:19px;position:relative}
+#back{position:absolute;left:8px;top:7px;height:29px;line-height:28px;padding:0 9px;border:1px solid #888;-webkit-border-radius:6px;border-radius:6px;background:#eee;background:-webkit-gradient(linear,left top,left bottom,from(#fff),to(#ccc));font:bold 11px Arial;color:#333;text-decoration:none}
+#content{padding:11px 9px 20px}
+.box{border:2px solid #78818a;-webkit-border-radius:10px;border-radius:10px;overflow:hidden;background:#fff}
+.item{display:block;padding:9px 10px;border-bottom:1px solid #d5d5d5;color:#0645ad;text-decoration:none}
+.item:last-child{border-bottom:0}
+.meta{display:block;color:#777;font-size:10px;margin-top:2px}
+.msg{padding:14px;color:#555}
+.footer{text-align:center;color:#777;font-size:9px;padding:14px}
+</style>
+<script>
+function esc(s){s=''+(s==null?'':s);return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+function init(){var s=document.createElement('script');s.src='https://en.wikipedia.org/w/api.php?action=query&list=recentchanges&rclimit=20&rcnamespace=0&rcprop=title%7Ctimestamp&format=json&formatversion=2&callback=wikiRecentCallback';document.getElementsByTagName('head')[0].appendChild(s);}
+function wikiRecentCallback(data){var a=(data&&data.query&&data.query.recentchanges)?data.query.recentchanges:[],h='',i,x;for(i=0;i<a.length;i++){x=a[i];h+='<a class="item" href="wikipedia-article.html?title='+encodeURIComponent(x.title)+'">'+esc(x.title)+'<span class="meta">'+esc((x.timestamp||'').replace('T',' ').replace('Z',' UTC'))+'</span></a>';}if(!h)h='<div class="msg">No recent changes were returned.</div>';document.getElementById('list').innerHTML=h;}
+</script>
+</head>
+<body onload="init()"><div id="page"><div id="top"><a id="back" href="wikipedia.html">Wikipedia</a>Recent Changes</div><div id="content"><div id="list" class="box"><div class="msg">Loading...</div></div></div><div class="footer">Wikipedia · The Free Encyclopedia</div></div></body>
+</html>
