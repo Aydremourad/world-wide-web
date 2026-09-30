@@ -2,7 +2,7 @@
 <html>
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=320">
+<meta name="viewport" content="width=320, initial-scale=1.0, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Airport Board</title>
 <link rel="stylesheet" href="style.css">
 <style>
@@ -34,17 +34,19 @@ background:#417eaf;
 background:-webkit-gradient(linear,left top,left bottom,from(#6da1cd),to(#2e6d9f));
 text-shadow:0 -1px 0 #31536e
 }
+#boardwrap{width:300px;overflow:hidden}
 #boardframe{
 display:block;
-width:300px;
-height:560px;
+width:300px !important;
+max-width:300px !important;
+height:430px;
 border:0;
 margin:0;
 padding:0;
 background:#fff
 }
 .loading{
-height:560px;
+height:430px;
 background:#fff;
 font-size:13px;
 color:#666;
@@ -79,6 +81,8 @@ function showBoard(type){
 }
 function init(){
  airport=cleanAirport(getParam('airport'));
+ var type=getParam('type');
+ var dest=cleanAirport(getParam('dest'));
  if(!airport.match(/^[A-Z0-9]{3}$/)){
   document.getElementById('titlecode').innerHTML='Airport';
   document.getElementById('boardwrap').innerHTML='<div class="hero"><b>Airport code not recognized.</b><p>Return to Flight Track and enter a three-letter airport code such as FWA.</p></div>';
@@ -87,7 +91,11 @@ function init(){
  document.title=airport+' Airport Board';
  document.getElementById('titlecode').innerHTML=airport+' Airport Board';
  document.getElementById('airportname').innerHTML=airport+' live flight board';
- showBoard('arrivals');
+ if(dest && dest.match(/^[A-Z0-9]{3}$/)){
+  document.getElementById('routehint').innerHTML='<b>'+airport+' to '+dest+'</b><br>Showing '+airport+' departures. Look for '+dest+' in the destination column.';
+  document.getElementById('routehint').style.display='block';
+ }
+ if(type=='departures'){showBoard('departures');}else{showBoard('arrivals');}
 }
 </script>
 </head>
@@ -100,6 +108,7 @@ function init(){
 <p>Live arrivals and departures.</p>
 </div>
 
+<div id="routehint" class="hero" style="display:none;margin-bottom:10px"></div>
 <div id="boardwrap">
 <div class="boardtabs"><a id="arrtab" class="sel" href="#" onclick="return showBoard('arrivals')">Arrivals</a><a id="deptab" href="#" onclick="return showBoard('departures')">Departures</a></div>
 <iframe id="boardframe" frameborder="0" scrolling="yes" title="Live airport board"></iframe>
