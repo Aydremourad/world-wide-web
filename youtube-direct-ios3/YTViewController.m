@@ -29,7 +29,7 @@
     _statusLabel.textAlignment = UITextAlignmentCenter;
     _statusLabel.numberOfLines = 4;
     _statusLabel.font = [UIFont systemFontOfSize:14];
-    _statusLabel.text = @"Direct to YouTube\nNo TubeRepair. No Render server.\nSearch above or paste a YouTube link.";
+    _statusLabel.text = @"No TubeRepair. No Render server.\nUses public resolvers directly from the phone.\nSearch above or paste a YouTube link.";
     _statusLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [self.view addSubview:_statusLabel];
 
@@ -127,7 +127,7 @@
 }
 
 - (void)beginResolve:(NSString *)videoID {
-    [self setBusy:YES text:@"Getting direct iPhone stream from YouTube..."];
+    [self setBusy:YES text:@"Finding an iPhone-compatible stream..."];
     [NSThread detachNewThreadSelector:@selector(resolveThread:) toTarget:self withObject:videoID];
 }
 
