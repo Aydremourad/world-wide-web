@@ -1,5 +1,6 @@
 ARCHS = armv6
-TARGET = iphone:clang:3.1:3.0
+SDKVERSION ?= 3.1.3
+TARGET = iphone:clang:$(SDKVERSION):3.0
 
 include $(THEOS)/makefiles/common.mk
 
