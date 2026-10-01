@@ -1,0 +1,70 @@
+*{-webkit-box-sizing:border-box;box-sizing:border-box}
+html,body{margin:0;padding:0;font-family:Helvetica,Arial,sans-serif;-webkit-text-size-adjust:none}
+body{font-size:12px;background:#e9e9e9;color:#222}
+.apple-nav{width:320px;height:36px;margin:0 auto;overflow:hidden;background:#4b4b4b;background:-webkit-gradient(linear,left top,left bottom,from(#777),color-stop(.48,#5d5d5d),color-stop(.52,#494949),to(#292929));border-top:1px solid #888;border-bottom:1px solid #111;-webkit-box-shadow:0 1px 2px rgba(0,0,0,.45)}
+.apple-nav a{display:block;float:left;height:35px;line-height:35px;text-align:center;color:#fff;text-decoration:none;font-size:8px;font-weight:bold;text-shadow:0 -1px 0 #222;border-right:1px solid #303030;border-left:1px solid rgba(255,255,255,.10);overflow:hidden;white-space:nowrap}
+.apple-nav a:first-child{border-left:0}
+.apple-nav a:last-child{border-right:0}
+.apple-nav .home{width:30px}
+.apple-nav .store{width:37px}
+.apple-nav .mac{width:32px}
+.apple-nav .ipod{width:67px}
+.apple-nav .iphone{width:43px}
+.apple-nav .downloads{width:60px;font-size:7px}
+.apple-nav .support{width:51px}
+.apple-nav a.current{background:#222;background:-webkit-gradient(linear,left top,left bottom,from(#555),to(#171717));-webkit-box-shadow:inset 0 1px 4px rgba(0,0,0,.7)}
+.apple-nav .home img{width:16px;height:16px;margin-top:9px;border:0;vertical-align:top}
+.subnav{width:320px;margin:0 auto;text-align:center;height:29px;line-height:29px;background:#f2f2f2;background:-webkit-gradient(linear,left top,left bottom,from(#fff),to(#dfdfdf));border-bottom:1px solid #aaa;white-space:nowrap;overflow:hidden}
+.subnav a{color:#555;text-decoration:none;font-size:9px;padding:0 7px;text-shadow:0 1px 0 #fff}
+.page{width:320px;margin:0 auto;min-height:444px;background:#f5f5f5}
+.content{width:300px;margin:0 auto}
+.darkpage{background:#000;color:#fff}
+.darkpage .content{background:#000}
+.hero-white{text-align:center;background:#fff;border-bottom:1px solid #c6c6c6;padding:17px 10px 14px}
+.hero-white h1{font-size:30px;line-height:32px;font-weight:normal;letter-spacing:-1px;margin:0;color:#111}
+.hero-white .tag{font-size:13px;line-height:17px;color:#666;margin:4px 0 10px}
+.hero-white img{display:block;max-width:276px;height:auto;margin:8px auto 0;border:0}
+.hero-dark{background:#000;text-align:center;padding:0 0 12px;border-bottom:1px solid #252525}
+.hero-dark img{display:block;width:320px;height:auto;margin:0 -10px;border:0}
+.hero-dark h1{font-size:27px;font-weight:normal;letter-spacing:-1px;margin:10px 0 2px}
+.hero-dark .tag{font-size:12px;color:#aaa;margin:0}
+.apple-section{background:#fff;border-bottom:1px solid #c8c8c8;padding:13px 12px}
+.apple-section h2{font-size:18px;line-height:21px;font-weight:normal;letter-spacing:-.4px;color:#222;margin:0 0 4px}
+.apple-section p{font-size:11px;line-height:16px;color:#666;margin:0}
+.apple-section .more{display:inline-block;margin-top:6px;color:#2672aa;text-decoration:none;font-size:11px}
+.dark-section{border-bottom:1px solid #2c2c2c;padding:13px 11px;background:#000}
+.dark-section h2{font-size:18px;font-weight:normal;margin:0 0 4px;color:#fff}
+.dark-section p{font-size:11px;line-height:16px;color:#aaa;margin:0}
+.dark-section .more{display:inline-block;color:#ddd;text-decoration:none;margin-top:6px}
+.promo-table{width:100%;border-collapse:collapse;background:#fff;border-bottom:1px solid #c7c7c7}
+.promo-table td{width:33%;vertical-align:top;text-align:center;padding:10px 3px 9px;border-right:1px solid #ddd}
+.promo-table td:last-child{border-right:0}
+.promo-table img{display:block;max-width:82px;max-height:76px;margin:0 auto 5px;border:0}
+.promo-table b{display:block;font-size:11px;color:#222;margin-bottom:2px}
+.promo-table span{display:block;font-size:9px;line-height:12px;color:#777}
+.promo-table a{text-decoration:none}
+.apple-list{margin:12px 8px;border:2px solid #8b8b8b;-webkit-border-radius:10px;border-radius:10px;overflow:hidden;background:#fff;-webkit-box-shadow:0 1px 1px rgba(0,0,0,.18)}
+.apple-list a{display:block;padding:10px 12px;border-bottom:1px solid #d1d1d1;background:#fff;color:#24669b;text-decoration:none;font-size:12px;font-weight:bold}
+.apple-list a:last-child{border-bottom:0}
+.apple-list a:first-child{-webkit-border-top-left-radius:8px;-webkit-border-top-right-radius:8px;border-top-left-radius:8px;border-top-right-radius:8px}
+.apple-list a:last-child{-webkit-border-bottom-left-radius:8px;-webkit-border-bottom-right-radius:8px;border-bottom-left-radius:8px;border-bottom-right-radius:8px}
+.software-table{width:260px;margin:8px auto 2px;border-collapse:collapse}
+.software-table td{width:33%;text-align:center;vertical-align:top;padding:6px 2px}
+.software-table img{display:block;width:58px;height:58px;margin:0 auto 4px;border:0}
+.software-table b{font-size:10px;font-weight:normal}
+.store-title{font-family:Helvetica,Arial,sans-serif}
+.notice{margin:11px 8px;padding:9px 10px;background:#fff;border:2px solid #8b8b8b;-webkit-border-radius:10px;border-radius:10px;color:#666;font-size:10px;line-height:14px}
+.footer{text-align:center;color:#888;font-size:8px;line-height:12px;padding:15px 8px 20px;background:#f5f5f5}
+.footer a{color:#777;text-decoration:none}
+.darkpage .footer{background:#000;color:#555}
+.darkpage .footer a{color:#777}
+.home-promos{width:320px;margin:0 auto;border-collapse:collapse;background:#111}
+.home-promos td{width:33%;text-align:center;vertical-align:top;padding:11px 4px;border-right:1px solid #333;border-top:1px solid #333}
+.home-promos td:last-child{border-right:0}
+.home-promos a{color:#fff;text-decoration:none}
+.home-promos b{display:block;font-size:12px;font-weight:normal;margin-bottom:2px}
+.home-promos span{display:block;font-size:9px;line-height:12px;color:#888}
+.home-news{width:320px;margin:0 auto;padding:9px 10px;background:#1a1a1a;border-top:1px solid #333;border-bottom:1px solid #333;color:#888;font-size:9px;line-height:13px;text-align:center}
+.home-news a{color:#ddd;text-decoration:none}
+.credit{font-size:7px;color:#aaa;line-height:10px;text-align:center;margin-top:6px}
+.clear{clear:both}
