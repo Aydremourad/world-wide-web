@@ -71,6 +71,30 @@ Use an account without private or sensitive content; authenticated public-server
 extraction can access content available to that account, and yt-dlp account use
 can risk suspension. Cookies may expire and may not overcome the IP block.
 
+## Export cookies without an extension
+
+The Mac helper uses a disposable Chrome profile, exports cookies with the official
+yt-dlp executable, keeps only youtube.com domains, and copies the Netscape text
+to the clipboard. It downloads a pinned, checksum-verified tool into a private
+temporary directory. It does not require Python, Homebrew, or a browser extension.
+The temporary browser and export workspace are removed when the helper exits.
+A YouTube-only copy remains in Downloads with owner-only permissions.
+
+1. Download [export-youtube-cookies.command](export-youtube-cookies.command) and
+   run it with bash on the Mac.
+2. Sign in to YouTube in its temporary Chrome window, preferably using a spare
+   account. Return to Terminal and press Return after the account picture appears.
+3. If macOS requests access to Chrome Safe Storage, choose Allow.
+4. In Render -> youtube-2g -> Environment -> Secret Files, add or update
+   youtube-cookies.txt. Paste the clipboard into Contents and save/deploy.
+5. Wait for Live and check cookies_loaded in diagnostics. Keep the export private.
+
+The Chrome window must be the one opened by the helper; ordinary or incognito
+windows outside it are not read. The script reads its own temporary profile only.
+Its credential-domain filtering and extension-free upstream CLI export are tested
+with synthetic cookies. The macOS interactive login and Keychain steps require
+the user's Mac. Cookies may expire or still be rejected by YouTube.
+
 ## Diagnostics, limits, and verification
 
 `/healthz` and `/diagnostics` expose versions and readiness only.
