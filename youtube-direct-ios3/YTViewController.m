@@ -127,7 +127,7 @@
 }
 
 - (void)beginResolve:(NSString *)videoID {
-    [self setBusy:YES text:@"Resolving and downloading video to iPhone..."];
+    [self setBusy:YES text:@"Downloading and converting for iPhone 2G..."];
     [NSThread detachNewThreadSelector:@selector(resolveThread:) toTarget:self withObject:videoID];
 }
 
