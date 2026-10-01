@@ -182,15 +182,61 @@ static NSArray *YTJSONObjectStringsInArray(NSString *text, NSString *arrayKey) {
 static BOOL YTJSONBoolForKey(NSString *obj, NSString *key, BOOL fallback) {
     NSString *trueNeedle = [NSString stringWithFormat:@"\"%@\":true", key];
     NSString *falseNeedle = [NSString stringWithFormat:@"\"%@\":false", key];
-    if ([obj rangeOfString:trueNeedle].location != NSNotFound) return YES;
-    if ([obj rangeOfString:falseNeedle].location != NSNotFound) return NO;
+    NSString *trueSpaced = [NSString stringWithFormat:@"\"%@\": true", key];
+    NSString *falseSpaced = [NSString stringWithFormat:@"\"%@\": false", key];
+    if ([obj rangeOfString:trueNeedle].location != NSNotFound ||
+        [obj rangeOfString:trueSpaced].location != NSNotFound) return YES;
+    if ([obj rangeOfString:falseNeedle].location != NSNotFound ||
+        [obj rangeOfString:falseSpaced].location != NSNotFound) return NO;
     return fallback;
+}
+
+static NSArray *YTTopLevelObjects(NSString *text) {
+    NSMutableArray *objects = [NSMutableArray array];
+    NSUInteger i = 0;
+    NSInteger arrayDepth = 0;
+    BOOL inString = NO, escaped = NO;
+    while (i < [text length]) {
+        unichar ch = [text characterAtIndex:i];
+        if (inString) {
+            if (escaped) escaped = NO;
+            else if (ch == '\\') escaped = YES;
+            else if (ch == '"') inString = NO;
+            i++;
+            continue;
+        }
+        if (ch == '"') {
+            inString = YES;
+            i++;
+            continue;
+        }
+        if (ch == '[') {
+            arrayDepth++;
+            i++;
+            continue;
+        }
+        if (ch == ']') {
+            arrayDepth--;
+            i++;
+            continue;
+        }
+        if (arrayDepth == 1 && ch == '{') {
+            NSString *obj = YTBalancedObject(text, i);
+            if (obj) {
+                [objects addObject:obj];
+                i += [obj length];
+                continue;
+            }
+        }
+        i++;
+    }
+    return objects;
 }
 
 static NSURL *YTPipedCombinedURL(NSString *text) {
     NSArray *objects = YTJSONObjectStringsInArray(text, @"videoStreams");
     NSString *bestURL = nil;
-    NSInteger bestHeight = 99999;
+    NSInteger bestHeight = 0;
     NSUInteger i;
     for (i = 0; i < [objects count]; i++) {
         NSString *obj = [objects objectAtIndex:i];
@@ -291,62 +337,56 @@ static NSURL *YTInvidiousFormatURL(NSString *text) {
 }
 
 + (NSArray *)search:(NSString *)query error:(NSString **)errorText {
-    NSString *version = @"2.20260708.00.00";
-    NSString *body = [NSString stringWithFormat:
-        @"{\"context\":{\"client\":{\"clientName\":\"WEB\",\"clientVersion\":\"%@\",\"hl\":\"en\",\"gl\":\"US\"}},\"query\":\"%@\"}",
-        version, YTJSONEscape(query)];
+    NSString *escaped = [query stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+    NSArray *instances = [NSArray arrayWithObjects:
+        @"https://inv.nadeko.net",
+        @"https://invidious.nerdvpn.de",
+        @"https://yt.chocolatemoo53.com",
+        @"https://invidious.tiekoetter.com",
+        nil];
 
-    NSData *data = [self postBody:body endpoint:@"search" clientName:@"WEB"
-                      clientVersion:version clientNumber:@"1"
-                          userAgent:@"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Safari/537.36"
-                              error:errorText];
-    if (!data) return nil;
+    NSString *lastError = nil;
+    NSUInteger h;
+    for (h = 0; h < [instances count]; h++) {
+        NSString *host = [instances objectAtIndex:h];
+        NSString *url = [NSString stringWithFormat:
+            @"%@/api/v1/search?q=%@&type=video&region=US&hl=en",
+            host, escaped];
+        NSData *data = YTGET(url, &lastError);
+        if (!data) continue;
 
-    NSString *text = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease];
-    if (!text) {
-        if (errorText) *errorText = @"YouTube returned unreadable search data.";
-        return nil;
-    }
+        NSString *text = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease];
+        if (!text || ![text length]) continue;
 
-    NSMutableArray *results = [NSMutableArray array];
-    NSMutableSet *seen = [NSMutableSet set];
-    NSString *marker = @"\"videoRenderer\":";
-    NSUInteger pos = 0;
+        NSArray *objects = YTTopLevelObjects(text);
+        NSMutableArray *results = [NSMutableArray array];
+        NSMutableSet *seen = [NSMutableSet set];
+        NSUInteger i;
+        for (i = 0; i < [objects count] && [results count] < 20; i++) {
+            NSString *obj = [objects objectAtIndex:i];
+            NSString *type = YTJSONStringForKey(obj, @"type", 0);
+            if (type && ![type isEqualToString:@"video"]) continue;
 
-    while (pos < [text length] && [results count] < 20) {
-        NSRange r = [text rangeOfString:marker options:0 range:NSMakeRange(pos, [text length] - pos)];
-        if (r.location == NSNotFound) break;
-        NSUInteger brace = r.location + r.length;
-        while (brace < [text length] && [text characterAtIndex:brace] != '{') brace++;
-        NSString *obj = YTBalancedObject(text, brace);
-        if (!obj) {
-            pos = r.location + r.length;
-            continue;
-        }
-
-        NSString *videoID = YTJSONStringForKey(obj, @"videoId", 0);
-        NSString *title = nil;
-        NSString *author = nil;
-
-        NSRange titleRange = [obj rangeOfString:@"\"title\":"];
-        if (titleRange.location != NSNotFound)
-            title = YTJSONStringForKey(obj, @"text", titleRange.location);
-
-        NSRange ownerRange = [obj rangeOfString:@"\"ownerText\":"];
-        if (ownerRange.location != NSNotFound)
-            author = YTJSONStringForKey(obj, @"text", ownerRange.location);
-
-        if (videoID && [videoID length] == 11 && ![seen containsObject:videoID]) {
+            NSString *videoID = YTJSONStringForKey(obj, @"videoId", 0);
+            if (!videoID || [videoID length] != 11 || [seen containsObject:videoID]) continue;
+            NSString *title = YTJSONStringForKey(obj, @"title", 0);
+            NSString *author = YTJSONStringForKey(obj, @"author", 0);
             if (!title) title = videoID;
             if (!author) author = @"YouTube";
+
             [results addObject:[NSDictionary dictionaryWithObjectsAndKeys:
                 videoID, @"id", title, @"title", author, @"author", nil]];
             [seen addObject:videoID];
         }
-        pos = brace + [obj length];
+        if ([results count]) return results;
+        lastError = [NSString stringWithFormat:@"No video results from %@", host];
     }
 
-    return results;
+    if (errorText) {
+        *errorText = [NSString stringWithFormat:@"Search resolver failed. Last error: %@",
+                      lastError ? lastError : @"no response"];
+    }
+    return nil;
 }
 
 + (NSURL *)directVideoURLForID:(NSString *)videoID error:(NSString **)errorText {
