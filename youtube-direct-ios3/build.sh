@@ -49,6 +49,11 @@ chmod +x "$LINK_WRAPPER"
 export LEGACY_LD
 export TARGET_LD="$LINK_WRAPPER"
 echo "Using armv6 linker: $LEGACY_LD"
+
+echo
+echo "Building bundled static converter..."
+SDKVER="$SDKVER" LEGACY_LD="$LEGACY_LD" sh ./build-static-ffmpeg.sh
+
 make clean SDKVERSION="$SDKVER" FINALPACKAGE=1
 make package SDKVERSION="$SDKVER" FINALPACKAGE=1
 
