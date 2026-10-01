@@ -127,7 +127,7 @@
 }
 
 - (void)beginResolve:(NSString *)videoID {
-    [self setBusy:YES text:@"Getting format 18 directly from YouTube..."];
+    [self setBusy:YES text:@"Resolving and downloading video to iPhone..."];
     [NSThread detachNewThreadSelector:@selector(resolveThread:) toTarget:self withObject:videoID];
 }
 
@@ -164,6 +164,9 @@
     }
 
     _moviePlayer = [[MPMoviePlayerController alloc] initWithContentURL:[NSURL URLWithString:urlString]];
+    [_movieStartedAt release];
+    _movieStartedAt = [[NSDate date] retain];
+
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(movieFinished:)
                                                  name:MPMoviePlayerPlaybackDidFinishNotification
@@ -172,17 +175,34 @@
 }
 
 - (void)movieFinished:(NSNotification *)note {
+    NSTimeInterval elapsed = _movieStartedAt ? -[_movieStartedAt timeIntervalSinceNow] : 999.0;
+    NSDictionary *info = [note userInfo];
+    NSError *mediaError = [info objectForKey:@"error"];
+
     [[NSNotificationCenter defaultCenter] removeObserver:self
                                                     name:MPMoviePlayerPlaybackDidFinishNotification
                                                   object:_moviePlayer];
     [_moviePlayer release];
     _moviePlayer = nil;
+    [_movieStartedAt release];
+    _movieStartedAt = nil;
+
+    if (mediaError || elapsed < 4.0) {
+        NSString *message = nil;
+        if (mediaError)
+            message = [NSString stringWithFormat:@"The local MP4 was rejected by iPhone OS 3 MediaPlayer: %@",
+                       [mediaError localizedDescription]];
+        else
+            message = @"The local MP4 was downloaded successfully, but iPhone OS 3 MediaPlayer rejected it immediately. This means the remaining problem is the video file/container itself, not YouTube networking.";
+        [self showError:message];
+    }
 }
 
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [_moviePlayer stop];
     [_moviePlayer release];
+    [_movieStartedAt release];
     [_results release];
     [_spinner release];
     [_statusLabel release];
