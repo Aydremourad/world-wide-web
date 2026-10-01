@@ -9,3 +9,6 @@ install.sh
 
 .env
 *cookies*.txt
+
+static/hls-test
+static/stream-test.jpg

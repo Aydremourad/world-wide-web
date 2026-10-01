@@ -18,16 +18,19 @@ playback of preparation/error clips. Actual YouTube downloads failed with
 “Sign in to confirm you’re not a bot.” Cookies were added as an optional recovery
 method. Live playback of an actual YouTube video is not yet verified.
 
-## Deploy the download recovery update
+## Deploy the faster playback update
 
 1. Open Render, select `youtube-2g`, and select **Manual Deploy → Deploy latest commit**.
-2. Wait for **Live**. This update adds a build stage, so the first build takes longer.
+2. Wait for **Live**.
 3. Open https://aydreyoutube2g.duckdns.org/diagnostics. Confirm `version` is
-   `2g-1.1-rc1` and `token_provider_ready` is `true`.
-4. Keep the working phone Custom URL above. Search for **Me at the zoo** and play it.
-5. After the preparation clip, wait a minute and tap the video again.
-6. Check https://aydreyoutube2g.duckdns.org/status/jNQXAC9IVRw for `ready`,
-   `preparing`, or `failed` with a safe error category.
+   `2g-1.2-rc1` and `token_provider_ready` is `true`.
+4. Keep the working phone Custom URL above. Search for **stream test** in the
+   original YouTube app and play **Streaming test**.
+5. If the sample plays, set `PLAYBACK_MODE=hls` in Render → Environment, then
+   choose **Save and deploy** from the save dropdown. Leave it unset if the sample fails.
+
+Automatic preparation and the short playback wait work with the default MP4
+mode. HLS is optional until the phone passes the local streaming test.
 
 There is no new paid service, domain, API key, or mandatory login for this update.
 The existing optional private cookie secret is retained. Do not add a payment
@@ -46,8 +49,9 @@ one at a time to reduce memory usage on the free service. FFmpeg conversion
 settings remain compatible with the iPhone 2G.
 
 This follows current upstream guidance, but a token does not guarantee access
-from a blocked hosting-provider IP. The update needs a real Render deployment
-and download test. No alternative public ARMv6 server was verified working.
+from a blocked hosting-provider IP. The deployed version 1.1 provider was ready,
+but Me at the zoo still returned `youtube-bot-check`. No alternative public
+ARMv6 server was verified working.
 
 ## Optional private YouTube cookies
 
@@ -79,12 +83,14 @@ search-backed suggestions rather than official YouTube rankings.
 
 ## Verification
 
-- Fifteen local tests cover feeds, XML escaping, ranges, queue limits, credential
+- Twenty-one local tests cover feeds, XML escaping, ranges, queue limits, credential
   copy cleanup, safe status reporting, and a real FFmpeg compatibility conversion.
 - The token provider installs and compiles under Node 24; its local `/ping` responds.
 - Both processes start through the supervisor; diagnostics report provider ready
   and the expected downloader version, the sample MP4 is served, and shutdown works.
-- Docker build and live YouTube playback still require the user's Render deployment.
+- Version 1.1 built successfully on Render; its live provider was ready, but
+  the tested YouTube download was blocked. Version 1.2 and stock-app HLS need
+  the user's deployment and physical phone test.
 
 ## Primary sources
 
@@ -97,3 +103,50 @@ search-backed suggestions rather than official YouTube rankings.
 - https://github.com/ShahAndI123/Modified-Tuberepair-for-ios-2-6-built-in-YT-best-for-pre-iphone-4
 
 See NOTICE.md and LICENSE for attribution and licensing.
+
+
+## Faster playback update (2g-1.2-rc1)
+
+Short top search results (up to sixty seconds) begin preparing automatically
+when their feeds are served. Prefetching uses only an idle queue; the server
+does not download every visible result. Opening a video's details also starts
+preparation, and its known metadata avoids a repeated metadata extraction.
+A playback GET may wait up to eight seconds under the normal loading spinner
+and serve the completed MP4 directly if it finishes during that interval.
+Only two requests can wait at once, leaving server capacity for other routes.
+Cached videos remain immediate. New long videos can still require preparation.
+
+### Try progressive streaming in the stock app
+
+1. Deploy the latest commit. Keep the existing TubeRepair Custom URL.
+2. In the stock YouTube app search for **stream test**. Play the **Streaming test**
+   result. This is an original local sample and does not need YouTube access.
+3. If it plays, set Render environment variable `PLAYBACK_MODE=hls`, then choose
+   **Save and deploy** from the save dropdown. This reuses the existing build.
+4. If the stock app rejects the sample, leave `PLAYBACK_MODE` unset (MP4).
+
+An optional streaming mode serves HLS version 2 playlists with integer durations
+and separate MPEG-TS segments, H.264 Baseline level 3.0 / AAC-LC. Modern fragmented
+MP4 is avoided. The video can begin after three complete two-second segments
+are encoded while the rest continues. Full source download is still required
+before encoding starts, so this reduces conversion wait rather than guaranteeing
+instant playback. The original YouTube player must pass the phone test before
+streaming is enabled. Partial files are not served, and failed streams are removed.
+
+Settings: `PREFETCH_SECONDS=0` disables speculative prefetch;
+`PLAYBACK_WAIT_SECONDS=0` disables the brief automatic wait; default is eight
+seconds, capped at fifteen. The stream test always uses its own local files.
+
+The real-time FFmpeg test verifies that a version 2 playlist and playable codec
+segments appear while the encoder is still running. Routes, byte ranges, and
+partial-stream safety are covered locally. Stock-app HLS playback remains
+unverified on the physical phone.
+
+At the live test of version 1.1, the provider was ready but Me at the zoo still
+failed with `youtube-bot-check`, and diagnostics reported no private cookies
+loaded. Faster playback cannot independently fix that upstream access failure.
+
+Sources for legacy streaming:
+https://developer.apple.com/library/archive/documentation/NetworkingInternet/Conceptual/StreamingMediaGuide/UsingHTTPLiveStreaming/UsingHTTPLiveStreaming.html
+https://developer.apple.com/library/archive/referencelibrary/GettingStarted/AboutHTTPLiveStreaming/about/about.html
+https://ffmpeg.org/ffmpeg-formats.html

@@ -18,9 +18,18 @@ for name, text in messages.items():
     draw.multiline_text((160, 120), text, font=font, fill='white', anchor='mm', align='center', spacing=8)
     png = root / (name + '.png')
     im.save(png)
+    if name == 'test':
+        im.save(root / 'stream-test.jpg', quality=85)
     subprocess.run(['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-loop', '1', '-i', str(png),
                     '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo', '-t', '8', '-r', '24',
                     '-c:v', 'libx264', '-threads', '1', '-preset', 'ultrafast', '-profile:v', 'baseline', '-level:v', '3.0',
                     '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '80k',
                     '-movflags', '+faststart', str(root / (name + '.mp4'))], check=True)
     png.unlink()
+
+# A local HLS test lets the stock app prove support before the operator enables
+# streaming for real videos. It never contacts YouTube or requires credentials.
+from app import hls_args
+stream = root / 'hls-test'
+stream.mkdir(exist_ok=True)
+subprocess.run(hls_args(root / 'test.mp4', stream), check=True, capture_output=True)
