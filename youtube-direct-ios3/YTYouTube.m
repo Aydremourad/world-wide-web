@@ -195,6 +195,53 @@ forHTTPHeaderField:@"Accept"];
     return nil;
 }
 
+static NSString *YTAndroidPlayerResponse(NSString *videoID, NSString **errorText) {
+    NSString *clientVersion = @"21.26.364";
+    NSString *userAgent =
+        @"com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip";
+
+    NSString *body = [NSString stringWithFormat:
+        @"{\"context\":{\"client\":{\"clientName\":\"ANDROID\","
+         "\"clientVersion\":\"%@\",\"androidSdkVersion\":30,"
+         "\"userAgent\":\"%@\",\"osName\":\"Android\",\"osVersion\":\"11\","
+         "\"hl\":\"en\",\"gl\":\"US\"}},"
+         "\"videoId\":\"%@\",\"contentCheckOk\":true,\"racyCheckOk\":true}",
+        clientVersion, userAgent, videoID];
+
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:
+        [NSURL URLWithString:@"https://www.youtube.com/youtubei/v1/player?prettyPrint=false"]
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:25.0];
+    [req setHTTPMethod:@"POST"];
+    [req setHTTPBody:[body dataUsingEncoding:NSUTF8StringEncoding]];
+    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    [req setValue:@"3" forHTTPHeaderField:@"X-YouTube-Client-Name"];
+    [req setValue:clientVersion forHTTPHeaderField:@"X-YouTube-Client-Version"];
+    [req setValue:userAgent forHTTPHeaderField:@"User-Agent"];
+    [req setValue:@"en-US,en;q=0.9" forHTTPHeaderField:@"Accept-Language"];
+
+    NSURLResponse *response = nil;
+    NSError *err = nil;
+    NSData *data = [NSURLConnection sendSynchronousRequest:req
+                                         returningResponse:&response
+                                                     error:&err];
+    NSInteger status = 0;
+    if ([response isKindOfClass:[NSHTTPURLResponse class]])
+        status = [(NSHTTPURLResponse *)response statusCode];
+
+    if (!data || status < 200 || status >= 300) {
+        if (errorText) {
+            if (err) *errorText = [err localizedDescription];
+            else *errorText = [NSString stringWithFormat:@"Android player HTTP %d", (int)status];
+        }
+        return nil;
+    }
+
+    NSString *json = [[[NSString alloc] initWithData:data
+                                            encoding:NSUTF8StringEncoding] autorelease];
+    if (!json && errorText) *errorText = @"Android player response was not UTF-8.";
+    return json;
+}
+
 static NSString *YTHTML(NSString *url, NSString **errorText) {
     NSData *data = YTGET(url, errorText);
     if (!data) return nil;
@@ -324,9 +371,27 @@ static NSURL *YTItag18FromPlayerResponse(NSString *player, NSString **detail) {
 }
 
 + (NSURL *)directVideoURLForID:(NSString *)videoID error:(NSString **)errorText {
-    NSString *requestError = nil;
+    NSString *androidError = nil;
     NSString *detail = nil;
 
+    // Primary path: current regular ANDROID client. Unlike WEB/MWEB, this
+    // client has recently continued returning plain CDN URLs and format 18
+    // without requiring JavaScript n/sig deciphering.
+    NSString *android = YTAndroidPlayerResponse(videoID, &androidError);
+    if (android) {
+        NSURL *stream = YTItag18FromPlayerResponse(android, &detail);
+        if (stream) return stream;
+
+        NSString *reason = YTJSONStringForKey(android, @"reason", 0);
+        if (reason) androidError = reason;
+        else if (detail) androidError = detail;
+        else androidError = @"Android player response had no usable format 18.";
+    }
+
+    // Fallback path: use only the player JSON embedded in YouTube's own HTML.
+    // This does not call the WEB/MWEB player API that returned "The page needs
+    // to be reloaded" on the previous build.
+    NSString *htmlError = nil;
     NSArray *pages = [NSArray arrayWithObjects:
         [NSString stringWithFormat:
             @"https://www.youtube.com/watch?v=%@&bpctr=9999999999&has_verified=1&hl=en&gl=US",
@@ -337,23 +402,25 @@ static NSURL *YTItag18FromPlayerResponse(NSString *player, NSString **detail) {
 
     NSUInteger i;
     for (i = 0; i < [pages count]; i++) {
-        NSString *html = YTHTML([pages objectAtIndex:i], &requestError);
+        NSString *html = YTHTML([pages objectAtIndex:i], &htmlError);
         if (!html) continue;
 
         NSString *player = YTPlayerResponseFromHTML(html);
         if (!player) {
-            detail = @"YouTube HTML loaded without an embedded player response.";
+            htmlError = @"YouTube HTML had no embedded player response.";
             continue;
         }
 
         NSURL *stream = YTItag18FromPlayerResponse(player, &detail);
         if (stream) return stream;
+        if (detail) htmlError = detail;
     }
 
     if (errorText) {
-        if (detail) *errorText = detail;
-        else if (requestError) *errorText = requestError;
-        else *errorText = @"Could not resolve a direct YouTube format 18 stream.";
+        *errorText = [NSString stringWithFormat:
+            @"Direct YouTube playback failed. Android: %@ | HTML: %@",
+            androidError ? androidError : @"no response",
+            htmlError ? htmlError : @"no usable format 18"];
     }
     return nil;
 }
