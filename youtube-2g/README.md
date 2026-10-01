@@ -110,3 +110,21 @@ The prepared server is a testable deployment candidate. Free Render has only 0.1
 - [Classic server templates and original credits](https://github.com/ShahAndI123/Modified-Tuberepair-for-ios-2-6-built-in-YT-best-for-pre-iphone-4)
 
 Research checked October 1, 2026. This guide replaces the earlier Oracle setup directions.
+
+
+### YouTube bot-check authentication
+
+When logs report “Sign in to confirm you’re not a bot”, optionally supply a
+Netscape-format YouTube cookie export as a Render Secret File named
+`youtube-cookies.txt`. The server automatically reads
+`/etc/secrets/youtube-cookies.txt`; `YOUTUBE_COOKIES_FILE` can override this path.
+Export only youtube.com cookies using the official yt-dlp wiki instructions.
+Use a separate account without private videos, memberships, or sensitive
+playlists: the playback server is public and authenticated extraction can access
+content available to that account. Account use with yt-dlp can risk suspension.
+Never commit cookies to GitHub, paste them into logs, or share them in chat.
+Each request gets a private writable copy, deleted after completion or failure.
+Cookies can expire and may not overcome a datacenter IP block.
+
+After adding the secret, manually deploy the latest commit on
+`youtube-2g-server`, then retry a short public video.

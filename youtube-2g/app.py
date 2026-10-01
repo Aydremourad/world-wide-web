@@ -8,6 +8,8 @@ from urllib.parse import urlsplit
 import os
 import re
 import subprocess
+import shutil
+import tempfile
 import sys
 import threading
 import time
@@ -50,11 +52,23 @@ def base_url():
 
 
 def run_ytdlp(args, timeout=90):
-    # No shell, arbitrary URLs, credentials, or external Invidious dependencies.
+    # Credentials are read only from a private, operator-managed secret file.
     cmd = [sys.executable, '-m', 'yt_dlp', '--ignore-config', '--no-warnings',
            '--no-playlist', '--socket-timeout', '15', '--retries', '1',
            '--extractor-retries', '1', *args]
-    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    configured = os.environ.get('YOUTUBE_COOKIES_FILE')
+    secret = Path(configured or '/etc/secrets/youtube-cookies.txt')
+    if configured and not secret.is_file():
+        raise RuntimeError('Configured YouTube cookie file is missing')
+    # yt-dlp writes its cookie jar. Give each request its own writable copy,
+    # leaving the mounted secret untouched and deleting the copy on all exits.
+    with tempfile.TemporaryDirectory(prefix='cookies-', dir=STATE) as work:
+        if secret.is_file():
+            jar = Path(work) / 'cookies.txt'
+            shutil.copyfile(secret, jar)
+            jar.chmod(0o600)
+            cmd[4:4] = ['--cookies', str(jar)]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if result.returncode:
         raise RuntimeError(result.stderr[-1200:] or 'YouTube request failed')
     return result.stdout

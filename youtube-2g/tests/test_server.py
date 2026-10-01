@@ -12,6 +12,34 @@ spec = importlib.util.spec_from_file_location('server', Path(__file__).parents[1
 s = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(s)
 VID='abcdefghijk'
+
+def test_private_cookie_copy_cleanup(client, monkeypatch, tmp_path):
+    secret = tmp_path / 'secret.txt'
+    secret.write_text('# Netscape HTTP Cookie File\n')
+    monkeypatch.setenv('YOUTUBE_COOKIES_FILE', str(secret))
+    copies = []
+    def run(cmd, **kwargs):
+        jar = Path(cmd[cmd.index('--cookies') + 1])
+        copies.append(jar)
+        assert jar != secret and jar.read_text() == secret.read_text()
+        assert jar.stat().st_mode & 0o777 == 0o600
+        jar.write_text('changed by downloader')
+        return subprocess.CompletedProcess(cmd, 0, 'ok', '')
+    monkeypatch.setattr(s.subprocess, 'run', run)
+    assert s.run_ytdlp(['--skip-download', 'https://www.youtube.com/watch?v='+VID]) == 'ok'
+    assert not copies[0].exists()
+    assert secret.read_text() == '# Netscape HTTP Cookie File\n'
+
+def test_cookie_copy_cleanup_on_timeout(client, monkeypatch, tmp_path):
+    secret = tmp_path / 'secret.txt'; secret.write_text('# Netscape HTTP Cookie File\n')
+    monkeypatch.setenv('YOUTUBE_COOKIES_FILE', str(secret))
+    copies = []
+    def run(cmd, **kwargs):
+        copies.append(Path(cmd[cmd.index('--cookies')+1]))
+        raise subprocess.TimeoutExpired(cmd, 1)
+    monkeypatch.setattr(s.subprocess, 'run', run)
+    with pytest.raises(subprocess.TimeoutExpired): s.run_ytdlp([])
+    assert not copies[0].exists()
 ITEM=dict(videoId=VID,title='A & B <test> "quotes"',author='Name & Name',authorId='unknown',description='Text <tag> & symbols',published=0,lengthSeconds=12,viewCount=123)
 
 @pytest.fixture
