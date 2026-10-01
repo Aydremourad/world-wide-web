@@ -1,0 +1,32 @@
+CACHE MANIFEST
+# World Wide Web cache v31
+
+CACHE:
+index.html
+style.css
+webapp.js
+google.html
+wikipedia.html
+wikipedia-search.html
+wikipedia-article.html
+wikipedia-recent.html
+news.html
+old-museum.html
+flight-track.html
+flight-airport.html
+old-search.html
+smith.html
+apple.html
+apple.css
+apple-store.html
+apple-mac.html
+apple-ipod.html
+apple-iphone.html
+apple-downloads.html
+apple-support.html
+apple-touch-icon-precomposed.png
+apple-touch-icon-57-precomposed.png
+apple-touch-icon-114-precomposed.png
+
+NETWORK:
+*
