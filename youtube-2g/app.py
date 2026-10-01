@@ -37,6 +37,19 @@ metadata_cache = {}
 jobs_lock = threading.Lock()
 jobs = {}
 worker = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+downloads = threading.BoundedSemaphore(1)
+job_errors = {}
+
+
+class DownloadError(RuntimeError):
+    def __init__(self, message):
+        super().__init__(message)
+        lower = message.lower()
+        self.code = ('youtube-bot-check' if 'confirm' in lower and 'bot' in lower else
+                     'cookies-expired' if 'cookies' in lower and ('expired' in lower or 'no longer valid' in lower) else
+                     'youtube-forbidden' if '403' in lower else
+                     'no-playable-format' if 'requested format' in lower else
+                     'download-failed')
 
 
 def validate(video_id):
@@ -55,7 +68,11 @@ def run_ytdlp(args, timeout=90):
     # Credentials are read only from a private, operator-managed secret file.
     cmd = [sys.executable, '-m', 'yt_dlp', '--ignore-config', '--no-warnings',
            '--no-playlist', '--socket-timeout', '15', '--retries', '1',
-           '--extractor-retries', '1', *args]
+           '--extractor-retries', '1']
+    if os.environ.get('YOUTUBE_POT_ENABLED') == '1':
+        cmd += ['--extractor-args', 'youtube:player_client=mweb,web_embedded',
+                '--extractor-args', 'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416']
+    cmd += args
     configured = os.environ.get('YOUTUBE_COOKIES_FILE')
     secret = Path(configured or '/etc/secrets/youtube-cookies.txt')
     if configured and not secret.is_file():
@@ -68,9 +85,10 @@ def run_ytdlp(args, timeout=90):
             shutil.copyfile(secret, jar)
             jar.chmod(0o600)
             cmd[4:4] = ['--cookies', str(jar)]
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        with downloads:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     if result.returncode:
-        raise RuntimeError(result.stderr[-1200:] or 'YouTube request failed')
+        raise DownloadError(result.stderr[-1200:] or 'YouTube request failed')
     return result.stdout
 
 
@@ -163,7 +181,23 @@ def phone_preferences():
 
 @app.get('/healthz')
 def health():
-    return jsonify(status='ok', version='2g-1.0-rc1')
+    return jsonify(status='ok', version='2g-1.1-rc1')
+
+
+@app.get('/diagnostics')
+def diagnostics():
+    from importlib.metadata import version
+    provider = False
+    if os.environ.get('YOUTUBE_POT_ENABLED') == '1':
+        try:
+            with urllib.request.urlopen('http://127.0.0.1:4416/ping', timeout=1) as r:
+                provider = r.status == 200
+        except OSError:
+            pass
+    secret = Path(os.environ.get('YOUTUBE_COOKIES_FILE') or '/etc/secrets/youtube-cookies.txt')
+    # Only readiness flags and versions; no tokens, file contents, or account data.
+    return jsonify(version='2g-1.1-rc1', downloader=version('yt-dlp'),
+                   token_provider_ready=provider, cookies_loaded=secret.is_file())
 
 
 @app.get('/feeds/api/videos')
@@ -313,10 +347,15 @@ def convert(vid):
             output.replace(MEDIA / (vid + '.mp4'))
         with jobs_lock:
             jobs[vid] = ('ready', time.monotonic())
+            job_errors.pop(vid, None)
     except Exception as exc:
         log.warning('Conversion failed for %s: %s', vid, exc)
         with jobs_lock:
             jobs[vid] = ('too-long' if str(exc) == 'too-long' else 'failed', time.monotonic())
+            job_errors[vid] = (exc.code if isinstance(exc, DownloadError) else
+                               'timeout' if isinstance(exc, subprocess.TimeoutExpired) else
+                               'conversion-failed' if isinstance(exc, subprocess.CalledProcessError) else
+                               'too-long' if str(exc) == 'too-long' else 'download-failed')
 
 
 def schedule(vid):
@@ -329,7 +368,9 @@ def schedule(vid):
         for key in list(jobs):
             if jobs[key][0] not in ('preparing', 'queued') and time.monotonic() - jobs[key][1] > 3600:
                 del jobs[key]
+                job_errors.pop(key, None)
         jobs[vid] = ('preparing', time.monotonic())
+        job_errors.pop(vid, None)
         worker.submit(convert, vid)
         return 'preparing'
 
@@ -355,7 +396,11 @@ def status(vid):
     validate(vid)
     with jobs_lock:
         state = jobs.get(vid, ('not-requested', 0))[0]
-    return jsonify(status='ready' if (MEDIA / (vid + '.mp4')).exists() else state)
+        code = job_errors.get(vid)
+    result = dict(status='ready' if (MEDIA / (vid + '.mp4')).exists() else state)
+    if code and result['status'] == 'failed':
+        result['error'] = code
+    return jsonify(result)
 
 
 @app.get('/test.mp4')

@@ -1,130 +1,99 @@
-# YouTube 2G: card-free Render deployment
+# YouTube 2G server
 
-Prepared for the original YouTube app on a jailbroken iPhone 2G running iPhone OS 3.1.3.
+Backend for the original stock YouTube app on a jailbroken iPhone 2G running
+iPhone OS 3.1.3. Uses TubeRepair to supply legacy GData feeds and converts videos
+to 320x240 H.264 Baseline / AAC MP4. No home computer needs to remain running.
 
-[Deploy the prepared free service](https://render.com/deploy?repo=https://github.com/Aydremourad/world-wide-web/tree/youtube-2g-server)
+## Current setup
 
-Render hosts the backend. A computer does not need to remain running. The Blueprint explicitly selects **Free**, creates one web service, and creates no paid disks or databases. Leave the Render account without a payment method.
+- GitHub branch: `youtube-2g-server`
+- Render service: `youtube-2g`, Free compute, Hobby workspace
+- Working phone address: `https://aydreyoutube2g.duckdns.org/`
+- Render environment: `PUBLIC_BASE_URL=https://aydreyoutube2g.duckdns.org`
+- Phone: TLSFix 1.1, root certificates, TubeRepair 1.2-Beta-1
+- TubeRepair Custom URL: `https://aydreyoutube2g.duckdns.org/`
 
-## 1. Create the free server
+The user confirmed Safari compatibility-video playback, stock-app search, and
+playback of preparation/error clips. Actual YouTube downloads failed with
+“Sign in to confirm you’re not a bot.” Cookies were added as an optional recovery
+method. Live playback of an actual YouTube video is not yet verified.
 
-Use a modern browser for this part, on a computer or newer phone.
+## Deploy the download recovery update
 
-1. Open the deployment link above.
-2. Sign up or sign in to Render. Using your GitHub account is the simplest option. If prompted for a workspace plan, use **Hobby**, the free workspace plan.
-3. If GitHub asks for repository access, select `Aydremourad/world-wide-web`.
-4. On the deployment review screen, confirm the service is `youtube-2g` and its compute plan is **Free / $0**. Click the deployment/apply button. Do not choose a paid plan or add a card.
-5. Wait until the service says **Live**. The first build can take several minutes.
-6. Open the service and copy its public URL. It will resemble `https://youtube-2g-xxxx.onrender.com`. Use the actual URL Render gives you, not this example.
-7. Open that URL. You should see **YouTube 2G** and **The server is running**.
+1. Open Render, select `youtube-2g`, and select **Manual Deploy → Deploy latest commit**.
+2. Wait for **Live**. This update adds a build stage, so the first build takes longer.
+3. Open https://aydreyoutube2g.duckdns.org/diagnostics. Confirm `version` is
+   `2g-1.1-rc1` and `token_provider_ready` is `true`.
+4. Keep the working phone Custom URL above. Search for **Me at the zoo** and play it.
+5. After the preparation clip, wait a minute and tap the video again.
+6. Check https://aydreyoutube2g.duckdns.org/status/jNQXAC9IVRw for `ready`,
+   `preparing`, or `failed` with a safe error category.
 
-No terminal commands, Oracle VM, API key, or YouTube login are needed for this deployment.
+There is no new paid service, domain, API key, or mandatory login for this update.
+The existing optional private cookie secret is retained. Do not add a payment
+method or upgrade compute to deploy this change.
 
-If the shortcut does not select the branch correctly, use Render's **New → Blueprint**, connect `world-wide-web`, choose branch `youtube-2g-server`, and use the root `render.yaml`. Review the Free plan and apply it. Do not deploy the repository's `main` branch.
+## How the update works
 
-## 2. Enable modern HTTPS on the 2G
+The Docker image builds BgUtils PO-token provider 2.0.0 and runs it only on
+`127.0.0.1:4416`. yt-dlp nightly 2026.09.27.232945 uses the mobile-web and
+embedded YouTube clients; its provider plugin obtains playback tokens locally.
+Both downloaded source archives are version-pinned and checksum-verified.
 
-Render redirects HTTP to HTTPS, so the old phone needs TLSFix and current root certificates.
+The supervisor waits for provider readiness, starts the legacy server, and
+shuts down both processes if either stops. Downloader processes are limited to
+one at a time to reduce memory usage on the free service. FFmpeg conversion
+settings remain compatible with the iPhone 2G.
 
-1. On the 2G, open **Cydia → Manage → Sources → Edit → Add**.
-2. Add `http://cydia.skyglow.es/`.
-3. Search for **TLSFix**, select the package from Skyglow, and install it. The checked package version is **1.1**. Let Cydia install its MobileSubstrate dependency if needed.
-4. Reboot the phone.
-5. In the phone's Safari, open [the unsigned root certificate bundle](http://tlsroot.litten.ca/beeg.unsigned.mobileconfig). This HTTP download was checked and does not require modern HTTPS to reach it. Select **Install** on the profile screen and complete the prompts. The signed bundle on the website is labeled iOS 5+, so use the unsigned bundle for OS 3.
-6. Reboot again. Ensure the phone's date and time are correct.
-7. Open your actual Render server URL in Safari on the 2G. Wait for the server page to load.
-8. Tap **Play compatibility test**. You should see an eight-second “YouTube 2G / Playback test” clip.
+This follows current upstream guidance, but a token does not guarantee access
+from a blocked hosting-provider IP. The update needs a real Render deployment
+and download test. No alternative public ARMv6 server was verified working.
 
-This test checks the phone's connection and playback without contacting YouTube. If the page or test clip fails, resolve that before changing the YouTube app configuration.
+## Optional private YouTube cookies
 
-TLSFix's author documents support for iPhone OS 2 through iOS 9, including ARMv6 builds. Physical playback on your 2G still needs this test.
+Export only youtube.com cookies in Netscape format using the official yt-dlp wiki
+instructions. Use a separate account without private videos, memberships, or
+sensitive playlists: the playback server is public, and authenticated extraction
+can access content available to that account. Account use with yt-dlp can risk
+suspension. Never put cookie contents in GitHub, logs, or chat.
 
-## 3. Point the original YouTube app at the server
+In Render → Environment → Secret Files, create `youtube-cookies.txt` and paste
+the export. Render mounts it at `/etc/secrets/youtube-cookies.txt`. The server
+automatically detects the file and gives each downloader an isolated writable
+copy, deleted when the request finishes or fails. Cookies may expire and may
+not overcome an IP block. `YOUTUBE_COOKIES_FILE` can override the file path.
 
-### If TubeRepair is already installed
+## Diagnostics and limits
 
-1. Open **Settings → TubeRepair**.
-2. Set **Custom URL** (sometimes called the endpoint) to your complete Render URL, including `https://`.
-3. Reboot the 2G.
-4. Open your server page in Safari and wait until it loads.
-5. Open the original YouTube app and search for a short video.
+`/healthz` reports the application version. `/diagnostics` exposes only software
+versions and readiness flags: no generated tokens, cookie contents, or account
+information. `/status/VIDEO_ID` exposes a safe failure category such as
+`youtube-bot-check`, `youtube-forbidden`, `cookies-expired`, `timeout`, or
+`conversion-failed`. Private details remain in operator logs.
 
-### If TubeRepair is not installed
+Free Render sleeps after idle periods, and cached videos can disappear after
+sleep or restart. The image limits videos to ten minutes, converts one at a
+time, and uses a bounded cache. Comments, sign-in inside the old app, live
+streams, and cloud playlist management are not implemented. Browse tabs use
+search-backed suggestions rather than official YouTube rankings.
 
-The checked Skyglow package index currently contains TLSFix but **does not contain TubeRepair**. Do not spend time searching that source for TubeRepair. The following preference-file method is an **experimental fallback** based on the public TubeRepair client's source; it has not been proven to replace every hook on OS 3.
+## Verification
 
-1. On your computer, open your Render server page and click **Download iPhone configuration file**. Keep the filename `com.apple.youtubeframework.plist` exactly as downloaded. If the browser appends `.txt`, remove that extra extension.
-2. Connect the jailbroken 2G by USB and open iFunBox.
-3. Open **Raw File System** and navigate to `/var/mobile/Library/Preferences/`.
-4. If `com.apple.youtubeframework.plist` already exists, copy it to your computer as a backup before replacing it.
-5. Copy the downloaded configuration file into that folder.
-6. Reboot the phone and disconnect USB.
-7. Open your server page in Safari, wait for it to load, then try the original YouTube app.
-
-The downloaded file is generated for your real server hostname. You do not need to edit its contents. If the app still contacts the old YouTube servers, this fallback is insufficient and a compatible client tweak is still needed. Do not repeatedly reinstall the server to fix that phone-side issue. Restore the backed-up plist if you want to undo the change; if the file did not exist before, delete only the file you added and reboot.
-
-After initial setup, the computer can be turned off.
-
-## 4. Use it
-
-1. On the 2G, open your server URL in Safari and let the page finish loading. Bookmark it for later.
-2. Open YouTube and start with a video under one minute long.
-3. The first tap may play a **Preparing video** clip. Close that clip, wait a few minutes, and tap the same video again. Free Render CPU is limited, so longer videos take longer.
-4. Once ready, the server sends the converted MP4. The Render deployment limits videos to **10 minutes** and converts one at a time.
-
-No Mac or home computer runs the server. The phone only needs an Internet connection after setup.
-
-## If something fails
-
-| What happens | What to do |
-| --- | --- |
-| Render asks for payment | Keep Hobby workspace + Free compute. Do not enter a card or approve a paid service. If those options are unavailable for your account, stop there and report the exact prompt. |
-| Render build fails | Open the service's **Logs** and copy the last error lines. The Docker image has not been built on Render yet; the first deployment is the cloud check. |
-| Safari cannot open the server | Check TLSFix, installed root bundle, correct date/time, and the exact URL. Wait about a minute in case the server is waking. |
-| Safari page loads but test video does not | The remaining issue is phone playback/HTTPS compatibility, not a YouTube download. Report that exact result. |
-| Test video works but YouTube app cannot connect | Recheck the TubeRepair URL or copied plist and reboot. A working Safari test does not prove the preference-only fallback supplies every native-app hook. |
-| “Preparing video” persists | Check `YOUR-SERVER-URL/status/VIDEO_ID` in a modern browser. `ready` means it finished; `preparing` means keep waiting; `failed` means inspect Render logs or try a different short public video. The video ID is the 11-character value after `v=` in a YouTube link. |
-| “Video unavailable” | Try another short public video. YouTube may block downloads from the hosting provider's IP. The backend does not guarantee access to every video. |
-| Previously ready video prepares again | Normal after Render sleeps or restarts: its free filesystem discards cached videos. |
-
-## What has been checked
-
-- Ten local tests pass, including XML feeds, HTTPS URLs behind Render's proxy, byte ranges, phone configuration, queue limits, failure cleanup, and a real synthetic FFmpeg conversion.
-- The Blueprint is validated against Render's official JSON Schema.
-- The Deno release used by the Dockerfile exists, and the dependencies are pinned.
-- The HTTP root certificate bundle download returns successfully.
-- The Docker image has **not** yet been built on Render, and live YouTube downloads and original-app playback have **not** been demonstrated on a physical 2G.
-
-The prepared server is a testable deployment candidate. Free Render has only 0.1 CPU and 512 MB RAM. It sleeps after 15 idle minutes, wakes in about one minute, and loses cached videos when it sleeps or restarts. Usage limits and unusually high outbound activity can suspend it. With no payment method, documented bandwidth overages suspend free services rather than charging you. Google account sign-in, live streams, comments, and server-side playlists are not implemented.
+- Fifteen local tests cover feeds, XML escaping, ranges, queue limits, credential
+  copy cleanup, safe status reporting, and a real FFmpeg compatibility conversion.
+- The token provider installs and compiles under Node 24; its local `/ping` responds.
+- Both processes start through the supervisor; diagnostics report provider ready
+  and the expected downloader version, the sample MP4 is served, and shutdown works.
+- Docker build and live YouTube playback still require the user's Render deployment.
 
 ## Primary sources
 
-- [Render: first deployment, no payment required](https://render.com/docs/your-first-deploy)
-- [Render: no credit card required](https://render.com/articles/platforms-with-a-real-free-tier-for-developers-in-2026)
-- [Render free service limits](https://render.com/docs/free)
-- [Render HTTPS redirects](https://render.com/docs/tls)
-- [Render deploy shortcut and branch selection](https://render.com/docs/deploy-to-render)
-- [TLSFix support and installation](https://github.com/nfzerox/TLSFix)
-- [Root certificate bundles](http://tlsroot.litten.ca/)
-- [TubeRepair client source](https://github.com/ObscureMosquito/TubeRepair-Client)
-- [Classic server templates and original credits](https://github.com/ShahAndI123/Modified-Tuberepair-for-ios-2-6-built-in-YT-best-for-pre-iphone-4)
+- https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide
+- https://github.com/Brainicism/bgutil-ytdlp-pot-provider
+- https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/tag/2026.09.27.232945
+- https://render.com/docs/configure-environment-variables
+- https://render.com/docs/free
+- https://github.com/ObscureMosquito/TubeRepair-Client
+- https://github.com/ShahAndI123/Modified-Tuberepair-for-ios-2-6-built-in-YT-best-for-pre-iphone-4
 
-Research checked October 1, 2026. This guide replaces the earlier Oracle setup directions.
-
-
-### YouTube bot-check authentication
-
-When logs report “Sign in to confirm you’re not a bot”, optionally supply a
-Netscape-format YouTube cookie export as a Render Secret File named
-`youtube-cookies.txt`. The server automatically reads
-`/etc/secrets/youtube-cookies.txt`; `YOUTUBE_COOKIES_FILE` can override this path.
-Export only youtube.com cookies using the official yt-dlp wiki instructions.
-Use a separate account without private videos, memberships, or sensitive
-playlists: the playback server is public and authenticated extraction can access
-content available to that account. Account use with yt-dlp can risk suspension.
-Never commit cookies to GitHub, paste them into logs, or share them in chat.
-Each request gets a private writable copy, deleted after completion or failure.
-Cookies can expire and may not overcome a datacenter IP block.
-
-After adding the secret, manually deploy the latest commit on
-`youtube-2g-server`, then retry a short public video.
+See NOTICE.md and LICENSE for attribution and licensing.

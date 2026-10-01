@@ -6,3 +6,6 @@ tests
 static/*.mp4
 static/*.png
 install.sh
+
+.env
+*cookies*.txt

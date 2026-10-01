@@ -49,8 +49,43 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setattr(s, 'MEDIA', tmp_path)
     monkeypatch.setattr(s, 'STATE', tmp_path)
     s.jobs.clear()
+    s.job_errors.clear()
     s.metadata_cache.clear()
     return s.app.test_client()
+
+def test_public_failure_status_does_not_expose_credentials(client, monkeypatch):
+    monkeypatch.setattr(s, 'info', lambda v: (_ for _ in ()).throw(
+        s.DownloadError('ERROR: Sign in to confirm you are not a bot; cookie-secret-value')))
+    s.convert(VID)
+    r = client.get('/status/' + VID)
+    assert r.json == {'status': 'failed', 'error': 'youtube-bot-check'}
+    assert b'cookie-secret-value' not in r.data
+
+def test_mobile_client_uses_local_token_provider(client, monkeypatch, tmp_path):
+    monkeypatch.setenv('YOUTUBE_POT_ENABLED', '1')
+    monkeypatch.setenv('YOUTUBE_COOKIES_FILE', str(tmp_path / 'secret'))
+    (tmp_path / 'secret').write_text('# Netscape HTTP Cookie File\n')
+    def run(cmd, **kwargs):
+        assert 'youtube:player_client=mweb,web_embedded' in cmd
+        assert 'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416' in cmd
+        assert '--cookies' in cmd
+        return subprocess.CompletedProcess(cmd, 0, '{}', '')
+    monkeypatch.setattr(s.subprocess, 'run', run)
+    assert s.run_ytdlp(['--skip-download', 'https://www.youtube.com/watch?v=' + VID]) == '{}'
+
+def test_diagnostics_exposes_readiness_only(client, monkeypatch, tmp_path):
+    secret = tmp_path / 'cookie-secret'; secret.write_text('PRIVATE_COOKIE_VALUE')
+    monkeypatch.setenv('YOUTUBE_COOKIES_FILE', str(secret))
+    monkeypatch.setenv('YOUTUBE_POT_ENABLED', '1')
+    class Ready:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+    monkeypatch.setattr(s.urllib.request, 'urlopen', lambda *args, **kwargs: Ready())
+    r = client.get('/diagnostics')
+    assert r.json['token_provider_ready'] is True
+    assert r.json['cookies_loaded'] is True
+    assert b'PRIVATE_COOKIE_VALUE' not in r.data and str(secret).encode() not in r.data
 
 def test_feed_valid_xml_and_http_urls(client, monkeypatch):
     monkeypatch.setattr(s, 'search', lambda *a, **k: [ITEM])
