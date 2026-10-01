@@ -1,88 +1,47 @@
-<!DOCTYPE html>
-<html manifest="cache.manifest">
+<!doctype html>
+<html>
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta charset="utf-8">
+<meta name="viewport" content="width=320, initial-scale=1.0">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="Apple">
 <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/Aydremourad/Aydre/main/internet/icons/apple.png">
-<meta charset="UTF-8">
+<link rel="stylesheet" href="apple.css">
 <title>Apple</title>
-<style type="text/css">
-html,body{margin:0;padding:0;background:#000;color:#fff;font-family:Arial,Helvetica,sans-serif;font-size:12px;}
-#nav{height:33px;background:-webkit-gradient(linear,left top,left bottom,from(#f4f4f4),color-stop(.48,#d7d7d7),color-stop(.52,#bdbdbd),to(#9f9f9f));border-bottom:1px solid #666;text-align:center;white-space:nowrap;overflow:hidden;}
-.navitem{display:inline-block;height:33px;line-height:33px;padding:0 6px;color:#222;text-decoration:none;font-size:9px;text-shadow:0 1px rgba(255,255,255,.7);border-right:1px solid rgba(90,90,90,.25);}
-.navitem:first-child{font-weight:bold;}
-#subnav{background:#222;text-align:center;border-bottom:1px solid #444;padding:6px 0;}
-.sub{color:#aaa;text-decoration:none;padding:0 5px;font-size:9px;}
-#page{width:300px;margin:0 auto;}
-#hero{margin-top:12px;border:1px solid #333;background:#000;text-align:center;}
-#hero img{display:block;width:286px;height:auto;margin:0 auto;}
-#headline{font-size:21px;font-weight:normal;text-align:center;margin:12px 0 4px 0;}
-#tagline{text-align:center;font-size:11px;color:#ccc;margin:0 8px 14px 8px;line-height:16px;}
-.panel{border-top:1px solid #333;padding:12px 8px 14px 8px;}
-.panel h2{font-size:16px;font-weight:normal;margin:0 0 5px 0;}
-.panel p{font-size:11px;line-height:16px;color:#ccc;margin:0;}
-.links{margin-top:10px;}
-.link{display:block;padding:9px 8px;border-top:1px solid #333;color:#fff;text-decoration:none;font-size:12px;}
-.link:last-child{border-bottom:1px solid #333;}
-.footer{text-align:center;color:#777;font-size:9px;line-height:14px;padding:15px 0 25px 0;}
-</style>
 </head>
-<body>
-<div id="nav">
-<a class="navitem" href="apple.html">Apple</a>
-<a class="navitem" href="apple-store.html">Store</a>
-<a class="navitem" href="apple-mac.html">Mac</a>
-<a class="navitem" href="apple-ipod.html">iPod + iTunes</a>
-<a class="navitem" href="apple-iphone.html">iPhone</a>
-<a class="navitem" href="apple-downloads.html">Downloads</a>
-<a class="navitem" href="apple-support.html">Support</a>
+<body class="darkpage">
+<div class="apple-nav">
+<a class="home current" href="apple.html"><img src="https://raw.githubusercontent.com/Aydremourad/Aydre/main/internet/icons/apple.png" alt="Apple"></a>
+<a class="store" href="apple-store.html">Store</a>
+<a class="mac" href="apple-mac.html">Mac</a>
+<a class="ipod" href="apple-ipod.html">iPod + iTunes</a>
+<a class="iphone" href="apple-iphone.html">iPhone</a>
+<a class="downloads" href="apple-downloads.html">Downloads</a>
+<a class="support" href="apple-support.html">Support</a>
+<div class="clear"></div>
 </div>
-<div id="subnav">
-<a class="sub" href="#iphone">Overview</a>
-<a class="sub" href="#features">Features</a>
-<a class="sub" href="#software">Software</a>
-<a class="sub" href="#support">Support</a>
+<div class="page darkpage">
+<div class="content">
+<div class="hero-dark">
+<img src="https://images.macrumors.com/t/IM1B0SIqKvBN5ajzq2jreBjMru0%3D/1600x/article-new/2012/06/say_hello_to_iphone.jpg" alt="Say hello to iPhone">
 </div>
-<div id="page">
-<div id="hero">
-<img src="https://cdn.mos.cms.futurecdn.net/e5e156fc151bc38b1213e63b53031ca3.jpg" alt="Original iPhone">
-</div>
-<div id="headline">Introducing iPhone.</div>
-<div id="tagline">Apple reinvents the phone.</div>
-
-<div class="panel" id="iphone">
+<div class="dark-section">
 <h2>iPhone</h2>
-<p>A revolutionary mobile phone, a widescreen iPod with touch controls, and a breakthrough Internet device.</p>
-<div class="links">
-<a class="link" href="apple-iphone.html#specs">Technical Specifications ›</a>
-<a class="link" href="apple-support.html#iphone">iPhone User Guide ›</a>
+<p>A revolutionary mobile phone, a widescreen iPod, and a breakthrough Internet communications device.</p>
+<a class="more" href="apple-iphone.html">Learn more about iPhone ›</a>
 </div>
 </div>
-
-<div class="panel" id="features">
-<h2>A phone unlike any other.</h2>
-<p>Multi-Touch, visual voicemail, Safari, Mail, Maps, iPod, and more.</p>
-</div>
-
-<div class="panel" id="software">
-<h2>Software</h2>
-<p>Explore information and support for the original iPhone and its early software.</p>
-<div class="links">
-<a class="link" href="apple-support.html">Apple Support ›</a>
-<a class="link" href="apple-iphone.html">iPhone launch — June 2007 ›</a>
-</div>
-</div>
-
-<div class="panel" id="support">
-<h2>Support</h2>
-<p>Manuals, specifications, and help for Apple products.</p>
-</div>
-
-<div class="footer">
-Apple · iPhone · Mac · iPod + iTunes · Support<br>
-Classic Apple product pages
+<table class="home-promos"><tr>
+<td><a href="apple-mac.html"><b>Mac</b><span>Beautifully simple computers.</span></a></td>
+<td><a href="apple-ipod.html"><b>iPod</b><span>Your music. Your way.</span></a></td>
+<td><a href="apple-store.html"><b>Store</b><span>Mac, iPod, iPhone & more.</span></a></td>
+</tr></table>
+<div class="home-news">Apple brings together <a href="apple-mac.html">Mac</a>, <a href="apple-ipod.html">iPod + iTunes</a>, and the new <a href="apple-iphone.html">iPhone</a>.</div>
+<div class="footer dark">
+<a href="apple.html">Apple</a> · <a href="apple-store.html">Store</a> · <a href="apple-mac.html">Mac</a> · <a href="apple-ipod.html">iPod</a> · <a href="apple-iphone.html">iPhone</a><br>
+<a href="index.html">Return to World Wide Web</a><br>
+<span style="font-size:7px">Classic Apple experience for original iPhone</span>
 </div>
 </div>
 </body>
