@@ -434,6 +434,149 @@ static NSURL *YTItag18FromPlayerResponse(NSString *player, NSString **detail) {
     return nil;
 }
 
+
+@interface YTFileDownloader : NSObject {
+    NSFileHandle *_handle;
+    NSError *_error;
+    BOOL _done;
+    NSInteger _status;
+    long long _received;
+}
+- (BOOL)downloadURL:(NSURL *)url toPath:(NSString *)path error:(NSString **)errorText;
+@end
+
+@implementation YTFileDownloader
+
+- (id)init {
+    self = [super init];
+    if (self) {
+        _handle = nil;
+        _error = nil;
+        _done = NO;
+        _status = 0;
+        _received = 0;
+    }
+    return self;
+}
+
+- (void)connection:(NSURLConnection *)connection didReceiveResponse:(NSURLResponse *)response {
+    if ([response isKindOfClass:[NSHTTPURLResponse class]])
+        _status = [(NSHTTPURLResponse *)response statusCode];
+    else
+        _status = 200;
+
+    if (_status != 200 && _status != 206) {
+        _done = YES;
+        [connection cancel];
+    }
+}
+
+- (void)connection:(NSURLConnection *)connection didReceiveData:(NSData *)data {
+    if (_done || ![data length]) return;
+    [_handle writeData:data];
+    _received += [data length];
+}
+
+- (void)connection:(NSURLConnection *)connection didFailWithError:(NSError *)error {
+    [_error release];
+    _error = [error retain];
+    _done = YES;
+}
+
+- (void)connectionDidFinishLoading:(NSURLConnection *)connection {
+    _done = YES;
+}
+
+- (BOOL)downloadURL:(NSURL *)url toPath:(NSString *)path error:(NSString **)errorText {
+    [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+    if (![[NSFileManager defaultManager] createFileAtPath:path contents:nil attributes:nil]) {
+        if (errorText) *errorText = @"Could not create temporary movie file.";
+        return NO;
+    }
+
+    _handle = [[NSFileHandle fileHandleForWritingAtPath:path] retain];
+    if (!_handle) {
+        if (errorText) *errorText = @"Could not open temporary movie file.";
+        return NO;
+    }
+
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url
+                                                       cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                                                   timeoutInterval:60.0];
+    [req setHTTPMethod:@"GET"];
+    [req setValue:@"Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_3 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7E18 Safari/528.16"
+forHTTPHeaderField:@"User-Agent"];
+    [req setValue:@"video/mp4,*/*;q=0.8" forHTTPHeaderField:@"Accept"];
+
+    _done = NO;
+    _status = 0;
+    _received = 0;
+
+    NSURLConnection *connection = [[NSURLConnection alloc] initWithRequest:req
+                                                                  delegate:self
+                                                          startImmediately:NO];
+    [connection scheduleInRunLoop:[NSRunLoop currentRunLoop] forMode:NSDefaultRunLoopMode];
+    [connection start];
+
+    while (!_done) {
+        NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                 beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.25]];
+        [pool release];
+    }
+
+    [connection cancel];
+    [connection release];
+    [_handle synchronizeFile];
+    [_handle closeFile];
+    [_handle release];
+    _handle = nil;
+
+    if (_error) {
+        if (errorText) *errorText = [_error localizedDescription];
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+        return NO;
+    }
+
+    if (_status != 200 && _status != 206) {
+        if (errorText)
+            *errorText = [NSString stringWithFormat:@"movie download HTTP %d", (int)_status];
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+        return NO;
+    }
+
+    if (_received < 1024) {
+        if (errorText)
+            *errorText = [NSString stringWithFormat:@"movie download was only %lld bytes", _received];
+        [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
+        return NO;
+    }
+
+    return YES;
+}
+
+- (void)dealloc {
+    [_handle closeFile];
+    [_handle release];
+    [_error release];
+    [super dealloc];
+}
+
+@end
+
+static NSURL *YTDownloadVideoLocally(NSURL *remoteURL, NSString *videoID, NSString **errorText) {
+    NSString *safeID = videoID ? videoID : @"video";
+    NSString *path = [NSTemporaryDirectory()
+        stringByAppendingPathComponent:[NSString stringWithFormat:@"ytdirect-%@.mp4", safeID]];
+
+    YTFileDownloader *downloader = [[YTFileDownloader alloc] init];
+    BOOL ok = [downloader downloadURL:remoteURL toPath:path error:errorText];
+    [downloader release];
+    if (!ok) return nil;
+
+    return [NSURL fileURLWithPath:path];
+}
+
 @implementation YTYouTube
 
 + (NSArray *)search:(NSString *)query error:(NSString **)errorText {
@@ -513,7 +656,13 @@ static NSURL *YTItag18FromPlayerResponse(NSString *player, NSString **detail) {
     NSString *embedded = YTEmbeddedPlayerResponse(videoID, &err);
     if (embedded) {
         stream = YTUsableItag18(embedded, &err);
-        if (stream) return stream;
+        if (stream) {
+        NSString *downloadError = nil;
+        NSURL *local = YTDownloadVideoLocally(stream, videoID, &downloadError);
+        if (local) return local;
+        err = [NSString stringWithFormat:@"resolved MP4 but local download failed: %@",
+               downloadError ? downloadError : @"unknown download error"];
+    }
     }
     if (err) [errors addObject:[NSString stringWithFormat:@"Embedded: %@", err]];
 
@@ -523,7 +672,13 @@ static NSURL *YTItag18FromPlayerResponse(NSString *player, NSString **detail) {
     NSString *tv = YTTVPlayerResponse(videoID, &err);
     if (tv) {
         stream = YTUsableItag18(tv, &err);
-        if (stream) return stream;
+        if (stream) {
+        NSString *downloadError = nil;
+        NSURL *local = YTDownloadVideoLocally(stream, videoID, &downloadError);
+        if (local) return local;
+        err = [NSString stringWithFormat:@"resolved MP4 but local download failed: %@",
+               downloadError ? downloadError : @"unknown download error"];
+    }
     }
     if (err) [errors addObject:[NSString stringWithFormat:@"TV: %@", err]];
 
@@ -533,7 +688,13 @@ static NSURL *YTItag18FromPlayerResponse(NSString *player, NSString **detail) {
     NSString *android = YTAndroidPlayerResponse(videoID, &err);
     if (android) {
         stream = YTUsableItag18(android, &err);
-        if (stream) return stream;
+        if (stream) {
+        NSString *downloadError = nil;
+        NSURL *local = YTDownloadVideoLocally(stream, videoID, &downloadError);
+        if (local) return local;
+        err = [NSString stringWithFormat:@"resolved MP4 but local download failed: %@",
+               downloadError ? downloadError : @"unknown download error"];
+    }
     }
     if (err) [errors addObject:[NSString stringWithFormat:@"Android: %@", err]];
 
@@ -557,7 +718,13 @@ static NSURL *YTItag18FromPlayerResponse(NSString *player, NSString **detail) {
             continue;
         }
         stream = YTUsableItag18(player, &err);
-        if (stream) return stream;
+        if (stream) {
+        NSString *downloadError = nil;
+        NSURL *local = YTDownloadVideoLocally(stream, videoID, &downloadError);
+        if (local) return local;
+        err = [NSString stringWithFormat:@"resolved MP4 but local download failed: %@",
+               downloadError ? downloadError : @"unknown download error"];
+    }
     }
     if (err) [errors addObject:[NSString stringWithFormat:@"HTML: %@", err]];
 
