@@ -4,12 +4,12 @@ Backend for the original stock YouTube app on a jailbroken iPhone 2G running
 iPhone OS 3.1.3. Uses TubeRepair for legacy GData feeds and ordinary MP4 playback.
 The server runs on free Render; no home computer needs to remain running.
 
-## Deploy version 1.4
+## Deploy version 1.5
 
 1. Open Render, select `youtube-2g`, then **Manual Deploy → Deploy latest commit**.
 2. Wait for **Live**. The deployed commit starts with the version 1.3 recovery change.
 3. Open https://aydreyoutube2g.duckdns.org/diagnostics and check
-   `version: 2g-1.4` and `playback_mode: mp4`.
+   `version: 2g-1.5` and `playback_mode: mp4`.
 4. Reopen the original YouTube app, search **playback test**, and play **Playback test**.
    This uses the same locally generated MP4 as the working Safari compatibility test.
 
@@ -17,6 +17,26 @@ No new environment variables, payment method, domain, or phone tweak is required
 `PLAYBACK_MODE=hls` from an earlier deployment is ignored, so it cannot select
 an incompatible player path. The old streaming test ID also serves MP4 directly.
 The new test ID avoids the previously rejected movie entry in the phone's cache.
+
+
+## First-tap playback in version 1.5
+
+The stock iPhone player may issue a HEAD request before its GET request. Earlier
+versions returned the small preparing clip immediately to HEAD, so the player
+could cache the placeholder movie's Content-Length and require closing the movie
+and trying again after conversion finished. Version 1.5 waits on both HEAD and
+GET for up to 75 seconds so the first successful response describes the real MP4.
+
+Preparation is also faster. The downloader now prefers YouTube's progressive
+H.264/AAC 360p MP4 (normally format 18). If ffprobe confirms Baseline H.264 level
+3.0 or below, <=640x480, 4:2:0 video and AAC audio, the server only remuxes it
+with fast-start metadata instead of re-encoding. If the file is not safe for the
+original iPhone, the existing 320x240 Baseline/AAC conversion remains the fallback.
+
+The Mac is not part of the runtime path. The phone connects to DuckDNS/Render
+and the server runs on Render. Render Free can still spin the web service down
+after inactivity, so the first request after a long idle period can be slower;
+a continuously running Render compute plan is required to eliminate that sleep.
 
 ## Current setup
 
