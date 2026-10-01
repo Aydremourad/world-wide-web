@@ -3,7 +3,7 @@
 <plist version="1.0">
 <dict>
     <key>CFBundleDisplayName</key>
-    <string>YouTube</string>
+    <string>YT Direct</string>
     <key>CFBundleExecutable</key>
     <string>YouTubeDirect</string>
     <key>CFBundleIdentifier</key>
