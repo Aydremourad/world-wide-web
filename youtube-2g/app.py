@@ -46,7 +46,7 @@ LOCAL_TEST_IDS = {PLAYBACK_TEST_ID, STREAM_TEST_ID}
 PLAYBACK_TEST_ITEM = dict(videoId=PLAYBACK_TEST_ID, title='Playback test',
     author='YouTube 2G', authorId='unknown', description='A local playback test.',
     published=0, lengthSeconds=8, viewCount=0)
-VERSION = '2g-1.5'
+VERSION = '2g-1.6'
 
 
 def media_ready(vid):
@@ -248,8 +248,8 @@ def diagnostics():
     return jsonify(version=VERSION, downloader=version('yt-dlp'),
                    token_provider_ready=provider, cookies_loaded=secret.is_file(),
                    playback_mode='mp4', youtube_clients='default,mweb,web_embedded',
-                   cookie_fallback='anonymous', playback_wait_seconds=75,
-                   progressive_fast_path=True)
+                   cookie_fallback='anonymous', playback_wait_seconds=120,
+                   progressive_fast_path=False)
 
 
 @app.get('/feeds/api/videos')
@@ -371,38 +371,6 @@ def ffmpeg_args(source, destination):
             '-movflags', '+faststart', str(destination)]
 
 
-def iphone_safe_mp4(path):
-    """Return True when a downloaded progressive MP4 already fits iPhone 2G limits."""
-    probe = subprocess.run([
-        'ffprobe', '-v', 'error', '-show_entries',
-        'stream=codec_type,codec_name,profile,level,width,height,pix_fmt',
-        '-of', 'json', str(path)
-    ], check=True, capture_output=True, text=True, timeout=30)
-    streams = json.loads(probe.stdout).get('streams') or []
-    video = next((s for s in streams if s.get('codec_type') == 'video'), None)
-    audio = next((s for s in streams if s.get('codec_type') == 'audio'), None)
-    if not video or video.get('codec_name') != 'h264':
-        return False
-    profile = (video.get('profile') or '').lower()
-    if profile not in ('baseline', 'constrained baseline'):
-        return False
-    if int(video.get('level') or 999) > 30:
-        return False
-    if int(video.get('width') or 9999) > 640 or int(video.get('height') or 9999) > 480:
-        return False
-    if video.get('pix_fmt') not in ('yuv420p', 'yuvj420p'):
-        return False
-    if audio and (audio.get('codec_name') != 'aac' or
-                  (audio.get('profile') or '').lower() not in ('lc', 'aac lc', '')):
-        return False
-    return True
-
-
-def faststart_copy_args(source, destination):
-    return ['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
-            '-i', str(source), '-map', '0:v:0', '-map', '0:a:0?',
-            '-c', 'copy', '-movflags', '+faststart', str(destination)]
-
 
 def prune_cache():
     files = list(MEDIA.glob('*.mp4'))
@@ -444,13 +412,13 @@ def convert(vid, hint=None):
                 raise RuntimeError('Video exceeds source limit or is unavailable')
             prune_cache()
             output = Path(work) / 'converted.mp4'
-            if iphone_safe_mp4(source):
-                log.info('Using iPhone-safe progressive MP4 fast path for %s', vid)
-                command = faststart_copy_args(source, output)
-            else:
-                log.info('Transcoding %s for original iPhone compatibility', vid)
-                command = ffmpeg_args(source, output)
-            subprocess.run(command, check=True, capture_output=True, timeout=600)
+            # Always transcode. The original iPhone/stock YouTube player is more
+            # restrictive than container/codec metadata alone can prove; some
+            # nominally Baseline progressive YouTube MP4s still produce
+            # "format not supported" on-device.
+            log.info('Transcoding %s for original iPhone compatibility', vid)
+            subprocess.run(ffmpeg_args(source, output), check=True,
+                           capture_output=True, timeout=600)
             if not output.exists() or output.stat().st_size < 1000:
                 raise RuntimeError('Empty converted video')
             output.replace(MEDIA / (vid + '.mp4'))
@@ -510,7 +478,7 @@ def playback(vid):
     # prepared, so the first successful response describes the actual movie.
     # Render supports long-running HTTP responses; keep two threads reserved for
     # feeds/health while at most two playback requests wait.
-    wait = min(max(float(os.environ.get('PLAYBACK_WAIT_SECONDS', '75')), 0), 120)
+    wait = min(max(float(os.environ.get('PLAYBACK_WAIT_SECONDS', '120')), 0), 180)
     if status in ('preparing', 'queued') and wait and playback_waiters.acquire(False):
         try:
             deadline = time.monotonic() + wait
