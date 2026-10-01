@@ -93,3 +93,6 @@ text-align:center;
 margin:0 auto 2px;
 text-shadow:0 1px 0 #fff
 }
+
+.footer .portal-return{font-size:11px;line-height:22px;font-weight:bold;color:#777}
+.darkpage .footer .portal-return{color:#aaa}
