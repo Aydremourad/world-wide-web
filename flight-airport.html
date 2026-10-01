@@ -302,11 +302,13 @@ function startBoardParts(id){
  },25000);
 }
 function flightKey(f){
- var c=(f&&f.carrier)?f.carrier:{};
  var a=(f&&f.airport)?f.airport:{};
  var d=(f&&f.departureTime)?f.departureTime:{};
  var r=(f&&f.arrivalTime)?f.arrivalTime:{};
- return 'k:'+(c.fs||'')+'|'+(c.flightNumber||'')+'|'+(a.fs||'')+'|'+(d.time24||d.timeAMPM||'')+'|'+(r.time24||r.timeAMPM||'');
+ var dep=d.time24||d.timeAMPM||'';
+ var arr=r.time24||r.timeAMPM||'';
+ var sort=f&&f.sortTime?f.sortTime:'';
+ return 'k:'+(a.fs||'')+'|'+dep+'|'+arr+'|'+sort;
 }
 function addFlight(f){
  var k=flightKey(f);
