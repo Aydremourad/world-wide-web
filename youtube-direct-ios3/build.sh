@@ -52,7 +52,10 @@ echo "Using armv6 linker: $LEGACY_LD"
 make clean SDKVERSION="$SDKVER" FINALPACKAGE=1
 make package SDKVERSION="$SDKVER" FINALPACKAGE=1
 
-BIN=".theos/obj/release/armv6/YouTubeDirect.app/YouTubeDirect"
+BIN=".theos/obj/armv6/YouTubeDirect.app/YouTubeDirect"
+if [ ! -f "$BIN" ]; then
+  BIN=".theos/obj/release/armv6/YouTubeDirect.app/YouTubeDirect"
+fi
 if [ ! -f "$BIN" ]; then
   BIN=".theos/obj/debug/armv6/YouTubeDirect.app/YouTubeDirect"
 fi
