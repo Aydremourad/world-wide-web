@@ -1,4 +1,7 @@
 #import "YTYouTube.h"
+#include <stdlib.h>
+#include <unistd.h>
+
 
 static int YTHex(unichar c) {
     if (c >= '0' && c <= '9') return c - '0';
@@ -577,6 +580,84 @@ static NSURL *YTDownloadVideoLocally(NSURL *remoteURL, NSString *videoID, NSStri
     return [NSURL fileURLWithPath:path];
 }
 
+
+static NSString *YTFFmpegPath(void) {
+    NSArray *paths = [NSArray arrayWithObjects:
+        @"/usr/bin/ffmpeg",
+        @"/usr/local/bin/ffmpeg",
+        @"/bin/ffmpeg",
+        nil];
+    NSUInteger i;
+    for (i = 0; i < [paths count]; i++) {
+        NSString *path = [paths objectAtIndex:i];
+        if ([[NSFileManager defaultManager] isExecutableFileAtPath:path])
+            return path;
+    }
+    return nil;
+}
+
+static NSURL *YTConvertForOriginalIPhone(NSURL *downloadedURL,
+                                          NSString *videoID,
+                                          NSString **errorText) {
+    NSString *ffmpeg = YTFFmpegPath();
+    if (!ffmpeg) {
+        if (errorText) {
+            *errorText = @"FFmpeg is not installed on the iPhone. Install the old ARM ffmpeg package from Saurik/Cydia, then reopen YT Direct.";
+        }
+        return nil;
+    }
+
+    NSString *inputPath = [downloadedURL path];
+    NSString *safeID = videoID ? videoID : @"video";
+    NSString *outputPath = [NSTemporaryDirectory()
+        stringByAppendingPathComponent:[NSString stringWithFormat:@"ytdirect-legacy-%@.mp4", safeID]];
+    NSString *logPath = [NSTemporaryDirectory()
+        stringByAppendingPathComponent:@"ytdirect-ffmpeg.log"];
+
+    [[NSFileManager defaultManager] removeItemAtPath:outputPath error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:logPath error:nil];
+
+    // Original iPhone-safe target:
+    // MPEG-4 Part 2 Simple Profile video, no B-frames, 320x180, 24 fps,
+    // ~500 kbps. Keep YouTube's AAC-LC audio without re-encoding.
+    NSString *command = [NSString stringWithFormat:
+        @"'%@' -y -i '%@' -vcodec mpeg4 -b 500k -r 24 -s 320x180 -bf 0 -acodec copy '%@' >'%@' 2>&1",
+        ffmpeg, inputPath, outputPath, logPath];
+
+    int status = system([command UTF8String]);
+
+    NSDictionary *attrs = [[NSFileManager defaultManager]
+        attributesOfItemAtPath:outputPath error:nil];
+    unsigned long long size = attrs ? [[attrs objectForKey:NSFileSize] unsignedLongLongValue] : 0;
+
+    if (status != 0 || size < 1024) {
+        NSString *log = [NSString stringWithContentsOfFile:logPath
+                                                   encoding:NSUTF8StringEncoding
+                                                      error:nil];
+        if ([log length] > 700)
+            log = [log substringFromIndex:[log length] - 700];
+        if (errorText) {
+            *errorText = [NSString stringWithFormat:
+                @"On-device FFmpeg conversion failed (status %d). %@",
+                status, [log length] ? log : @"No FFmpeg log was produced."];
+        }
+        [[NSFileManager defaultManager] removeItemAtPath:outputPath error:nil];
+        return nil;
+    }
+
+    // Remove the incompatible YouTube source after conversion to save space.
+    [[NSFileManager defaultManager] removeItemAtPath:inputPath error:nil];
+    return [NSURL fileURLWithPath:outputPath];
+}
+
+static NSURL *YTDownloadAndConvertForOriginalIPhone(NSURL *remoteURL,
+                                                     NSString *videoID,
+                                                     NSString **errorText) {
+    NSURL *downloaded = YTDownloadVideoLocally(remoteURL, videoID, errorText);
+    if (!downloaded) return nil;
+    return YTConvertForOriginalIPhone(downloaded, videoID, errorText);
+}
+
 @implementation YTYouTube
 
 + (NSArray *)search:(NSString *)query error:(NSString **)errorText {
@@ -658,9 +739,9 @@ static NSURL *YTDownloadVideoLocally(NSURL *remoteURL, NSString *videoID, NSStri
         stream = YTUsableItag18(embedded, &err);
         if (stream) {
         NSString *downloadError = nil;
-        NSURL *local = YTDownloadVideoLocally(stream, videoID, &downloadError);
+        NSURL *local = YTDownloadAndConvertForOriginalIPhone(stream, videoID, &downloadError);
         if (local) return local;
-        err = [NSString stringWithFormat:@"resolved MP4 but local download failed: %@",
+        err = [NSString stringWithFormat:@"resolved MP4 but download/conversion failed: %@",
                downloadError ? downloadError : @"unknown download error"];
     }
     }
@@ -674,9 +755,9 @@ static NSURL *YTDownloadVideoLocally(NSURL *remoteURL, NSString *videoID, NSStri
         stream = YTUsableItag18(tv, &err);
         if (stream) {
         NSString *downloadError = nil;
-        NSURL *local = YTDownloadVideoLocally(stream, videoID, &downloadError);
+        NSURL *local = YTDownloadAndConvertForOriginalIPhone(stream, videoID, &downloadError);
         if (local) return local;
-        err = [NSString stringWithFormat:@"resolved MP4 but local download failed: %@",
+        err = [NSString stringWithFormat:@"resolved MP4 but download/conversion failed: %@",
                downloadError ? downloadError : @"unknown download error"];
     }
     }
@@ -690,9 +771,9 @@ static NSURL *YTDownloadVideoLocally(NSURL *remoteURL, NSString *videoID, NSStri
         stream = YTUsableItag18(android, &err);
         if (stream) {
         NSString *downloadError = nil;
-        NSURL *local = YTDownloadVideoLocally(stream, videoID, &downloadError);
+        NSURL *local = YTDownloadAndConvertForOriginalIPhone(stream, videoID, &downloadError);
         if (local) return local;
-        err = [NSString stringWithFormat:@"resolved MP4 but local download failed: %@",
+        err = [NSString stringWithFormat:@"resolved MP4 but download/conversion failed: %@",
                downloadError ? downloadError : @"unknown download error"];
     }
     }
@@ -720,9 +801,9 @@ static NSURL *YTDownloadVideoLocally(NSURL *remoteURL, NSString *videoID, NSStri
         stream = YTUsableItag18(player, &err);
         if (stream) {
         NSString *downloadError = nil;
-        NSURL *local = YTDownloadVideoLocally(stream, videoID, &downloadError);
+        NSURL *local = YTDownloadAndConvertForOriginalIPhone(stream, videoID, &downloadError);
         if (local) return local;
-        err = [NSString stringWithFormat:@"resolved MP4 but local download failed: %@",
+        err = [NSString stringWithFormat:@"resolved MP4 but download/conversion failed: %@",
                downloadError ? downloadError : @"unknown download error"];
     }
     }
