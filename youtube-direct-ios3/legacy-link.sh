@@ -8,4 +8,4 @@ if [ ! -x "$LEGACY_LD" ]; then
 fi
 
 # Keep the current Apple clang driver, but force cctools-port ld64.
-exec xcrun clang++ -fuse-ld="$LEGACY_LD" "$@"
+exec xcrun clang -fuse-ld="$LEGACY_LD" "$@"
