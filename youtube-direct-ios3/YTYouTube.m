@@ -1,26 +1,5 @@
 #import "YTYouTube.h"
 
-static NSString * const YTAPIKey = @"AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8";
-
-static NSString *YTJSONEscape(NSString *value) {
-    NSMutableString *out = [NSMutableString string];
-    NSUInteger i, n = [value length];
-    for (i = 0; i < n; i++) {
-        unichar c = [value characterAtIndex:i];
-        switch (c) {
-            case '\\': [out appendString:@"\\\\"]; break;
-            case '"': [out appendString:@"\\\""]; break;
-            case '\n': [out appendString:@"\\n"]; break;
-            case '\r': [out appendString:@"\\r"]; break;
-            case '\t': [out appendString:@"\\t"]; break;
-            default:
-                if (c < 0x20) [out appendFormat:@"\\u%04x", c];
-                else [out appendFormat:@"%C", c];
-        }
-    }
-    return out;
-}
-
 static int YTHex(unichar c) {
     if (c >= '0' && c <= '9') return c - '0';
     if (c >= 'a' && c <= 'f') return c - 'a' + 10;
@@ -62,25 +41,30 @@ static NSString *YTJSONUnescape(NSString *value) {
 }
 
 static NSString *YTJSONStringForKey(NSString *text, NSString *key, NSUInteger start) {
-    NSString *needle = [NSString stringWithFormat:@"\"%@\":\"", key];
     if (start >= [text length]) return nil;
+    NSString *needle = [NSString stringWithFormat:@"\"%@\"", key];
     NSRange search = NSMakeRange(start, [text length] - start);
     NSRange r = [text rangeOfString:needle options:0 range:search];
-    if (r.location == NSNotFound) {
-        needle = [NSString stringWithFormat:@"\"%@\" : \"", key];
-        r = [text rangeOfString:needle options:0 range:search];
-        if (r.location == NSNotFound) return nil;
-    }
+    if (r.location == NSNotFound) return nil;
 
     NSUInteger i = r.location + r.length;
+    while (i < [text length] && [[NSCharacterSet whitespaceAndNewlineCharacterSet]
+           characterIsMember:[text characterAtIndex:i]]) i++;
+    if (i >= [text length] || [text characterAtIndex:i] != ':') return nil;
+    i++;
+    while (i < [text length] && [[NSCharacterSet whitespaceAndNewlineCharacterSet]
+           characterIsMember:[text characterAtIndex:i]]) i++;
+    if (i >= [text length] || [text characterAtIndex:i] != '"') return nil;
+    i++;
+
     NSMutableString *raw = [NSMutableString string];
     BOOL escaped = NO;
     while (i < [text length]) {
-        unichar c = [text characterAtIndex:i++];
-        if (!escaped && c == '"') break;
-        [raw appendFormat:@"%C", c];
+        unichar ch = [text characterAtIndex:i++];
+        if (!escaped && ch == '"') break;
+        [raw appendFormat:@"%C", ch];
         if (escaped) escaped = NO;
-        else if (c == '\\') escaped = YES;
+        else if (ch == '\\') escaped = YES;
     }
     return YTJSONUnescape(raw);
 }
@@ -130,16 +114,20 @@ static NSData *YTGET(NSString *urlString, NSString **errorText) {
 }
 
 static NSArray *YTJSONObjectStringsInArray(NSString *text, NSString *arrayKey) {
-    NSString *needle = [NSString stringWithFormat:@"\"%@\":[", arrayKey];
+    NSString *needle = [NSString stringWithFormat:@"\"%@\"", arrayKey];
     NSRange r = [text rangeOfString:needle];
-    if (r.location == NSNotFound) {
-        needle = [NSString stringWithFormat:@"\"%@\" : [", arrayKey];
-        r = [text rangeOfString:needle];
-    }
     if (r.location == NSNotFound) return [NSArray array];
 
-    NSMutableArray *objects = [NSMutableArray array];
     NSUInteger i = r.location + r.length;
+    NSCharacterSet *ws = [NSCharacterSet whitespaceAndNewlineCharacterSet];
+    while (i < [text length] && [ws characterIsMember:[text characterAtIndex:i]]) i++;
+    if (i >= [text length] || [text characterAtIndex:i] != ':') return [NSArray array];
+    i++;
+    while (i < [text length] && [ws characterIsMember:[text characterAtIndex:i]]) i++;
+    if (i >= [text length] || [text characterAtIndex:i] != '[') return [NSArray array];
+    i++;
+
+    NSMutableArray *objects = [NSMutableArray array];
     NSInteger arrayDepth = 1;
     BOOL inString = NO, escaped = NO;
     while (i < [text length] && arrayDepth > 0) {
@@ -261,9 +249,6 @@ static NSURL *YTPipedCombinedURL(NSString *text) {
                 bestHeight = height;
             }
             if (height == 360) return [NSURL URLWithString:url];
-        } else if (!bestURL) {
-            bestURL = url;
-            bestHeight = height;
         }
     }
     return bestURL ? [NSURL URLWithString:bestURL] : nil;
@@ -293,48 +278,6 @@ static NSURL *YTInvidiousFormatURL(NSString *text) {
 
 
 @implementation YTYouTube
-
-+ (NSData *)postBody:(NSString *)body
-            endpoint:(NSString *)endpoint
-          clientName:(NSString *)clientName
-       clientVersion:(NSString *)clientVersion
-        clientNumber:(NSString *)clientNumber
-           userAgent:(NSString *)userAgent
-               error:(NSString **)errorText {
-    NSArray *urls = [NSArray arrayWithObjects:
-        [NSString stringWithFormat:@"https://www.youtube.com/youtubei/v1/%@?key=%@&prettyPrint=false", endpoint, YTAPIKey],
-        [NSString stringWithFormat:@"https://www.youtube.com/youtubei/v1/%@?prettyPrint=false", endpoint],
-        nil];
-
-    NSString *lastError = nil;
-    NSUInteger u;
-    for (u = 0; u < [urls count]; u++) {
-        NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:[urls objectAtIndex:u]]
-                                                           cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
-                                                       timeoutInterval:25.0];
-        [req setHTTPMethod:@"POST"];
-        [req setHTTPBody:[body dataUsingEncoding:NSUTF8StringEncoding]];
-        [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-        [req setValue:clientNumber forHTTPHeaderField:@"X-YouTube-Client-Name"];
-        [req setValue:clientVersion forHTTPHeaderField:@"X-YouTube-Client-Version"];
-        [req setValue:@"https://www.youtube.com" forHTTPHeaderField:@"Origin"];
-        if (userAgent) [req setValue:userAgent forHTTPHeaderField:@"User-Agent"];
-
-        NSURLResponse *response = nil;
-        NSError *err = nil;
-        NSData *data = [NSURLConnection sendSynchronousRequest:req returningResponse:&response error:&err];
-        NSInteger status = 0;
-        if ([response isKindOfClass:[NSHTTPURLResponse class]])
-            status = [(NSHTTPURLResponse *)response statusCode];
-
-        if (data && status >= 200 && status < 300) return data;
-        if (err) lastError = [err localizedDescription];
-        else lastError = [NSString stringWithFormat:@"YouTube HTTP %d", (int)status];
-    }
-
-    if (errorText) *errorText = lastError ? lastError : @"No response from YouTube.";
-    return nil;
-}
 
 + (NSArray *)search:(NSString *)query error:(NSString **)errorText {
     NSString *escaped = [query stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
