@@ -13,9 +13,11 @@ if [ ! -d "$THEOS/sdks" ]; then
 fi
 
 SDK=""
-for candidate in iPhoneOS3.1.3.sdk iPhoneOS3.1.2.sdk iPhoneOS3.1.sdk; do
-  if [ -d "$THEOS/sdks/$candidate" ]; then
-    SDK="$candidate"
+SDKVER=""
+for candidate in 3.1.3 3.1.2 3.1; do
+  if [ -d "$THEOS/sdks/iPhoneOS${candidate}.sdk" ]; then
+    SDK="iPhoneOS${candidate}.sdk"
+    SDKVER="$candidate"
     break
   fi
 done
@@ -26,8 +28,8 @@ if [ -z "$SDK" ]; then
 fi
 
 echo "Using $SDK"
-make clean
-make package
+make clean SDKVERSION="$SDKVER"
+make package SDKVERSION="$SDKVER"
 echo
 echo "Built packages:"
 find packages -type f -name '*.deb' -maxdepth 2 -print
