@@ -46,7 +46,7 @@ LOCAL_TEST_IDS = {PLAYBACK_TEST_ID, STREAM_TEST_ID}
 PLAYBACK_TEST_ITEM = dict(videoId=PLAYBACK_TEST_ID, title='Playback test',
     author='YouTube 2G', authorId='unknown', description='A local playback test.',
     published=0, lengthSeconds=8, viewCount=0)
-VERSION = '2g-1.4'
+VERSION = '2g-1.5'
 
 
 def media_ready(vid):
@@ -248,7 +248,8 @@ def diagnostics():
     return jsonify(version=VERSION, downloader=version('yt-dlp'),
                    token_provider_ready=provider, cookies_loaded=secret.is_file(),
                    playback_mode='mp4', youtube_clients='default,mweb,web_embedded',
-                   cookie_fallback='anonymous')
+                   cookie_fallback='anonymous', playback_wait_seconds=75,
+                   progressive_fast_path=True)
 
 
 @app.get('/feeds/api/videos')
@@ -370,6 +371,39 @@ def ffmpeg_args(source, destination):
             '-movflags', '+faststart', str(destination)]
 
 
+def iphone_safe_mp4(path):
+    """Return True when a downloaded progressive MP4 already fits iPhone 2G limits."""
+    probe = subprocess.run([
+        'ffprobe', '-v', 'error', '-show_entries',
+        'stream=codec_type,codec_name,profile,level,width,height,pix_fmt',
+        '-of', 'json', str(path)
+    ], check=True, capture_output=True, text=True, timeout=30)
+    streams = json.loads(probe.stdout).get('streams') or []
+    video = next((s for s in streams if s.get('codec_type') == 'video'), None)
+    audio = next((s for s in streams if s.get('codec_type') == 'audio'), None)
+    if not video or video.get('codec_name') != 'h264':
+        return False
+    profile = (video.get('profile') or '').lower()
+    if profile not in ('baseline', 'constrained baseline'):
+        return False
+    if int(video.get('level') or 999) > 30:
+        return False
+    if int(video.get('width') or 9999) > 640 or int(video.get('height') or 9999) > 480:
+        return False
+    if video.get('pix_fmt') not in ('yuv420p', 'yuvj420p'):
+        return False
+    if audio and (audio.get('codec_name') != 'aac' or
+                  (audio.get('profile') or '').lower() not in ('lc', 'aac lc', '')):
+        return False
+    return True
+
+
+def faststart_copy_args(source, destination):
+    return ['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y',
+            '-i', str(source), '-map', '0:v:0', '-map', '0:a:0?',
+            '-c', 'copy', '-movflags', '+faststart', str(destination)]
+
+
 def prune_cache():
     files = list(MEDIA.glob('*.mp4'))
     sizes = {p: p.stat().st_size for p in files}
@@ -394,15 +428,29 @@ def convert(vid, hint=None):
             raise ValueError('too-long')
         with tempfile.TemporaryDirectory(prefix='source-', dir=STATE) as work:
             source = Path(work) / 'source.mp4'
-            run_ytdlp(['-f', 'best[height<=360]/bestvideo[height<=360]+bestaudio/best[height<=480]',
-                       '--merge-output-format', 'mp4', '--max-filesize', '200M',
+            # Prefer YouTube's progressive H.264/AAC 360p file (normally format
+            # 18). On an original iPhone this can often be remuxed instead of
+            # re-encoded, cutting preparation time dramatically.
+            selector = ('18/'
+                        'best[ext=mp4][height<=360][vcodec^=avc1][acodec^=mp4a]/'
+                        'best[height<=360]/'
+                        'bestvideo[height<=360]+bestaudio/'
+                        'best[height<=480]')
+            run_ytdlp(['-f', selector, '--merge-output-format', 'mp4',
+                       '--max-filesize', '200M',
                        '--match-filters', f'!is_live & duration <= {MAX_SECONDS}',
                        '-o', str(source), 'https://www.youtube.com/watch?v=' + vid], timeout=600)
             if not source.exists():
                 raise RuntimeError('Video exceeds source limit or is unavailable')
             prune_cache()
             output = Path(work) / 'converted.mp4'
-            subprocess.run(ffmpeg_args(source, output), check=True, capture_output=True, timeout=600)
+            if iphone_safe_mp4(source):
+                log.info('Using iPhone-safe progressive MP4 fast path for %s', vid)
+                command = faststart_copy_args(source, output)
+            else:
+                log.info('Transcoding %s for original iPhone compatibility', vid)
+                command = ffmpeg_args(source, output)
+            subprocess.run(command, check=True, capture_output=True, timeout=600)
             if not output.exists() or output.stat().st_size < 1000:
                 raise RuntimeError('Empty converted video')
             output.replace(MEDIA / (vid + '.mp4'))
@@ -456,10 +504,14 @@ def playback(vid):
         os.utime(path, None)
         return send_file(path, mimetype='video/mp4', conditional=True)
     status = schedule(vid)
-    # Allow short jobs to finish under the normal loading spinner. Limit waiters
-    # so health checks and feeds retain server threads, and retain the old fallback.
-    wait = min(max(float(os.environ.get('PLAYBACK_WAIT_SECONDS', '8')), 0), 15)
-    if request.method == 'GET' and status in ('preparing', 'queued') and wait and playback_waiters.acquire(False):
+    # The stock player may issue HEAD before GET. Returning the tiny "preparing"
+    # movie to either request makes it remember the wrong Content-Length and
+    # forces a close/reopen. Hold both HEAD and GET while the real MP4 is being
+    # prepared, so the first successful response describes the actual movie.
+    # Render supports long-running HTTP responses; keep two threads reserved for
+    # feeds/health while at most two playback requests wait.
+    wait = min(max(float(os.environ.get('PLAYBACK_WAIT_SECONDS', '75')), 0), 120)
+    if status in ('preparing', 'queued') and wait and playback_waiters.acquire(False):
         try:
             deadline = time.monotonic() + wait
             while time.monotonic() < deadline and not media_ready(vid):
