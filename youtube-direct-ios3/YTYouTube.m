@@ -325,6 +325,8 @@ static NSURL *YTUsableItag18(NSString *player, NSString **errorText) {
     return nil;
 }
 
+static NSURL *YTItag18FromPlayerResponse(NSString *player, NSString **detail);
+
 static NSString *YTAndroidPlayerResponse(NSString *videoID, NSString **errorText) {
     NSString *clientVersion = @"21.26.364";
     NSString *userAgent =
