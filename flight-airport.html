@@ -123,9 +123,16 @@ var destination='';
 var flights=[];
 var pending=0;
 var requestNumber=0;
-var responseCount=0;
-var errorCount=0;
+var boardStartedFor=0;
+var successfulParts=0;
+var failedParts=0;
 var parseErrorCount=0;
+var preferredProxy=0;
+var boardYear=0;
+var boardMonth=0;
+var boardDay=0;
+var boardDateLabel='';
+var proxies=['https://api.allorigins.win/get','https://allorigins.hexlet.app/get'];
 
 function getParam(name){
  var s=window.location.search.substring(1).split('&');
@@ -150,7 +157,34 @@ function esc(s){
  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 function pad2(n){return n<10?'0'+n:''+n;}
-
+function proxyURL(proxyIndex,cb,target){
+ return proxies[proxyIndex]+'?callback='+cb+'&disableCache=true&url='+encodeURIComponent(target);
+}
+function outerOkay(data){
+ if(!data){return false;}
+ if(data.status && data.status.http_code){
+  var c=parseInt(data.status.http_code,10);
+  if(c>=400){return false;}
+ }
+ return true;
+}
+function parseAirportDate(s){
+ var p=(s||'').split('-');
+ var mons={Jan:1,Feb:2,Mar:3,Apr:4,May:5,Jun:6,Jul:7,Aug:8,Sep:9,Oct:10,Nov:11,Dec:12};
+ if(p.length!=3 || !mons[p[1]]){return false;}
+ boardDay=parseInt(p[0],10);
+ boardMonth=mons[p[1]];
+ boardYear=parseInt(p[2],10);
+ boardDateLabel=s;
+ return boardYear>2000 && boardMonth>0 && boardDay>0;
+}
+function useDeviceDate(){
+ var d=new Date();
+ boardYear=d.getFullYear();
+ boardMonth=d.getMonth()+1;
+ boardDay=d.getDate();
+ boardDateLabel=pad2(boardDay)+'/'+pad2(boardMonth)+'/'+boardYear;
+}
 function showBoard(type){
  boardType=(type=='departures')?'departures':'arrivals';
  document.getElementById('arrtab').className=(boardType=='arrivals')?'sel':'';
@@ -162,50 +196,115 @@ function showBoard(type){
 function loadBoard(){
  requestNumber++;
  var id=requestNumber;
+ boardStartedFor=0;
  flights=[];
- pending=2;
- responseCount=0;
- errorCount=0;
+ pending=0;
+ successfulParts=0;
+ failedParts=0;
  parseErrorCount=0;
+ preferredProxy=0;
+ boardDateLabel='';
  document.getElementById('flightlist').innerHTML='<div class="loadingrow">Loading '+esc(airport)+' '+esc(boardType)+'...</div>';
- document.getElementById('statusline').innerHTML='Loading today\'s flight board';
- var d=new Date();
- loadPart(0,id,d);
- loadPart(12,id,d);
+ document.getElementById('statusline').innerHTML='Finding the airport\'s local date...';
+ loadAirportDate(id,0);
  window.setTimeout(function(){
-  if(id==requestNumber && pending>0){pending=0;renderBoard();}
- },15000);
+  if(id==requestNumber && boardStartedFor!=id){
+   useDeviceDate();
+   startBoardParts(id);
+  }
+ },12000);
 }
-function loadPart(hour,id,d){
- var kind=(boardType=='departures')?'dep':'arr';
- var target='https://www.flightstats.com/v2/api-next/flight-tracker/'+kind+'/'+airport+'/'+d.getFullYear()+'/'+(d.getMonth()+1)+'/'+d.getDate()+'/'+hour+'?numHours=12';
- var cb='wwFlightCb'+id+'_'+hour;
+function loadAirportDate(id,proxyIndex){
+ var target='https://www.flightstats.com/v2/api/airport/'+airport+'?rqid=wwweb2g';
+ var cb='wwAirportDate'+id+'_'+proxyIndex;
  window[cb]=function(data){
-  if(id!=requestNumber){return;}
-  receivePart(data);
-  try{window[cb]=null;}catch(e){}
+  if(id!=requestNumber || boardStartedFor==id){return;}
+  var ok=false;
+  try{
+   if(outerOkay(data) && data && typeof data.contents=='string' && data.contents.length){
+    var obj=parseJSONOld(data.contents);
+    if(obj && obj.detailsHeader && parseAirportDate(obj.detailsHeader.currentDate)){
+     preferredProxy=proxyIndex;
+     ok=true;
+    }
+   }
+  }catch(e){}
+  try{window[cb]=null;}catch(e2){}
+  if(ok){startBoardParts(id);}
+  else if(proxyIndex==0){loadAirportDate(id,1);}
+  else{
+   useDeviceDate();
+   startBoardParts(id);
+  }
  };
- var src='https://api.allorigins.win/get?callback='+cb+'&disableCache=true&url='+encodeURIComponent(target);
  var s=document.createElement('script');
  s.type='text/javascript';
- s.src=src;
+ s.src=proxyURL(proxyIndex,cb,target);
  s.onerror=function(){
-  if(id==requestNumber){errorCount++;partFinished();}
+  if(id!=requestNumber || boardStartedFor==id){return;}
+  if(proxyIndex==0){loadAirportDate(id,1);}
+  else{useDeviceDate();startBoardParts(id);}
  };
  document.getElementsByTagName('head')[0].appendChild(s);
 }
-function receivePart(data){
- responseCount++;
- try{
-  var obj=data;
-  if(data && typeof data.contents=='string'){obj=parseJSONOld(data.contents);}
-  if(obj && obj.data && obj.data.flights){
-   var a=obj.data.flights;
-   var i;
-   for(i=0;i<a.length;i++){flights[flights.length]=a[i];}
+function startBoardParts(id){
+ if(id!=requestNumber || boardStartedFor==id){return;}
+ boardStartedFor=id;
+ flights=[];
+ pending=2;
+ successfulParts=0;
+ failedParts=0;
+ parseErrorCount=0;
+ document.getElementById('statusline').innerHTML='Loading '+esc(boardDateLabel)+' flight board...';
+ loadPart(0,id,preferredProxy,0);
+ loadPart(12,id,preferredProxy,0);
+ window.setTimeout(function(){
+  if(id==requestNumber && pending>0){
+   failedParts+=pending;
+   pending=0;
+   renderBoard();
   }
- }catch(e){parseErrorCount++;}
- partFinished();
+ },25000);
+}
+function loadPart(hour,id,proxyIndex,attempt){
+ var kind=(boardType=='departures')?'dep':'arr';
+ var target='https://www.flightstats.com/v2/api-next/flight-tracker/'+kind+'/'+airport+'/'+boardYear+'/'+boardMonth+'/'+boardDay+'/'+hour+'?numHours=12';
+ var cb='wwFlightCb'+id+'_'+hour+'_'+proxyIndex+'_'+attempt;
+ window[cb]=function(data){
+  if(id!=requestNumber){return;}
+  var ok=false;
+  try{
+   if(outerOkay(data) && data && typeof data.contents=='string' && data.contents.length){
+    var obj=parseJSONOld(data.contents);
+    if(obj && !obj.error && obj.data && typeof obj.data.flights!='undefined'){
+     var a=obj.data.flights||[];
+     var i;
+     for(i=0;i<a.length;i++){flights[flights.length]=a[i];}
+     successfulParts++;
+     ok=true;
+    }
+   }
+  }catch(e){parseErrorCount++;}
+  try{window[cb]=null;}catch(e2){}
+  if(ok){partFinished();}
+  else{retryPart(hour,id,proxyIndex,attempt);}
+ };
+ var s=document.createElement('script');
+ s.type='text/javascript';
+ s.src=proxyURL(proxyIndex,cb,target);
+ s.onerror=function(){
+  if(id==requestNumber){retryPart(hour,id,proxyIndex,attempt);}
+ };
+ document.getElementsByTagName('head')[0].appendChild(s);
+}
+function retryPart(hour,id,proxyIndex,attempt){
+ if(id!=requestNumber){return;}
+ if(attempt<1){
+  loadPart(hour,id,proxyIndex==0?1:0,attempt+1);
+ }else{
+  failedParts++;
+  partFinished();
+ }
 }
 function partFinished(){
  if(pending>0){pending--;}
@@ -252,21 +351,21 @@ function renderBoard(){
   h+='</div>';
  }
  if(!h){
-  if(responseCount==0){
-   h='<div class="emptyrow"><b>Flight data could not be reached.</b><br>The flight service or proxy did not return a response.</div>';
-  }else if(parseErrorCount>0){
-   h='<div class="emptyrow"><b>Flight data response could not be read.</b><br>The service returned data in an unexpected format.</div>';
+  if(successfulParts==0){
+   h='<div class="emptyrow"><b>Flight data could not be reached.</b><br>Both live data connections failed. Please try again.</div>';
+  }else if(failedParts>0){
+   h='<div class="emptyrow">No matching flights were found in the part of the '+esc(boardDateLabel)+' board that loaded.</div>';
   }else{
-   h='<div class="emptyrow">No '+esc(destination?airport+' to '+destination:boardType)+' flights were found for today.</div>';
+   h='<div class="emptyrow">No '+esc(destination?airport+' to '+destination:boardType)+' flights were found for '+esc(boardDateLabel)+'.</div>';
   }
  }
  document.getElementById('flightlist').innerHTML=h;
- if(responseCount==0){
-  document.getElementById('statusline').innerHTML='Data request failed &middot; '+errorCount+' script error'+(errorCount==1?'':'s');
- }else if(parseErrorCount>0){
-  document.getElementById('statusline').innerHTML='Data received &middot; '+parseErrorCount+' unreadable response'+(parseErrorCount==1?'':'s');
+ if(successfulParts==0){
+  document.getElementById('statusline').innerHTML='Live data request failed';
+ }else if(failedParts>0){
+  document.getElementById('statusline').innerHTML=list.length+' flight'+(list.length==1?'':'s')+' shown &middot; '+esc(boardDateLabel)+' &middot; Partial board';
  }else{
-  document.getElementById('statusline').innerHTML=list.length+' flight'+(list.length==1?'':'s')+' shown &middot; Today &middot; '+responseCount+' data response'+(responseCount==1?'':'s');
+  document.getElementById('statusline').innerHTML=list.length+' flight'+(list.length==1?'':'s')+' shown &middot; '+esc(boardDateLabel);
  }
 }
 function init(){
@@ -277,7 +376,7 @@ function init(){
  if(!airport.match(/^[A-Z0-9]{3}$/)){
   document.getElementById('titlecode').innerHTML='Airport';
   document.getElementById('airportname').innerHTML='Airport Board';
-  document.getElementById('flightlist').innerHTML='<div class="emptyrow">Airport code not recognized. Return to Flight Track and enter a code such as FWA.</div>';
+  document.getElementById('flightlist').innerHTML='<div class="emptyrow">Airport code not recognized. Return to Flight Track and enter a three-letter IATA code.</div>';
   return;
  }
  document.title=airport+' Airport Board';
