@@ -195,6 +195,136 @@ forHTTPHeaderField:@"Accept"];
     return nil;
 }
 
+
+static NSString *YTPlayerPOST(NSString *videoID,
+                              NSString *clientName,
+                              NSString *clientVersion,
+                              NSString *clientNumber,
+                              NSString *userAgent,
+                              BOOL embedded,
+                              NSString **errorText) {
+    NSString *thirdParty = embedded
+        ? @",\"thirdParty\":{\"embedUrl\":\"https://www.youtube.com/\"}"
+        : @"";
+    NSString *body = [NSString stringWithFormat:
+        @"{\"context\":{\"client\":{\"clientName\":\"%@\","
+        @"\"clientVersion\":\"%@\",\"userAgent\":\"%@\","
+        @"\"hl\":\"en\",\"gl\":\"US\"}%@},"
+        @"\"videoId\":\"%@\",\"contentCheckOk\":true,\"racyCheckOk\":true}",
+        clientName, clientVersion, userAgent, thirdParty, videoID];
+
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:
+        [NSURL URLWithString:@"https://www.youtube.com/youtubei/v1/player?prettyPrint=false"]
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:25.0];
+    [req setHTTPMethod:@"POST"];
+    [req setHTTPBody:[body dataUsingEncoding:NSUTF8StringEncoding]];
+    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    [req setValue:clientNumber forHTTPHeaderField:@"X-YouTube-Client-Name"];
+    [req setValue:clientVersion forHTTPHeaderField:@"X-YouTube-Client-Version"];
+    [req setValue:userAgent forHTTPHeaderField:@"User-Agent"];
+
+    NSURLResponse *response = nil;
+    NSError *err = nil;
+    NSData *data = [NSURLConnection sendSynchronousRequest:req
+                                         returningResponse:&response
+                                                     error:&err];
+    NSInteger status = 0;
+    if ([response isKindOfClass:[NSHTTPURLResponse class]])
+        status = [(NSHTTPURLResponse *)response statusCode];
+
+    if (!data || status < 200 || status >= 300) {
+        if (errorText) {
+            if (err) *errorText = [err localizedDescription];
+            else *errorText = [NSString stringWithFormat:@"%@ player HTTP %d",
+                               clientName, (int)status];
+        }
+        return nil;
+    }
+
+    NSString *json = [[[NSString alloc] initWithData:data
+                                            encoding:NSUTF8StringEncoding] autorelease];
+    if (!json && errorText)
+        *errorText = [NSString stringWithFormat:@"%@ player response was not UTF-8.",
+                      clientName];
+    return json;
+}
+
+static NSString *YTEmbeddedPlayerResponse(NSString *videoID, NSString **errorText) {
+    return YTPlayerPOST(videoID,
+        @"WEB_EMBEDDED_PLAYER",
+        @"2.20260708.00.00",
+        @"56",
+        @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15",
+        YES, errorText);
+}
+
+static NSString *YTTVPlayerResponse(NSString *videoID, NSString **errorText) {
+    return YTPlayerPOST(videoID,
+        @"TVHTML5",
+        @"7.20260707.07.00",
+        @"7",
+        @"Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold (unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)",
+        NO, errorText);
+}
+
+static BOOL YTProbeVideoURL(NSURL *url, NSString **errorText) {
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url
+                                                       cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                                                   timeoutInterval:18.0];
+    [req setHTTPMethod:@"GET"];
+    [req setValue:@"bytes=0-1" forHTTPHeaderField:@"Range"];
+    [req setValue:@"Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_3 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7E18 Safari/528.16"
+forHTTPHeaderField:@"User-Agent"];
+
+    NSURLResponse *response = nil;
+    NSError *err = nil;
+    NSData *data = [NSURLConnection sendSynchronousRequest:req
+                                         returningResponse:&response
+                                                     error:&err];
+    NSInteger status = 0;
+    NSString *type = nil;
+    if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
+        NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
+        status = [http statusCode];
+        type = [[http allHeaderFields] objectForKey:@"Content-Type"];
+        if (!type) type = [response MIMEType];
+    }
+
+    if (data && (status == 200 || status == 206)) {
+        if (!type || [type rangeOfString:@"video/" options:NSCaseInsensitiveSearch].location != NSNotFound ||
+            [type rangeOfString:@"application/octet-stream" options:NSCaseInsensitiveSearch].location != NSNotFound)
+            return YES;
+    }
+
+    if (errorText) {
+        if (err) *errorText = [err localizedDescription];
+        else *errorText = [NSString stringWithFormat:@"media HTTP %d%@%@",
+                           (int)status, type ? @" (" : @"",
+                           type ? type : @""];
+        if (type) *errorText = [*errorText stringByAppendingString:@")"];
+    }
+    return NO;
+}
+
+static NSURL *YTUsableItag18(NSString *player, NSString **errorText) {
+    NSString *detail = nil;
+    NSURL *url = YTItag18FromPlayerResponse(player, &detail);
+    if (!url) {
+        if (errorText) *errorText = detail;
+        return nil;
+    }
+
+    NSString *probeError = nil;
+    if (YTProbeVideoURL(url, &probeError))
+        return url;
+
+    if (errorText) {
+        *errorText = [NSString stringWithFormat:@"format 18 URL rejected: %@",
+                      probeError ? probeError : @"unknown media error"];
+    }
+    return nil;
+}
+
 static NSString *YTAndroidPlayerResponse(NSString *videoID, NSString **errorText) {
     NSString *clientVersion = @"21.26.364";
     NSString *userAgent =
@@ -371,56 +501,66 @@ static NSURL *YTItag18FromPlayerResponse(NSString *player, NSString **detail) {
 }
 
 + (NSURL *)directVideoURLForID:(NSString *)videoID error:(NSString **)errorText {
-    NSString *androidError = nil;
-    NSString *detail = nil;
+    NSMutableArray *errors = [NSMutableArray array];
+    NSString *err = nil;
+    NSURL *stream = nil;
 
-    // Primary path: current regular ANDROID client. Unlike WEB/MWEB, this
-    // client has recently continued returning plain CDN URLs and format 18
-    // without requiring JavaScript n/sig deciphering.
-    NSString *android = YTAndroidPlayerResponse(videoID, &androidError);
-    if (android) {
-        NSURL *stream = YTItag18FromPlayerResponse(android, &detail);
+    // First choice: WEB_EMBEDDED_PLAYER. Current yt-dlp policy does not require
+    // a GVS PO token for this client. It only works when the video is embeddable.
+    NSString *embedded = YTEmbeddedPlayerResponse(videoID, &err);
+    if (embedded) {
+        stream = YTUsableItag18(embedded, &err);
         if (stream) return stream;
-
-        NSString *reason = YTJSONStringForKey(android, @"reason", 0);
-        if (reason) androidError = reason;
-        else if (detail) androidError = detail;
-        else androidError = @"Android player response had no usable format 18.";
     }
+    if (err) [errors addObject:[NSString stringWithFormat:@"Embedded: %@", err]];
 
-    // Fallback path: use only the player JSON embedded in YouTube's own HTML.
-    // This does not call the WEB/MWEB player API that returned "The page needs
-    // to be reloaded" on the previous build.
-    NSString *htmlError = nil;
+    // Second no-PO-token family: TVHTML5. It may not expose progressive format
+    // 18 for every video, but when it does we verify the CDN URL before playback.
+    err = nil;
+    NSString *tv = YTTVPlayerResponse(videoID, &err);
+    if (tv) {
+        stream = YTUsableItag18(tv, &err);
+        if (stream) return stream;
+    }
+    if (err) [errors addObject:[NSString stringWithFormat:@"TV: %@", err]];
+
+    // Android can still expose format 18, but GVS enforcement may make the URL
+    // return 403. Keep it only as a verified fallback.
+    err = nil;
+    NSString *android = YTAndroidPlayerResponse(videoID, &err);
+    if (android) {
+        stream = YTUsableItag18(android, &err);
+        if (stream) return stream;
+    }
+    if (err) [errors addObject:[NSString stringWithFormat:@"Android: %@", err]];
+
+    // Last attempt: the player response embedded directly in YouTube's own page.
+    err = nil;
     NSArray *pages = [NSArray arrayWithObjects:
+        [NSString stringWithFormat:
+            @"https://www.youtube.com/embed/%@?hl=en&gl=US", videoID],
         [NSString stringWithFormat:
             @"https://www.youtube.com/watch?v=%@&bpctr=9999999999&has_verified=1&hl=en&gl=US",
             videoID],
-        [NSString stringWithFormat:
-            @"https://www.youtube.com/embed/%@?hl=en&gl=US", videoID],
         nil];
 
     NSUInteger i;
     for (i = 0; i < [pages count]; i++) {
-        NSString *html = YTHTML([pages objectAtIndex:i], &htmlError);
+        NSString *html = YTHTML([pages objectAtIndex:i], &err);
         if (!html) continue;
-
         NSString *player = YTPlayerResponseFromHTML(html);
         if (!player) {
-            htmlError = @"YouTube HTML had no embedded player response.";
+            err = @"page contained no embedded player response";
             continue;
         }
-
-        NSURL *stream = YTItag18FromPlayerResponse(player, &detail);
+        stream = YTUsableItag18(player, &err);
         if (stream) return stream;
-        if (detail) htmlError = detail;
     }
+    if (err) [errors addObject:[NSString stringWithFormat:@"HTML: %@", err]];
 
     if (errorText) {
-        *errorText = [NSString stringWithFormat:
-            @"Direct YouTube playback failed. Android: %@ | HTML: %@",
-            androidError ? androidError : @"no response",
-            htmlError ? htmlError : @"no usable format 18"];
+        *errorText = [NSString stringWithFormat:@"No playable format 18. %@",
+                      [errors componentsJoinedByString:@" | "]];
     }
     return nil;
 }
