@@ -140,7 +140,7 @@ var boardMinute=0;
 var boardWindowHours=24;
 var seenFlights={};
 var visibleLimit=50;
-var proxies=['https://api.allorigins.win/get','https://allorigins.hexlet.app/get'];
+var proxies=['json2jsonp','allorigins','hexlet','whateverorigin'];
 
 function getParam(name){
  var s=window.location.search.substring(1).split('&');
@@ -166,15 +166,36 @@ function esc(s){
 }
 function pad2(n){return n<10?'0'+n:''+n;}
 function proxyURL(proxyIndex,cb,target){
- return proxies[proxyIndex]+'?callback='+cb+'&disableCache=true&wwnocache='+(new Date().getTime())+'&url='+encodeURIComponent(target);
+ var t=(new Date().getTime());
+ if(proxies[proxyIndex]=='json2jsonp'){
+  return 'https://json2jsonp.com/?url='+encodeURIComponent(target)+'&callback='+cb+'&wwnocache='+t;
+ }
+ if(proxies[proxyIndex]=='whateverorigin'){
+  return 'https://www.whateverorigin.org/get?callback='+cb+'&url='+encodeURIComponent(target)+'&wwnocache='+t;
+ }
+ if(proxies[proxyIndex]=='hexlet'){
+  return 'https://allorigins.hexlet.app/get?callback='+cb+'&disableCache=true&url='+encodeURIComponent(target)+'&wwnocache='+t;
+ }
+ return 'https://api.allorigins.win/get?callback='+cb+'&disableCache=true&url='+encodeURIComponent(target)+'&wwnocache='+t;
 }
-function outerOkay(data){
+function outerOkay(data,proxyIndex){
  if(!data){return false;}
+ if(proxies[proxyIndex]=='json2jsonp'){return true;}
  if(data.status && data.status.http_code){
   var c=parseInt(data.status.http_code,10);
   if(c>=400){return false;}
  }
  return true;
+}
+function proxyData(data,proxyIndex){
+ if(!data){return null;}
+ if(proxies[proxyIndex]=='json2jsonp'){return data;}
+ if(typeof data.contents=='string' && data.contents.length){return parseJSONOld(data.contents);}
+ if(typeof data.body!='undefined'){
+  if(typeof data.body=='string'){return parseJSONOld(data.body);}
+  return data.body;
+ }
+ return null;
 }
 function parseAirportDate(s){
  var p=(s||'').split('-');
@@ -243,8 +264,8 @@ function loadAirportDate(id,proxyIndex){
   if(id!=requestNumber || boardStartedFor==id){return;}
   var ok=false;
   try{
-   if(outerOkay(data) && data && typeof data.contents=='string' && data.contents.length){
-    var obj=parseJSONOld(data.contents);
+   if(outerOkay(data,proxyIndex)){
+    var obj=proxyData(data,proxyIndex);
     if(obj && obj.detailsHeader && parseAirportDate(obj.detailsHeader.currentDate)){
      parseAirportTime(obj.detailsHeader.currentTime);
      preferredProxy=proxyIndex;
@@ -254,7 +275,7 @@ function loadAirportDate(id,proxyIndex){
   }catch(e){}
   try{window[cb]=null;}catch(e2){}
   if(ok){startBoardParts(id);}
-  else if(proxyIndex==0){loadAirportDate(id,1);}
+  else if(proxyIndex+1<proxies.length){loadAirportDate(id,proxyIndex+1);}
   else{
    useDeviceDate();
    startBoardParts(id);
@@ -265,7 +286,7 @@ function loadAirportDate(id,proxyIndex){
  s.src=proxyURL(proxyIndex,cb,target);
  s.onerror=function(){
   if(id!=requestNumber || boardStartedFor==id){return;}
-  if(proxyIndex==0){loadAirportDate(id,1);}
+  if(proxyIndex+1<proxies.length){loadAirportDate(id,proxyIndex+1);}
   else{useDeviceDate();startBoardParts(id);}
  };
  document.getElementsByTagName('head')[0].appendChild(s);
@@ -327,8 +348,8 @@ function loadPart(hour,id,proxyIndex,attempt,numHours){
   if(id!=requestNumber){return;}
   var ok=false;
   try{
-   if(outerOkay(data) && data && typeof data.contents=='string' && data.contents.length){
-    var obj=parseJSONOld(data.contents);
+   if(outerOkay(data,proxyIndex)){
+    var obj=proxyData(data,proxyIndex);
     if(obj && !obj.error && obj.data && typeof obj.data.flights!='undefined'){
      var a=obj.data.flights||[];
      var i;
@@ -352,8 +373,10 @@ function loadPart(hour,id,proxyIndex,attempt,numHours){
 }
 function retryPart(hour,id,proxyIndex,attempt,numHours){
  if(id!=requestNumber){return;}
- if(attempt<1){
-  loadPart(hour,id,proxyIndex==0?1:0,attempt+1,numHours);
+ if(attempt+1<proxies.length){
+  var next=proxyIndex+1;
+  if(next>=proxies.length){next=0;}
+  loadPart(hour,id,next,attempt+1,numHours);
  }else{
   failedParts++;
   partFinished();
@@ -439,7 +462,7 @@ function renderBoard(){
  }
  document.getElementById('flightlist').innerHTML=h;
  if(successfulParts==0){
-  document.getElementById('statusline').innerHTML='Live data request failed';
+  document.getElementById('statusline').innerHTML='Live data request failed on all connections';
  }else if(failedParts>0){
   document.getElementById('statusline').innerHTML=renderCount+(list.length>renderCount?' of '+list.length:'')+' flight'+(list.length==1?'':'s')+' shown &middot; '+esc(boardDateLabel)+' &middot; Partial board';
  }else{
