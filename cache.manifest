@@ -1,5 +1,5 @@
 CACHE MANIFEST
-# World Wide Web cache v44
+# World Wide Web cache v45
 
 CACHE:
 index.html
@@ -14,6 +14,8 @@ news.html
 old-museum.html
 flight-track.html
 flight-airport.html
+flight-track-v2.html
+flight-airport-v2.html
 old-search.html
 smith.html
 canterbury-logo.png
