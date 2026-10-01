@@ -583,6 +583,7 @@ static NSURL *YTDownloadVideoLocally(NSURL *remoteURL, NSString *videoID, NSStri
 
 static NSString *YTFFmpegPath(void) {
     NSArray *paths = [NSArray arrayWithObjects:
+        @"/usr/libexec/ytdirect-ffmpeg",
         @"/usr/bin/ffmpeg",
         @"/usr/local/bin/ffmpeg",
         @"/bin/ffmpeg",
@@ -602,7 +603,7 @@ static NSURL *YTConvertForOriginalIPhone(NSURL *downloadedURL,
     NSString *ffmpeg = YTFFmpegPath();
     if (!ffmpeg) {
         if (errorText) {
-            *errorText = @"FFmpeg is not installed on the iPhone. Install the old ARM ffmpeg package from Saurik/Cydia, then reopen YT Direct.";
+            *errorText = @"The bundled YT Direct converter is missing. Reinstall YT Direct 0.4.1 or newer.";
         }
         return nil;
     }
@@ -621,7 +622,7 @@ static NSURL *YTConvertForOriginalIPhone(NSURL *downloadedURL,
     // MPEG-4 Part 2 Simple Profile video, no B-frames, 320x180, 24 fps,
     // ~500 kbps. Keep YouTube's AAC-LC audio without re-encoding.
     NSString *command = [NSString stringWithFormat:
-        @"'%@' -y -i '%@' -vcodec mpeg4 -b 500k -r 24 -s 320x180 -bf 0 -acodec copy '%@' >'%@' 2>&1",
+        @"'%@' -y -i '%@' -vcodec mpeg4 -profile:v 0 -b:v 500k -r 24 -s 320x180 -pix_fmt yuv420p -bf 0 -acodec copy -movflags +faststart '%@' >'%@' 2>&1",
         ffmpeg, inputPath, outputPath, logPath];
 
     int status = system([command UTF8String]);
