@@ -1,9 +1,14 @@
 #!/bin/sh
 set -e
 
+if [ -z "$THEOS" ] && [ -d "$HOME/theos" ]; then
+  THEOS="$HOME/theos"
+  export THEOS
+fi
+
 if [ -z "$THEOS" ]; then
-  echo "THEOS is not set."
-  echo "Example: export THEOS=~/theos"
+  echo "Theos is not installed/configured."
+  echo "Install it to ~/theos, then run this script again."
   exit 1
 fi
 
