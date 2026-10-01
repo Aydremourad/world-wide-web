@@ -267,6 +267,8 @@ static NSString *YTTVPlayerResponse(NSString *videoID, NSString **errorText) {
         NO, errorText);
 }
 
+static NSURL *YTItag18FromPlayerResponse(NSString *player, NSString **detail);
+
 static BOOL YTProbeVideoURL(NSURL *url, NSString **errorText) {
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url
                                                        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
@@ -325,7 +327,6 @@ static NSURL *YTUsableItag18(NSString *player, NSString **errorText) {
     return nil;
 }
 
-static NSURL *YTItag18FromPlayerResponse(NSString *player, NSString **detail);
 
 static NSString *YTAndroidPlayerResponse(NSString *videoID, NSString **errorText) {
     NSString *clientVersion = @"21.26.364";
