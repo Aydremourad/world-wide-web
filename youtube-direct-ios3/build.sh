@@ -43,9 +43,11 @@ if [ ! -x "$LEGACY_LD" ]; then
   exit 2
 fi
 
-chmod +x ./legacy-link.sh
+LINK_WRAPPER="${TMPDIR:-/tmp}/youtube-direct-ios3-legacy-link.sh"
+cp ./legacy-link.sh "$LINK_WRAPPER"
+chmod +x "$LINK_WRAPPER"
 export LEGACY_LD
-export TARGET_LD="$PWD/legacy-link.sh"
+export TARGET_LD="$LINK_WRAPPER"
 echo "Using armv6 linker: $LEGACY_LD"
 make clean SDKVERSION="$SDKVER"
 make package SDKVERSION="$SDKVER"
