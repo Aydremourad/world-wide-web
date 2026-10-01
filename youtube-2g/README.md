@@ -4,12 +4,12 @@ Backend for the original stock YouTube app on a jailbroken iPhone 2G running
 iPhone OS 3.1.3. Uses TubeRepair for legacy GData feeds and ordinary MP4 playback.
 The server runs on free Render; no home computer needs to remain running.
 
-## Deploy version 1.3
+## Deploy version 1.4
 
 1. Open Render, select `youtube-2g`, then **Manual Deploy → Deploy latest commit**.
 2. Wait for **Live**. The deployed commit starts with the version 1.3 recovery change.
 3. Open https://aydreyoutube2g.duckdns.org/diagnostics and check
-   `version: 2g-1.3` and `playback_mode: mp4`.
+   `version: 2g-1.4` and `playback_mode: mp4`.
 4. Reopen the original YouTube app, search **playback test**, and play **Playback test**.
    This uses the same locally generated MP4 as the working Safari compatibility test.
 
@@ -51,25 +51,33 @@ Neither setting bypasses YouTube access restrictions.
 
 ## YouTube download status
 
-Actual YouTube playback is not yet verified. The most recent live diagnostics
-reported the token provider ready and no private cookies loaded; the tested
-Me at the zoo download returned `youtube-bot-check`. MP4 recovery fixes the
-rejected local sample path, not this separate upstream access failure.
+Version 1.4 addresses the current September 2026 YouTube client rollout that can
+make logged-in `mweb` / `web_embedded` extraction return no video formats.
+The server now asks yt-dlp for `default,mweb,web_embedded` clients instead of
+forcing only the two affected clients. When a Render secret cookie file exists,
+each extraction first tries that private cookie session and automatically retries
+without cookies if the logged-in session fails. This lets cookies still work
+around hosting-provider bot checks while avoiding a broken account/session
+experiment as a single point of failure.
+
+Diagnostics now reports `youtube_clients: default,mweb,web_embedded` and
+`cookie_fallback: anonymous` when the 1.4 code is live. The existing PO-token
+provider, Deno runtime, EJS package, MP4 conversion path, byte-range support, and
+320x240 H.264 Baseline/AAC-LC output are unchanged.
 
 The image pins yt-dlp nightly 2026.09.27.232945 and BgUtils PO-token provider
-2.0.0, with checksum-verified source downloads. The provider runs on loopback
-only at `127.0.0.1:4416`. The supervisor starts and monitors both processes.
-Downloader requests are serialized to limit memory. A token does not guarantee
-access from a blocked hosting-provider IP.
+2.0.0. The provider runs on loopback only at `127.0.0.1:4416`. Downloader
+requests are serialized to limit memory. YouTube can still change access rules,
+but one client/session failure no longer immediately aborts playback.
 
 Optional recovery: export youtube.com cookies in Netscape format according to
-the official yt-dlp wiki. Store them only in Render → Environment → Secret Files
+the official yt-dlp wiki. Store them only in Render -> Environment -> Secret Files
 as `youtube-cookies.txt`; Render mounts `/etc/secrets/youtube-cookies.txt`.
-The server makes a private writable copy for each downloader and deletes it on
-completion or failure. Never commit cookies to GitHub or paste them in chat.
-Use an account without private or sensitive content; authenticated public-server
-extraction can access content available to that account, and yt-dlp account use
-can risk suspension. Cookies may expire and may not overcome the IP block.
+The server makes a private writable copy for each cookie-backed attempt and
+deletes it on completion or failure. Never commit cookies to GitHub or paste
+them in chat. Use an account without private or sensitive content; authenticated
+public-server extraction can access content available to that account, and
+yt-dlp account use can risk suspension. Cookies may expire.
 
 ## Export cookies without an extension
 
