@@ -49,8 +49,8 @@ chmod +x "$LINK_WRAPPER"
 export LEGACY_LD
 export TARGET_LD="$LINK_WRAPPER"
 echo "Using armv6 linker: $LEGACY_LD"
-make clean SDKVERSION="$SDKVER"
-make package SDKVERSION="$SDKVER"
+make clean SDKVERSION="$SDKVER" FINALPACKAGE=1
+make package SDKVERSION="$SDKVER" FINALPACKAGE=1
 echo
 echo "Built packages:"
 find packages -type f -name '*.deb' -maxdepth 2 -print
