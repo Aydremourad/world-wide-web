@@ -33,6 +33,20 @@ if [ -z "$SDK" ]; then
 fi
 
 echo "Using $SDK"
+
+LEGACY_LD="${LEGACY_LD:-$HOME/cctools-armv6/bin/ld}"
+if [ ! -x "$LEGACY_LD" ]; then
+  echo
+  echo "Modern Xcode cannot link armv6."
+  echo "Install cctools-port to $HOME/cctools-armv6 first."
+  echo "Expected linker: $LEGACY_LD"
+  exit 2
+fi
+
+chmod +x ./legacy-link.sh
+export LEGACY_LD
+export TARGET_LD="$PWD/legacy-link.sh"
+echo "Using armv6 linker: $LEGACY_LD"
 make clean SDKVERSION="$SDKVER"
 make package SDKVERSION="$SDKVER"
 echo
