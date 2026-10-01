@@ -133,9 +133,10 @@ var boardMonth=0;
 var boardDay=0;
 var boardDateLabel='';
 var boardHour=12;
+var boardMinute=0;
 var boardWindowHours=24;
 var seenFlights={};
-var visibleLimit=100;
+var visibleLimit=50;
 var proxies=['https://api.allorigins.win/get','https://allorigins.hexlet.app/get'];
 
 function getParam(name){
@@ -184,9 +185,12 @@ function parseAirportDate(s){
 }
 function parseAirportTime(s){
  var p=(s||'').split(':');
- var n=parseInt(p[0],10);
- if(isNaN(n) || n<0 || n>23){return false;}
- boardHour=n;
+ var h=parseInt(p[0],10);
+ var m=parseInt(p[1],10);
+ if(isNaN(h) || h<0 || h>23){return false;}
+ if(isNaN(m) || m<0 || m>59){m=0;}
+ boardHour=h;
+ boardMinute=m;
  return true;
 }
 function useDeviceDate(){
@@ -195,6 +199,7 @@ function useDeviceDate(){
  boardMonth=d.getMonth()+1;
  boardDay=d.getDate();
  boardHour=d.getHours();
+ boardMinute=d.getMinutes();
  boardDateLabel=pad2(boardDay)+'/'+pad2(boardMonth)+'/'+boardYear;
 }
 function showBoard(type){
@@ -211,7 +216,7 @@ function loadBoard(){
  boardStartedFor=0;
  flights=[];
  seenFlights={};
- visibleLimit=100;
+ visibleLimit=50;
  pending=0;
  successfulParts=0;
  failedParts=0;
@@ -267,23 +272,26 @@ function startBoardParts(id){
  boardStartedFor=id;
  flights=[];
  seenFlights={};
- visibleLimit=100;
+ visibleLimit=50;
  successfulParts=0;
  failedParts=0;
  parseErrorCount=0;
  document.getElementById('statusline').innerHTML='Loading '+esc(boardDateLabel)+' flight board...';
  if(destination){
-  boardWindowHours=24;
-  pending=2;
-  loadPart(0,id,preferredProxy,0,12);
-  loadPart(12,id,preferredProxy,0,12);
+  var remain=24-boardHour;
+  var first=remain>12?12:remain;
+  var second=remain-first;
+  boardWindowHours=remain;
+  pending=second>0?2:1;
+  loadPart(boardHour,id,preferredProxy,0,first);
+  if(second>0){loadPart(boardHour+first,id,preferredProxy,0,second);}
  }else{
-  var startHour=boardHour-2;
-  if(startHour<0){startHour=0;}
-  if(startHour>18){startHour=18;}
-  boardWindowHours=6;
+  var hours=24-boardHour;
+  if(hours>6){hours=6;}
+  if(hours<1){hours=1;}
+  boardWindowHours=hours;
   pending=1;
-  loadPart(startHour,id,preferredProxy,0,6);
+  loadPart(boardHour,id,preferredProxy,0,hours);
  }
  window.setTimeout(function(){
   if(id==requestNumber && pending>0){
@@ -294,10 +302,11 @@ function startBoardParts(id){
  },25000);
 }
 function flightKey(f){
- if(f && f.url){return 'u:'+f.url;}
  var c=(f&&f.carrier)?f.carrier:{};
  var a=(f&&f.airport)?f.airport:{};
- return 'k:'+(f.sortTime||'')+'|'+(c.fs||'')+'|'+(c.flightNumber||'')+'|'+(a.fs||'');
+ var d=(f&&f.departureTime)?f.departureTime:{};
+ var r=(f&&f.arrivalTime)?f.arrivalTime:{};
+ return 'k:'+(c.fs||'')+'|'+(c.flightNumber||'')+'|'+(a.fs||'')+'|'+(d.time24||d.timeAMPM||'')+'|'+(r.time24||r.timeAMPM||'');
 }
 function addFlight(f){
  var k=flightKey(f);
@@ -356,9 +365,23 @@ function sortFlights(){
  });
 }
 function showMoreFlights(){
- visibleLimit+=100;
+ visibleLimit+=50;
  renderBoard();
  return false;
+}
+function timeMinutes(v){
+ var p=(v||'').split(':');
+ if(p.length<2){return -1;}
+ var h=parseInt(p[0],10);
+ var m=parseInt(p[1],10);
+ if(isNaN(h)||isNaN(m)){return -1;}
+ return h*60+m;
+}
+function isPastFlight(f){
+ var t=(boardType=='departures')?(f.departureTime||{}):(f.arrivalTime||{});
+ var mins=timeMinutes(t.time24||'');
+ if(mins<0){return false;}
+ return mins<(boardHour*60+boardMinute);
 }
 function renderBoard(){
  var list=[];
@@ -366,6 +389,7 @@ function renderBoard(){
  sortFlights();
  for(i=0;i<flights.length;i++){
   f=flights[i];
+  if(isPastFlight(f)){continue;}
   other=(f.airport&&f.airport.fs)?cleanAirport(f.airport.fs):'';
   if(destination && other!=destination){continue;}
   list[list.length]=f;
@@ -397,7 +421,7 @@ function renderBoard(){
   h+='</div>';
  }
  if(list.length>renderCount){
-  h+='<div class="loadingrow"><a href="#" onclick="return showMoreFlights()">Show 100 More Flights</a></div>';
+  h+='<div class="loadingrow"><a href="#" onclick="return showMoreFlights()">Show 50 More Flights</a></div>';
  }
  if(!h){
   if(successfulParts==0){
