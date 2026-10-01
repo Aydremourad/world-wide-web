@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: youtube-2g
+    runtime: docker
+    plan: free
+    branch: youtube-2g-server
+    dockerfilePath: ./youtube-2g/Dockerfile
+    dockerContext: ./youtube-2g
+    healthCheckPath: /healthz
+    autoDeployTrigger: "off"

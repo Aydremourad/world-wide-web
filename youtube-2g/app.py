@@ -24,7 +24,7 @@ MEDIA = STATE / 'media'
 MEDIA.mkdir(exist_ok=True)
 VIDEO_ID = re.compile(r'^[A-Za-z0-9_-]{11}$')
 MAX_SECONDS = int(os.environ.get('MAX_VIDEO_SECONDS', '1200'))
-MAX_CACHE_BYTES = 1024 * 1024 * 1024
+MAX_CACHE_BYTES = int(os.environ.get('MAX_CACHE_BYTES', str(1024 * 1024 * 1024)))
 app = Flask(__name__, static_folder=str(ROOT / 'static'))
 app.config['MAX_CONTENT_LENGTH'] = 128 * 1024
 env = Environment(loader=FileSystemLoader(ROOT / 'templates'), autoescape=select_autoescape(default=True))
@@ -44,7 +44,9 @@ def validate(video_id):
 
 
 def base_url():
-    return os.environ.get('PUBLIC_BASE_URL', request.url_root).rstrip('/')
+    # Render terminates HTTPS before forwarding HTTP to the container.
+    return (os.environ.get('PUBLIC_BASE_URL') or
+            os.environ.get('RENDER_EXTERNAL_URL') or request.url_root).rstrip('/')
 
 
 def run_ytdlp(args, timeout=90):
@@ -354,4 +356,5 @@ def error500(exc):
 
 if __name__ == '__main__':
     from waitress import serve
-    serve(app, host='0.0.0.0', port=int(os.environ.get('PORT', '2000')), threads=8)
+    serve(app, host='0.0.0.0', port=int(os.environ.get('PORT', '2000')),
+          threads=int(os.environ.get('SERVER_THREADS', '8')))

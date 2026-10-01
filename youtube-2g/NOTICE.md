@@ -12,9 +12,12 @@ with direct yt-dlp metadata, background jobs, validated video IDs, bounded cache
 byte ranges, XML escaping, and automatically installed cloud dependencies.
 All project source and adapted templates are provided under GPL-3.0, see LICENSE.
 Generated test/preparing/error clips contain only original text and silent audio.
-TubeRepair client is a separate project and is installed from Skyglow in Cydia.
+TubeRepair client is a separate project. A compatible installed client is preferred;
+the currently checked Skyglow package index does not list TubeRepair. The supplied
+ConfiguredServiceHost preference is an experimental fallback, not a proven substitute
+for all TubeRepair client hooks. TLSFix 1.1 is currently available from Skyglow.
 
-Not yet tested on a physical iPhone 2G or an Oracle VM. Cloud YouTube access may
+Not yet tested on a physical iPhone 2G or a cloud host. Cloud YouTube access may
 be blocked or change. Compatibility tests and mocked route tests do not establish
 live YouTube playback. Google sign-in and live streaming are not implemented.
 Browse tabs use search-backed suggestions, not official YouTube rankings.

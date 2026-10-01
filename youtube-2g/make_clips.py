@@ -1,4 +1,5 @@
 from pathlib import Path
+import os
 import subprocess
 import textwrap
 from PIL import Image, ImageDraw, ImageFont
@@ -7,9 +8,9 @@ font_path = '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'
 font = ImageFont.truetype(font_path, 18)
 messages = {
  'test': 'YouTube 2G\nPlayback test\n\nIf you can see this,\nMP4 playback works.',
- 'preparing': 'Preparing video\n\nClose this clip.\nWait 30-90 seconds.\nTap the video again.',
+ 'preparing': 'Preparing video\n\nClose this clip.\nWait a few minutes.\nTap the video again.',
  'failed': 'Video unavailable\n\nTry another video.\nYouTube may be blocking\nthe server request.',
- 'too-long': 'Video is too long\n\nTry a video under\n20 minutes.',
+ 'too-long': 'Video is too long\n\nTry a video under\n' + str(int(os.environ.get('MAX_VIDEO_SECONDS', '1200')) // 60) + ' minutes.',
  'busy': 'Server is busy\n\nWait a minute, then\ntap the video again.'}
 for name, text in messages.items():
     im = Image.new('RGB', (320, 240), '#122637')

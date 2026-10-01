@@ -1,0 +1,8 @@
+state
+__pycache__
+**/__pycache__
+tests
+.pytest_cache
+static/*.mp4
+static/*.png
+install.sh

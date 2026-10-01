@@ -16,6 +16,8 @@ ITEM=dict(videoId=VID,title='A & B <test> "quotes"',author='Name & Name',authorI
 
 @pytest.fixture
 def client(monkeypatch, tmp_path):
+    monkeypatch.delenv('PUBLIC_BASE_URL', raising=False)
+    monkeypatch.delenv('RENDER_EXTERNAL_URL', raising=False)
     monkeypatch.setattr(s, 'MEDIA', tmp_path)
     monkeypatch.setattr(s, 'STATE', tmp_path)
     s.jobs.clear()
@@ -104,3 +106,15 @@ def test_phone_plist_has_host_without_protocol(client):
     r=client.get('/setup/com.apple.youtubeframework.plist',base_url='http://198.51.100.5')
     assert plistlib.loads(r.data)=={'ConfiguredServiceHost':'198.51.100.5'}
     assert r.headers['Content-Disposition'].endswith('com.apple.youtubeframework.plist')
+
+def test_render_https_urls_behind_http_proxy(client, monkeypatch):
+    import plistlib
+    monkeypatch.setenv('RENDER_EXTERNAL_URL', 'https://youtube-2g-example.onrender.com')
+    monkeypatch.setattr(s, 'search', lambda *a, **k: [ITEM])
+    r=client.get('/feeds/api/videos?q=test', base_url='http://internal:10000')
+    assert b'https://youtube-2g-example.onrender.com/getvideo/abcdefghijk' in r.data
+    assert b'http://internal' not in r.data
+    r=client.get('/setup/com.apple.youtubeframework.plist', base_url='http://internal:10000')
+    assert plistlib.loads(r.data)=={'ConfiguredServiceHost':'youtube-2g-example.onrender.com'}
+    monkeypatch.setenv('PUBLIC_BASE_URL', 'https://custom.example/')
+    assert b'https://custom.example' in client.get('/feeds/api/videos?q=test').data
