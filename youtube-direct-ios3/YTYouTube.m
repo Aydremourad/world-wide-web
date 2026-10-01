@@ -202,10 +202,10 @@ static NSString *YTAndroidPlayerResponse(NSString *videoID, NSString **errorText
 
     NSString *body = [NSString stringWithFormat:
         @"{\"context\":{\"client\":{\"clientName\":\"ANDROID\","
-         "\"clientVersion\":\"%@\",\"androidSdkVersion\":30,"
-         "\"userAgent\":\"%@\",\"osName\":\"Android\",\"osVersion\":\"11\","
-         "\"hl\":\"en\",\"gl\":\"US\"}},"
-         "\"videoId\":\"%@\",\"contentCheckOk\":true,\"racyCheckOk\":true}",
+        @"\"clientVersion\":\"%@\",\"androidSdkVersion\":30,"
+        @"\"userAgent\":\"%@\",\"osName\":\"Android\",\"osVersion\":\"11\","
+        @"\"hl\":\"en\",\"gl\":\"US\"}},"
+        @"\"videoId\":\"%@\",\"contentCheckOk\":true,\"racyCheckOk\":true}",
         clientVersion, userAgent, videoID];
 
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:
