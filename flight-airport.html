@@ -132,6 +132,10 @@ var boardYear=0;
 var boardMonth=0;
 var boardDay=0;
 var boardDateLabel='';
+var boardHour=12;
+var boardWindowHours=24;
+var seenFlights={};
+var visibleLimit=100;
 var proxies=['https://api.allorigins.win/get','https://allorigins.hexlet.app/get'];
 
 function getParam(name){
@@ -178,11 +182,19 @@ function parseAirportDate(s){
  boardDateLabel=s;
  return boardYear>2000 && boardMonth>0 && boardDay>0;
 }
+function parseAirportTime(s){
+ var p=(s||'').split(':');
+ var n=parseInt(p[0],10);
+ if(isNaN(n) || n<0 || n>23){return false;}
+ boardHour=n;
+ return true;
+}
 function useDeviceDate(){
  var d=new Date();
  boardYear=d.getFullYear();
  boardMonth=d.getMonth()+1;
  boardDay=d.getDate();
+ boardHour=d.getHours();
  boardDateLabel=pad2(boardDay)+'/'+pad2(boardMonth)+'/'+boardYear;
 }
 function showBoard(type){
@@ -198,6 +210,8 @@ function loadBoard(){
  var id=requestNumber;
  boardStartedFor=0;
  flights=[];
+ seenFlights={};
+ visibleLimit=100;
  pending=0;
  successfulParts=0;
  failedParts=0;
@@ -224,6 +238,7 @@ function loadAirportDate(id,proxyIndex){
    if(outerOkay(data) && data && typeof data.contents=='string' && data.contents.length){
     var obj=parseJSONOld(data.contents);
     if(obj && obj.detailsHeader && parseAirportDate(obj.detailsHeader.currentDate)){
+     parseAirportTime(obj.detailsHeader.currentTime);
      preferredProxy=proxyIndex;
      ok=true;
     }
@@ -251,13 +266,25 @@ function startBoardParts(id){
  if(id!=requestNumber || boardStartedFor==id){return;}
  boardStartedFor=id;
  flights=[];
- pending=2;
+ seenFlights={};
+ visibleLimit=100;
  successfulParts=0;
  failedParts=0;
  parseErrorCount=0;
  document.getElementById('statusline').innerHTML='Loading '+esc(boardDateLabel)+' flight board...';
- loadPart(0,id,preferredProxy,0);
- loadPart(12,id,preferredProxy,0);
+ if(destination){
+  boardWindowHours=24;
+  pending=2;
+  loadPart(0,id,preferredProxy,0,12);
+  loadPart(12,id,preferredProxy,0,12);
+ }else{
+  var startHour=boardHour-2;
+  if(startHour<0){startHour=0;}
+  if(startHour>18){startHour=18;}
+  boardWindowHours=6;
+  pending=1;
+  loadPart(startHour,id,preferredProxy,0,6);
+ }
  window.setTimeout(function(){
   if(id==requestNumber && pending>0){
    failedParts+=pending;
@@ -266,10 +293,22 @@ function startBoardParts(id){
   }
  },25000);
 }
-function loadPart(hour,id,proxyIndex,attempt){
+function flightKey(f){
+ if(f && f.url){return 'u:'+f.url;}
+ var c=(f&&f.carrier)?f.carrier:{};
+ var a=(f&&f.airport)?f.airport:{};
+ return 'k:'+(f.sortTime||'')+'|'+(c.fs||'')+'|'+(c.flightNumber||'')+'|'+(a.fs||'');
+}
+function addFlight(f){
+ var k=flightKey(f);
+ if(seenFlights[k]){return;}
+ seenFlights[k]=1;
+ flights[flights.length]=f;
+}
+function loadPart(hour,id,proxyIndex,attempt,numHours){
  var kind=(boardType=='departures')?'dep':'arr';
- var target='https://www.flightstats.com/v2/api-next/flight-tracker/'+kind+'/'+airport+'/'+boardYear+'/'+boardMonth+'/'+boardDay+'/'+hour+'?numHours=12';
- var cb='wwFlightCb'+id+'_'+hour+'_'+proxyIndex+'_'+attempt;
+ var target='https://www.flightstats.com/v2/api-next/flight-tracker/'+kind+'/'+airport+'/'+boardYear+'/'+boardMonth+'/'+boardDay+'/'+hour+'?numHours='+numHours;
+ var cb='wwFlightCb'+id+'_'+hour+'_'+proxyIndex+'_'+attempt+'_'+numHours;
  window[cb]=function(data){
   if(id!=requestNumber){return;}
   var ok=false;
@@ -279,7 +318,7 @@ function loadPart(hour,id,proxyIndex,attempt){
     if(obj && !obj.error && obj.data && typeof obj.data.flights!='undefined'){
      var a=obj.data.flights||[];
      var i;
-     for(i=0;i<a.length;i++){flights[flights.length]=a[i];}
+     for(i=0;i<a.length;i++){addFlight(a[i]);}
      successfulParts++;
      ok=true;
     }
@@ -287,20 +326,20 @@ function loadPart(hour,id,proxyIndex,attempt){
   }catch(e){parseErrorCount++;}
   try{window[cb]=null;}catch(e2){}
   if(ok){partFinished();}
-  else{retryPart(hour,id,proxyIndex,attempt);}
+  else{retryPart(hour,id,proxyIndex,attempt,numHours);}
  };
  var s=document.createElement('script');
  s.type='text/javascript';
  s.src=proxyURL(proxyIndex,cb,target);
  s.onerror=function(){
-  if(id==requestNumber){retryPart(hour,id,proxyIndex,attempt);}
+  if(id==requestNumber){retryPart(hour,id,proxyIndex,attempt,numHours);}
  };
  document.getElementsByTagName('head')[0].appendChild(s);
 }
-function retryPart(hour,id,proxyIndex,attempt){
+function retryPart(hour,id,proxyIndex,attempt,numHours){
  if(id!=requestNumber){return;}
  if(attempt<1){
-  loadPart(hour,id,proxyIndex==0?1:0,attempt+1);
+  loadPart(hour,id,proxyIndex==0?1:0,attempt+1,numHours);
  }else{
   failedParts++;
   partFinished();
@@ -316,6 +355,11 @@ function sortFlights(){
   if(x<y){return -1;} if(x>y){return 1;} return 0;
  });
 }
+function showMoreFlights(){
+ visibleLimit+=100;
+ renderBoard();
+ return false;
+}
 function renderBoard(){
  var list=[];
  var i,f,other;
@@ -330,7 +374,9 @@ function renderBoard(){
  if(destination){title=airport+' to '+destination;}
  document.getElementById('airportname').innerHTML=esc(title);
  var h='';
- for(i=0;i<list.length;i++){
+ var renderCount=list.length;
+ if(renderCount>visibleLimit){renderCount=visibleLimit;}
+ for(i=0;i<renderCount;i++){
   f=list[i];
   var c=f.carrier||{};
   var ap=f.airport||{};
@@ -350,6 +396,9 @@ function renderBoard(){
   if(f.operatedBy){h+='<div class="fop">'+esc(f.operatedBy)+'</div>';}
   h+='</div>';
  }
+ if(list.length>renderCount){
+  h+='<div class="loadingrow"><a href="#" onclick="return showMoreFlights()">Show 100 More Flights</a></div>';
+ }
  if(!h){
   if(successfulParts==0){
    h='<div class="emptyrow"><b>Flight data could not be reached.</b><br>Both live data connections failed. Please try again.</div>';
@@ -363,9 +412,9 @@ function renderBoard(){
  if(successfulParts==0){
   document.getElementById('statusline').innerHTML='Live data request failed';
  }else if(failedParts>0){
-  document.getElementById('statusline').innerHTML=list.length+' flight'+(list.length==1?'':'s')+' shown &middot; '+esc(boardDateLabel)+' &middot; Partial board';
+  document.getElementById('statusline').innerHTML=renderCount+(list.length>renderCount?' of '+list.length:'')+' flight'+(list.length==1?'':'s')+' shown &middot; '+esc(boardDateLabel)+' &middot; Partial board';
  }else{
-  document.getElementById('statusline').innerHTML=list.length+' flight'+(list.length==1?'':'s')+' shown &middot; '+esc(boardDateLabel);
+  document.getElementById('statusline').innerHTML=renderCount+(list.length>renderCount?' of '+list.length:'')+' flight'+(list.length==1?'':'s')+' shown &middot; '+esc(boardDateLabel)+(destination?'':' &middot; Current '+boardWindowHours+'-hour window');
  }
 }
 function init(){
