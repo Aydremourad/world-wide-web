@@ -98,7 +98,8 @@ static NSData *YTGET(NSString *urlString, NSString **errorText) {
                                                        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
                                                    timeoutInterval:18.0];
     [req setHTTPMethod:@"GET"];
-    [req setValue:@"Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_3 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7E18 Safari/528.16" forHTTPHeaderField:@"User-Agent"];\n    [req setValue:@"application/json,text/plain,*/*" forHTTPHeaderField:@"Accept"];
+    [req setValue:@"Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_3 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7E18 Safari/528.16" forHTTPHeaderField:@"User-Agent"];
+    [req setValue:@"application/json,text/plain,*/*" forHTTPHeaderField:@"Accept"];
     NSURLResponse *response = nil;
     NSError *err = nil;
     NSData *data = [NSURLConnection sendSynchronousRequest:req returningResponse:&response error:&err];
