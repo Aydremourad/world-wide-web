@@ -23,7 +23,7 @@ method. Live playback of an actual YouTube video is not yet verified.
 1. Open Render, select `youtube-2g`, and select **Manual Deploy → Deploy latest commit**.
 2. Wait for **Live**.
 3. Open https://aydreyoutube2g.duckdns.org/diagnostics. Confirm `version` is
-   `2g-1.2-rc1` and `token_provider_ready` is `true`.
+   `2g-1.2.1` and `token_provider_ready` is `true`.
 4. Keep the working phone Custom URL above. Search for **stream test** in the
    original YouTube app and play **Streaming test**.
 5. If the sample plays, set `PLAYBACK_MODE=hls` in Render → Environment, then
@@ -83,7 +83,7 @@ search-backed suggestions rather than official YouTube rankings.
 
 ## Verification
 
-- Twenty-one local tests cover feeds, XML escaping, ranges, queue limits, credential
+- Twenty-two local tests cover feeds, XML escaping, ranges, queue limits, credential
   copy cleanup, safe status reporting, and a real FFmpeg compatibility conversion.
 - The token provider installs and compiles under Node 24; its local `/ping` responds.
 - Both processes start through the supervisor; diagnostics report provider ready
@@ -105,7 +105,7 @@ search-backed suggestions rather than official YouTube rankings.
 See NOTICE.md and LICENSE for attribution and licensing.
 
 
-## Faster playback update (2g-1.2-rc1)
+## Faster playback update (2g-1.2.1)
 
 Short top search results (up to sixty seconds) begin preparing automatically
 when their feeds are served. Prefetching uses only an idle queue; the server
@@ -150,3 +150,14 @@ Sources for legacy streaming:
 https://developer.apple.com/library/archive/documentation/NetworkingInternet/Conceptual/StreamingMediaGuide/UsingHTTPLiveStreaming/UsingHTTPLiveStreaming.html
 https://developer.apple.com/library/archive/referencelibrary/GettingStarted/AboutHTTPLiveStreaming/about/about.html
 https://ffmpeg.org/ffmpeg-formats.html
+
+### Streaming sample server-error fix
+
+The version 1.2 sample returned HTTP 502 on Render because the serving route
+tried to change the modification time of its root-owned, build-generated folder.
+This caused the phone's "This movie could not be played" message before it
+received the playlist or video segments. Version 1.2.1 reads sample files without
+modifying them; only writable runtime cache folders have access times updated.
+The regression test reproduces the forbidden modification and verifies playlist
+GET/HEAD, the stock playback redirect, and segment byte ranges after the fix.
+Actual stock-app HLS compatibility still requires the corrected phone test.

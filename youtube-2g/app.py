@@ -46,6 +46,7 @@ STREAM_TEST_ID = 'STREAMTEST1'
 STREAM_TEST_ITEM = dict(videoId=STREAM_TEST_ID, title='Streaming test',
     author='YouTube 2G', authorId='unknown', description='A local playback test.',
     published=0, lengthSeconds=8, viewCount=0)
+VERSION = '2g-1.2.1'
 
 
 def streaming_enabled():
@@ -220,7 +221,7 @@ def phone_preferences():
 
 @app.get('/healthz')
 def health():
-    return jsonify(status='ok', version='2g-1.2-rc1')
+    return jsonify(status='ok', version=VERSION)
 
 
 @app.get('/diagnostics')
@@ -235,7 +236,7 @@ def diagnostics():
             pass
     secret = Path(os.environ.get('YOUTUBE_COOKIES_FILE') or '/etc/secrets/youtube-cookies.txt')
     # Only readiness flags and versions; no tokens, file contents, or account data.
-    return jsonify(version='2g-1.2-rc1', downloader=version('yt-dlp'),
+    return jsonify(version=VERSION, downloader=version('yt-dlp'),
                    token_provider_ready=provider, cookies_loaded=secret.is_file(),
                    playback_mode='hls' if streaming_enabled() else 'mp4')
 
@@ -490,13 +491,15 @@ def playback(vid):
     return send_file(ROOT / 'static' / (clip + '.mp4'), mimetype='video/mp4', conditional=True)
 
 
-def stream_file(directory, filename):
+def stream_file(directory, filename, touch_cache=False):
     if filename != 'index.m3u8' and not re.fullmatch(r'part-[0-9]{5}\.ts', filename):
         abort(404)
     path = directory / filename
     if not path.is_file():
         abort(404)
-    if directory.exists():
+    # Only the writable runtime cache needs an access timestamp. Sample files
+    # are built as root and served by youtube2g, which cannot touch their folder.
+    if touch_cache:
         os.utime(directory, None)
     return send_file(path, mimetype='application/vnd.apple.mpegurl' if filename.endswith('.m3u8')
                      else 'video/mp2t', conditional=True)
@@ -512,7 +515,7 @@ def stream(vid, filename):
     validate(vid)
     if not hls_ready(vid):
         abort(404)
-    return stream_file(HLS / vid, filename)
+    return stream_file(HLS / vid, filename, touch_cache=True)
 
 
 @app.get('/status/<vid>')

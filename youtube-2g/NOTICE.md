@@ -1,4 +1,4 @@
-YouTube 2G, version 1.2 release candidate, prepared 2026-10-01.
+YouTube 2G, version 1.2.1, prepared 2026-10-01.
 
 The GData XML templates and categories.cat are adapted from:
 https://github.com/ShahAndI123/Modified-Tuberepair-for-ios-2-6-built-in-YT-best-for-pre-iphone-4
@@ -39,3 +39,8 @@ for "stream test" in the original YouTube app. It must pass on the physical
 phone before HLS is enabled. Real-time local FFmpeg verification does not prove
 that the stock iPhone OS 3 YouTube player accepts HLS. Live version 1.1 still
 returned youtube-bot-check for Me at the zoo; speed changes do not resolve it.
+
+Version 1.2.1 fixes the streaming sample's HTTP 502: serving immutable sample
+files no longer attempts to update a root-owned directory's timestamps. Runtime
+cache access timestamps remain in use. The corrected sample still needs testing
+in the stock app on the physical phone.

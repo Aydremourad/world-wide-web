@@ -139,6 +139,25 @@ def test_stream_test_is_local_and_uses_hls(client, monkeypatch):
     chunk = client.get('/stream-test/' + names[0])
     assert chunk.mimetype == 'video/mp2t' and chunk.data[0] == 0x47
 
+def test_stream_test_works_with_read_only_build_files(client, monkeypatch):
+    # Render runs as youtube2g; image-built sample files belong to root. Reads
+    # succeed, but changing the sample directory's timestamps is forbidden.
+    original_utime = s.os.utime
+    def read_only_sample(path, *args, **kwargs):
+        if Path(path) == s.ROOT / 'static' / 'hls-test':
+            raise PermissionError('build-generated sample directory is read-only')
+        return original_utime(path, *args, **kwargs)
+    monkeypatch.setattr(s.os, 'utime', read_only_sample)
+    playlist = client.get('/getvideo/' + s.STREAM_TEST_ID, follow_redirects=True)
+    assert playlist.status_code == 200
+    assert b'#EXT-X-VERSION:2' in playlist.data
+    name = next(v for v in playlist.data.decode().splitlines() if v.endswith('.ts'))
+    chunk = client.get('/stream-test/' + name, headers={'Range': 'bytes=0-187'})
+    assert chunk.status_code == 206 and len(chunk.data) == 188
+    assert chunk.data[0] == 0x47
+    head = client.head('/stream-test/index.m3u8')
+    assert head.status_code == 200 and not head.data
+
 def test_partial_hls_can_play_before_conversion_finishes(client, monkeypatch):
     monkeypatch.setenv('PLAYBACK_MODE', 'hls')
     d = s.HLS / VID; d.mkdir()
