@@ -108,6 +108,144 @@ static NSString *YTBalancedObject(NSString *text, NSUInteger openIndex) {
     return nil;
 }
 
+
+static NSData *YTGET(NSString *urlString, NSString **errorText) {
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlString]
+                                                       cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                                                   timeoutInterval:18.0];
+    [req setHTTPMethod:@"GET"];
+    [req setValue:@"YouTubeDirect/0.2 (iPhone OS 3)" forHTTPHeaderField:@"User-Agent"];
+    NSURLResponse *response = nil;
+    NSError *err = nil;
+    NSData *data = [NSURLConnection sendSynchronousRequest:req returningResponse:&response error:&err];
+    NSInteger status = 0;
+    if ([response isKindOfClass:[NSHTTPURLResponse class]])
+        status = [(NSHTTPURLResponse *)response statusCode];
+    if (data && status >= 200 && status < 300) return data;
+    if (errorText) {
+        if (err) *errorText = [err localizedDescription];
+        else *errorText = [NSString stringWithFormat:@"HTTP %d", (int)status];
+    }
+    return nil;
+}
+
+static NSArray *YTJSONObjectStringsInArray(NSString *text, NSString *arrayKey) {
+    NSString *needle = [NSString stringWithFormat:@"\"%@\":[", arrayKey];
+    NSRange r = [text rangeOfString:needle];
+    if (r.location == NSNotFound) {
+        needle = [NSString stringWithFormat:@"\"%@\" : [", arrayKey];
+        r = [text rangeOfString:needle];
+    }
+    if (r.location == NSNotFound) return [NSArray array];
+
+    NSMutableArray *objects = [NSMutableArray array];
+    NSUInteger i = r.location + r.length;
+    NSInteger arrayDepth = 1;
+    BOOL inString = NO, escaped = NO;
+    while (i < [text length] && arrayDepth > 0) {
+        unichar ch = [text characterAtIndex:i];
+        if (inString) {
+            if (escaped) escaped = NO;
+            else if (ch == '\\') escaped = YES;
+            else if (ch == '"') inString = NO;
+            i++;
+            continue;
+        }
+        if (ch == '"') {
+            inString = YES;
+            i++;
+            continue;
+        }
+        if (ch == '[') {
+            arrayDepth++;
+            i++;
+            continue;
+        }
+        if (ch == ']') {
+            arrayDepth--;
+            i++;
+            continue;
+        }
+        if (arrayDepth == 1 && ch == '{') {
+            NSString *obj = YTBalancedObject(text, i);
+            if (obj) {
+                [objects addObject:obj];
+                i += [obj length];
+                continue;
+            }
+        }
+        i++;
+    }
+    return objects;
+}
+
+static BOOL YTJSONBoolForKey(NSString *obj, NSString *key, BOOL fallback) {
+    NSString *trueNeedle = [NSString stringWithFormat:@"\"%@\":true", key];
+    NSString *falseNeedle = [NSString stringWithFormat:@"\"%@\":false", key];
+    if ([obj rangeOfString:trueNeedle].location != NSNotFound) return YES;
+    if ([obj rangeOfString:falseNeedle].location != NSNotFound) return NO;
+    return fallback;
+}
+
+static NSURL *YTPipedCombinedURL(NSString *text) {
+    NSArray *objects = YTJSONObjectStringsInArray(text, @"videoStreams");
+    NSString *bestURL = nil;
+    NSInteger bestHeight = 99999;
+    NSUInteger i;
+    for (i = 0; i < [objects count]; i++) {
+        NSString *obj = [objects objectAtIndex:i];
+        if (YTJSONBoolForKey(obj, @"videoOnly", YES)) continue;
+        NSString *mime = YTJSONStringForKey(obj, @"mimeType", 0);
+        NSString *format = YTJSONStringForKey(obj, @"format", 0);
+        NSString *codec = YTJSONStringForKey(obj, @"codec", 0);
+        if (mime && [mime rangeOfString:@"video/mp4"].location == NSNotFound) continue;
+        if (format && ![format isEqualToString:@"MPEG_4"]) continue;
+        if (codec && [codec rangeOfString:@"avc1"].location == NSNotFound) continue;
+        NSString *url = YTJSONStringForKey(obj, @"url", 0);
+        if (!url || ![url hasPrefix:@"https://"]) continue;
+
+        NSInteger height = 360;
+        NSString *quality = YTJSONStringForKey(obj, @"quality", 0);
+        if (quality && [quality hasSuffix:@"p"])
+            height = [[quality substringToIndex:[quality length] - 1] integerValue];
+
+        if (height <= 360) {
+            if (!bestURL || height > bestHeight) {
+                bestURL = url;
+                bestHeight = height;
+            }
+            if (height == 360) return [NSURL URLWithString:url];
+        } else if (!bestURL) {
+            bestURL = url;
+            bestHeight = height;
+        }
+    }
+    return bestURL ? [NSURL URLWithString:bestURL] : nil;
+}
+
+static NSURL *YTInvidiousFormatURL(NSString *text) {
+    NSArray *objects = YTJSONObjectStringsInArray(text, @"formatStreams");
+    NSString *fallbackURL = nil;
+    NSUInteger i;
+    for (i = 0; i < [objects count]; i++) {
+        NSString *obj = [objects objectAtIndex:i];
+        NSString *url = YTJSONStringForKey(obj, @"url", 0);
+        if (!url || ![url hasPrefix:@"https://"]) continue;
+        NSString *itag = YTJSONStringForKey(obj, @"itag", 0);
+        NSString *container = YTJSONStringForKey(obj, @"container", 0);
+        NSString *encoding = YTJSONStringForKey(obj, @"encoding", 0);
+        NSString *quality = YTJSONStringForKey(obj, @"qualityLabel", 0);
+        if (container && ![container isEqualToString:@"mp4"]) continue;
+        if (encoding && [encoding rangeOfString:@"h264" options:NSCaseInsensitiveSearch].location == NSNotFound &&
+            [encoding rangeOfString:@"avc" options:NSCaseInsensitiveSearch].location == NSNotFound) continue;
+        if ([itag isEqualToString:@"18"]) return [NSURL URLWithString:url];
+        if (!fallbackURL && (!quality || [quality hasPrefix:@"360"]))
+            fallbackURL = url;
+    }
+    return fallbackURL ? [NSURL URLWithString:fallbackURL] : nil;
+}
+
+
 @implementation YTYouTube
 
 + (NSData *)postBody:(NSString *)body
@@ -212,67 +350,60 @@ static NSString *YTBalancedObject(NSString *text, NSUInteger openIndex) {
 }
 
 + (NSURL *)directVideoURLForID:(NSString *)videoID error:(NSString **)errorText {
-    NSArray *clients = [NSArray arrayWithObjects:
-        [NSDictionary dictionaryWithObjectsAndKeys:
-            @"WEB", @"name", @"2.20260708.00.00", @"version", @"1", @"number",
-            @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Safari/537.36", @"ua", nil],
-        [NSDictionary dictionaryWithObjectsAndKeys:
-            @"MWEB", @"name", @"2.20260708.05.00", @"version", @"2", @"number",
-            @"Mozilla/5.0 (iPad; CPU OS 16_7_10 like Mac OS X) AppleWebKit/605.1.15 Version/16.6 Mobile/15E148 Safari/604.1", @"ua", nil],
+    NSString *escapedID = [videoID stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
+    NSString *lastError = nil;
+
+    // Do NOT call YouTube's /youtubei/v1/player here. In late 2026 anonymous
+    // WEB/MWEB player requests can return "The page needs to be reloaded."
+    // Piped resolves the video on its own backend and gives us a progressive
+    // combined MP4/proxy URL suitable for old single-stream clients.
+    NSArray *piped = [NSArray arrayWithObjects:
+        @"https://pipedapi.kavin.rocks",
+        @"https://pipedapi.leptons.xyz",
+        @"https://pipedapi.nosebs.ru",
         nil];
 
-    NSString *lastError = nil;
     NSUInteger i;
-    for (i = 0; i < [clients count]; i++) {
-        NSDictionary *client = [clients objectAtIndex:i];
-        NSString *name = [client objectForKey:@"name"];
-        NSString *version = [client objectForKey:@"version"];
-        NSString *body = [NSString stringWithFormat:
-            @"{\"context\":{\"client\":{\"clientName\":\"%@\",\"clientVersion\":\"%@\",\"hl\":\"en\",\"gl\":\"US\"}},\"videoId\":\"%@\",\"contentCheckOk\":true,\"racyCheckOk\":true,\"playbackContext\":{\"contentPlaybackContext\":{\"html5Preference\":\"HTML5_PREF_WANTS\"}}}",
-            name, version, YTJSONEscape(videoID)];
-
-        NSData *data = [self postBody:body endpoint:@"player" clientName:name
-                          clientVersion:version clientNumber:[client objectForKey:@"number"]
-                              userAgent:[client objectForKey:@"ua"] error:&lastError];
+    for (i = 0; i < [piped count]; i++) {
+        NSString *host = [piped objectAtIndex:i];
+        NSString *url = [NSString stringWithFormat:@"%@/streams/%@", host, escapedID];
+        NSData *data = YTGET(url, &lastError);
         if (!data) continue;
-
         NSString *text = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease];
         if (!text) continue;
-
-        NSArray *markers = [NSArray arrayWithObjects:@"\"itag\":18", @"\"itag\": 18", nil];
-        NSUInteger m;
-        for (m = 0; m < [markers count]; m++) {
-            NSRange itag = [text rangeOfString:[markers objectAtIndex:m]];
-            if (itag.location == NSNotFound) continue;
-
-            NSRange remain = NSMakeRange(itag.location, [text length] - itag.location);
-            NSRange urlKey = [text rangeOfString:@"\"url\":\"" options:0 range:remain];
-            if (urlKey.location == NSNotFound || urlKey.location - itag.location > 12000) continue;
-
-            NSUInteger valueStart = urlKey.location + urlKey.length;
-            NSMutableString *raw = [NSMutableString string];
-            BOOL escaped = NO;
-            NSUInteger p;
-            for (p = valueStart; p < [text length]; p++) {
-                unichar c = [text characterAtIndex:p];
-                if (!escaped && c == '"') break;
-                [raw appendFormat:@"%C", c];
-                if (escaped) escaped = NO;
-                else if (c == '\\') escaped = YES;
-            }
-            NSString *decoded = YTJSONUnescape(raw);
-            if ([decoded hasPrefix:@"https://"]) {
-                NSURL *url = [NSURL URLWithString:decoded];
-                if (url) return url;
-            }
-        }
-
-        NSString *reason = YTJSONStringForKey(text, @"reason", 0);
-        if (reason) lastError = reason;
-        else lastError = [NSString stringWithFormat:@"%@ did not return direct format 18.", name];
+        NSURL *stream = YTPipedCombinedURL(text);
+        if (stream) return stream;
+        lastError = [NSString stringWithFormat:@"No combined MP4 from %@", host];
     }
 
-    if (errorText) *errorText = lastError ? lastError : @"No direct iPhone-compatible stream is available.";
+    // Second independent resolver family. local=true asks Invidious to return
+    // instance-proxied formatStreams instead of handing the phone a modern
+    // YouTube player URL directly.
+    NSArray *invidious = [NSArray arrayWithObjects:
+        @"https://inv.nadeko.net",
+        @"https://invidious.nerdvpn.de",
+        @"https://yt.chocolatemoo53.com",
+        @"https://invidious.tiekoetter.com",
+        nil];
+
+    for (i = 0; i < [invidious count]; i++) {
+        NSString *host = [invidious objectAtIndex:i];
+        NSString *url = [NSString stringWithFormat:@"%@/api/v1/videos/%@?local=true&region=US",
+                          host, escapedID];
+        NSData *data = YTGET(url, &lastError);
+        if (!data) continue;
+        NSString *text = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease];
+        if (!text || ![text length]) continue;
+        NSURL *stream = YTInvidiousFormatURL(text);
+        if (stream) return stream;
+        lastError = [NSString stringWithFormat:@"No progressive MP4 from %@", host];
+    }
+
+    if (errorText) {
+        *errorText = [NSString stringWithFormat:
+            @"No old-iPhone stream resolver succeeded. Last error: %@",
+            lastError ? lastError : @"no response"];
+    }
     return nil;
 }
 
