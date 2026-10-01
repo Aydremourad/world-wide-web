@@ -23,5 +23,5 @@ function init(){var s=document.createElement('script');s.src='https://en.wikiped
 function wikiRecentCallback(data){var a=(data&&data.query&&data.query.recentchanges)?data.query.recentchanges:[],h='',i,x;for(i=0;i<a.length;i++){x=a[i];h+='<a class="item" href="wikipedia-article.html?title='+encodeURIComponent(x.title)+'">'+esc(x.title)+'<span class="meta">'+esc((x.timestamp||'').replace('T',' ').replace('Z',' UTC'))+'</span></a>';}if(!h)h='<div class="msg">No recent changes were returned.</div>';document.getElementById('list').innerHTML=h;}
 </script>
 </head>
-<body onload="init()"><div id="page"><div id="top"><a id="back" href="wikipedia.html"><span>Wikipedia</span></a>Recent Changes</div><div id="content"><div id="list" class="box"><div class="msg">Loading...</div></div></div><div class="footer">Wikipedia · The Free Encyclopedia</div></div></body>
+<body onload="init()"><div id="page"><div id="top"><a id="back" href="wikipedia.html"><span>Wikipedia</span></a>Recent Changes</div><div id="content"><div id="list" class="box"><div class="msg">Loading...</div></div></div><div class="footer">Wikipedia · The Free Encyclopedia</div></div><script src="webapp.js"></script></body>
 </html>
