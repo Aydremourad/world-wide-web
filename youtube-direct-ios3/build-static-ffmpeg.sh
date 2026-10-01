@@ -25,6 +25,16 @@ SRC="$DEPS/FFmpeg-2.8.22"
 OUT="$ROOT/layout/usr/libexec/ytdirect-ffmpeg"
 mkdir -p "$DEPS" "$ROOT/layout/usr/libexec"
 
+if [ -x "$OUT" ]; then
+  if file "$OUT" | grep -q "Mach-O executable arm_v6" \
+    && ! xcrun otool -L "$OUT" | egrep -q 'libav(codec|format|util|filter)|libsw(scale|resample)' \
+    && ! xcrun otool -l "$OUT" | grep -q LC_MAIN \
+    && xcrun otool -l "$OUT" | grep -q LC_UNIXTHREAD; then
+    echo "Reusing existing bundled static converter: $OUT"
+    exit 0
+  fi
+fi
+
 if [ ! -d "$SRC/.git" ]; then
   echo "Fetching FFmpeg 2.8.22..."
   rm -rf "$SRC"
