@@ -24,8 +24,6 @@ STATE = Path(os.environ.get('STATE_DIR', str(ROOT / 'state')))
 STATE.mkdir(parents=True, exist_ok=True)
 MEDIA = STATE / 'media'
 MEDIA.mkdir(exist_ok=True)
-HLS = STATE / 'hls'
-HLS.mkdir(exist_ok=True)
 VIDEO_ID = re.compile(r'^[A-Za-z0-9_-]{11}$')
 MAX_SECONDS = int(os.environ.get('MAX_VIDEO_SECONDS', '1200'))
 MAX_CACHE_BYTES = int(os.environ.get('MAX_CACHE_BYTES', str(1024 * 1024 * 1024)))
@@ -43,27 +41,18 @@ downloads = threading.BoundedSemaphore(1)
 job_errors = {}
 playback_waiters = threading.BoundedSemaphore(2)
 STREAM_TEST_ID = 'STREAMTEST1'
-STREAM_TEST_ITEM = dict(videoId=STREAM_TEST_ID, title='Streaming test',
+PLAYBACK_TEST_ID = 'MP4TEST0002'
+LOCAL_TEST_IDS = {PLAYBACK_TEST_ID, STREAM_TEST_ID}
+PLAYBACK_TEST_ITEM = dict(videoId=PLAYBACK_TEST_ID, title='Playback test',
     author='YouTube 2G', authorId='unknown', description='A local playback test.',
     published=0, lengthSeconds=8, viewCount=0)
-VERSION = '2g-1.2.1'
-
-
-def streaming_enabled():
-    return os.environ.get('PLAYBACK_MODE', 'mp4').lower() == 'hls'
-
-
-def hls_ready(vid):
-    try:
-        text = (HLS / vid / 'index.m3u8').read_text()
-        # Keep three complete segments buffered before exposing an active stream.
-        return text.count('#EXTINF:') >= 3 or ('#EXT-X-ENDLIST' in text and '#EXTINF:' in text)
-    except OSError:
-        return False
+VERSION = '2g-1.3'
 
 
 def media_ready(vid):
-    return hls_ready(vid) if streaming_enabled() else (MEDIA / (vid + '.mp4')).exists()
+    if vid in LOCAL_TEST_IDS:
+        return (ROOT / 'static' / 'test.mp4').is_file()
+    return (MEDIA / (vid + '.mp4')).is_file()
 
 
 class DownloadError(RuntimeError):
@@ -150,8 +139,8 @@ def cached(key, fetch, ttl=600):
 
 def info(vid):
     validate(vid)
-    if vid == STREAM_TEST_ID:
-        return dict(STREAM_TEST_ITEM)
+    if vid in LOCAL_TEST_IDS:
+        return {**PLAYBACK_TEST_ITEM, 'videoId': vid}
     def fetch():
         item = json.loads(run_ytdlp(['--skip-download', '--dump-single-json',
                                     'https://www.youtube.com/watch?v=' + vid]))
@@ -163,8 +152,8 @@ def info(vid):
 
 def search(query, count=15, start=1):
     query = query.strip()[:160]
-    if query.lower() in ('stream test', 'streaming test'):
-        return [dict(STREAM_TEST_ITEM)]
+    if query.lower() in ('playback test', 'stock test', 'stream test', 'streaming test'):
+        return [dict(PLAYBACK_TEST_ITEM)]
     count = min(max(count, 1), 25)
     start = min(max(start, 1), 76)
     def fetch():
@@ -192,7 +181,7 @@ def warm_results(data):
     limit = min(int(os.environ.get('PREFETCH_SECONDS', '60')), MAX_SECONDS)
     if data and limit > 0:
         first = data[0]
-        if first['videoId'] != STREAM_TEST_ID and 0 < first.get('lengthSeconds', 0) <= limit:
+        if first['videoId'] not in LOCAL_TEST_IDS and 0 < first.get('lengthSeconds', 0) <= limit:
             schedule(first['videoId'], hint=first, prefetch=True)
 
 
@@ -238,7 +227,7 @@ def diagnostics():
     # Only readiness flags and versions; no tokens, file contents, or account data.
     return jsonify(version=VERSION, downloader=version('yt-dlp'),
                    token_provider_ready=provider, cookies_loaded=secret.is_file(),
-                   playback_mode='hls' if streaming_enabled() else 'mp4')
+                   playback_mode='mp4')
 
 
 @app.get('/feeds/api/videos')
@@ -269,7 +258,7 @@ def frontpage(popular, region='US'):
 @app.get('/feeds/api/videos/<vid>')
 def single(vid):
     item = info(vid)
-    if vid != STREAM_TEST_ID:
+    if vid not in LOCAL_TEST_IDS:
         schedule(vid, hint=item)
     return feed([item], 'batch_videos.jinja2')
 
@@ -337,8 +326,8 @@ def categories():
 @app.get('/thumb/<vid>')
 def thumbnail(vid):
     validate(vid)
-    if vid == STREAM_TEST_ID:
-        return send_file(ROOT / 'static' / 'stream-test.jpg', mimetype='image/jpeg')
+    if vid in LOCAL_TEST_IDS:
+        return send_file(ROOT / 'static' / 'playback-test.jpg', mimetype='image/jpeg')
     try:
         with urllib.request.urlopen('https://i.ytimg.com/vi/' + vid + '/default.jpg', timeout=12) as upstream:
             data = upstream.read(256 * 1024)
@@ -360,39 +349,24 @@ def ffmpeg_args(source, destination):
             '-movflags', '+faststart', str(destination)]
 
 
-def hls_args(source, directory):
-    # HLS version 2 uses integer durations and MPEG-TS, both suitable for OS 3.
-    return ffmpeg_args(source, directory / 'index.m3u8')[:-3] + [
-        '-g', '48', '-keyint_min', '48', '-sc_threshold', '0',
-        '-f', 'hls', '-hls_time', '2', '-hls_list_size', '0',
-        '-hls_segment_type', 'mpegts', '-hls_flags', 'temp_file+round_durations',
-        '-hls_segment_filename', str(directory / 'part-%05d.ts'),
-        str(directory / 'index.m3u8')]
-
-
 def prune_cache():
-    files = list(MEDIA.glob('*.mp4')) + [p for p in HLS.iterdir() if p.is_dir()]
-    sizes = {p: sum(f.stat().st_size for f in p.iterdir() if f.is_file())
-             if p.is_dir() else p.stat().st_size for p in files}
+    files = list(MEDIA.glob('*.mp4'))
+    sizes = {p: p.stat().st_size for p in files}
     files.sort(key=lambda p: p.stat().st_mtime)
     total = sum(sizes.values())
     with jobs_lock:
         active = {vid for vid, record in jobs.items() if record[0] in ('preparing', 'queued')}
     for path in files:
-        if (path.name if path.is_dir() else path.stem) in active:
+        if path.stem in active:
             continue
         if total <= MAX_CACHE_BYTES and time.time() - path.stat().st_mtime < 86400:
             continue
-        if path.is_dir():
-            shutil.rmtree(path, ignore_errors=True)
-        else:
-            path.unlink(missing_ok=True)
+        path.unlink(missing_ok=True)
         total -= sizes[path]
 
 
 def convert(vid, hint=None):
     import tempfile
-    stream_dir = None
     try:
         item = hint or info(vid)
         if item['lengthSeconds'] > MAX_SECONDS:
@@ -406,25 +380,15 @@ def convert(vid, hint=None):
             if not source.exists():
                 raise RuntimeError('Video exceeds source limit or is unavailable')
             prune_cache()
-            if streaming_enabled():
-                stream_dir = HLS / vid
-                shutil.rmtree(stream_dir, ignore_errors=True)
-                stream_dir.mkdir()
-                subprocess.run(hls_args(source, stream_dir), check=True, capture_output=True, timeout=600)
-                if not hls_ready(vid):
-                    raise RuntimeError('Empty converted stream')
-            else:
-                output = Path(work) / 'converted.mp4'
-                subprocess.run(ffmpeg_args(source, output), check=True, capture_output=True, timeout=600)
-                if not output.exists() or output.stat().st_size < 1000:
-                    raise RuntimeError('Empty converted video')
-                output.replace(MEDIA / (vid + '.mp4'))
+            output = Path(work) / 'converted.mp4'
+            subprocess.run(ffmpeg_args(source, output), check=True, capture_output=True, timeout=600)
+            if not output.exists() or output.stat().st_size < 1000:
+                raise RuntimeError('Empty converted video')
+            output.replace(MEDIA / (vid + '.mp4'))
         with jobs_lock:
             jobs[vid] = ('ready', time.monotonic())
             job_errors.pop(vid, None)
     except Exception as exc:
-        if stream_dir is not None:
-            shutil.rmtree(stream_dir, ignore_errors=True)
         log.warning('Conversion failed for %s: %s', vid, exc)
         with jobs_lock:
             jobs[vid] = ('too-long' if str(exc) == 'too-long' else 'failed', time.monotonic())
@@ -461,10 +425,13 @@ def schedule(vid, hint=None, prefetch=False):
 @app.route('/video/hd/<vid>', methods=['GET', 'HEAD'])
 def playback(vid):
     validate(vid)
-    if vid == STREAM_TEST_ID:
-        return redirect('/stream-test/index.m3u8')
+    # The stock OS 3 player rejected HLS even after its server error was fixed.
+    # Both sample IDs serve the exact known-compatible MP4, without a redirect.
+    # PLAYBACK_MODE=hls from an earlier deployment is intentionally ignored.
+    if vid in LOCAL_TEST_IDS:
+        return send_file(ROOT / 'static' / 'test.mp4', mimetype='video/mp4', conditional=True)
     path = MEDIA / (vid + '.mp4')
-    if not streaming_enabled() and path.exists():
+    if path.exists():
         os.utime(path, None)
         return send_file(path, mimetype='video/mp4', conditional=True)
     status = schedule(vid)
@@ -483,39 +450,16 @@ def playback(vid):
         finally:
             playback_waiters.release()
     if media_ready(vid):
-        if streaming_enabled():
-            return redirect('/stream/' + vid + '/index.m3u8')
         os.utime(path, None)
         return send_file(path, mimetype='video/mp4', conditional=True)
     clip = {'failed': 'failed', 'too-long': 'too-long', 'busy': 'busy'}.get(status, 'preparing')
     return send_file(ROOT / 'static' / (clip + '.mp4'), mimetype='video/mp4', conditional=True)
 
 
-def stream_file(directory, filename, touch_cache=False):
-    if filename != 'index.m3u8' and not re.fullmatch(r'part-[0-9]{5}\.ts', filename):
-        abort(404)
-    path = directory / filename
-    if not path.is_file():
-        abort(404)
-    # Only the writable runtime cache needs an access timestamp. Sample files
-    # are built as root and served by youtube2g, which cannot touch their folder.
-    if touch_cache:
-        os.utime(directory, None)
-    return send_file(path, mimetype='application/vnd.apple.mpegurl' if filename.endswith('.m3u8')
-                     else 'video/mp2t', conditional=True)
-
-
-@app.route('/stream-test/<filename>', methods=['GET', 'HEAD'])
-def stream_test(filename):
-    return stream_file(ROOT / 'static' / 'hls-test', filename)
-
-
-@app.route('/stream/<vid>/<filename>', methods=['GET', 'HEAD'])
-def stream(vid, filename):
-    validate(vid)
-    if not hls_ready(vid):
-        abort(404)
-    return stream_file(HLS / vid, filename, touch_cache=True)
+@app.route('/stream-test/index.m3u8', methods=['GET', 'HEAD'])
+def retired_stream_test():
+    # Recover saved Safari links to the retired experiment.
+    return redirect('/test.mp4')
 
 
 @app.get('/status/<vid>')
@@ -524,8 +468,7 @@ def status(vid):
     with jobs_lock:
         state = jobs.get(vid, ('not-requested', 0))[0]
         code = job_errors.get(vid)
-    result = dict(status=('streaming' if streaming_enabled() and state != 'ready' else 'ready')
-                  if media_ready(vid) else state)
+    result = dict(status='ready' if media_ready(vid) else state)
     if code and result['status'] == 'failed':
         result['error'] = code
     return jsonify(result)

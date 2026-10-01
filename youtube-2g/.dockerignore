@@ -11,4 +11,4 @@ install.sh
 *cookies*.txt
 
 static/hls-test
-static/stream-test.jpg
+static/*-test.jpg

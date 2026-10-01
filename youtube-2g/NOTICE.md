@@ -1,4 +1,4 @@
-YouTube 2G, version 1.2.1, prepared 2026-10-01.
+YouTube 2G, version 1.3, prepared 2026-10-01.
 
 The GData XML templates and categories.cat are adapted from:
 https://github.com/ShahAndI123/Modified-Tuberepair-for-ios-2-6-built-in-YT-best-for-pre-iphone-4
@@ -32,15 +32,10 @@ Its source and GPL-3.0 license are retained at /opt/bgutil in the image.
 The provider runs on loopback only. It may help with upstream bot checks, but
 its maintainer does not guarantee successful downloads from blocked IP addresses.
 
-Version 1.2 adds speculative preparation of a short top result, earlier detail-
-page preparation, a bounded automatic playback wait, and opt-in HLS version 2
-with MPEG-TS segments. A local streaming sample can be selected by searching
-for "stream test" in the original YouTube app. It must pass on the physical
-phone before HLS is enabled. Real-time local FFmpeg verification does not prove
-that the stock iPhone OS 3 YouTube player accepts HLS. Live version 1.1 still
-returned youtube-bot-check for Me at the zoo; speed changes do not resolve it.
-
-Version 1.2.1 fixes the streaming sample's HTTP 502: serving immutable sample
-files no longer attempts to update a root-owned directory's timestamps. Runtime
-cache access timestamps remain in use. The corrected sample still needs testing
-in the stock app on the physical phone.
+Version 1.3 restores ordinary MP4 throughout the stock-app playback workflow.
+The version 1.2.1 HLS sample was served successfully, but the user reported that
+the phone still rejected it. HLS is withdrawn from this workflow. Old HLS mode
+settings are ignored, and both the new local playback test and the old test ID
+serve the original compatible MP4 without a redirect. Background preparation
+and the bounded playback wait remain. Actual YouTube downloads are still blocked
+by the upstream bot check; this recovery does not claim to resolve it.

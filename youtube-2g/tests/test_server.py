@@ -51,8 +51,6 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv('PLAYBACK_WAIT_SECONDS', '0')
     monkeypatch.setattr(s, 'MEDIA', tmp_path)
     monkeypatch.setattr(s, 'STATE', tmp_path)
-    monkeypatch.setattr(s, 'HLS', tmp_path / 'hls')
-    s.HLS.mkdir()
     s.jobs.clear()
     s.job_errors.clear()
     s.metadata_cache.clear()
@@ -126,79 +124,63 @@ def test_prefetch_does_not_fill_active_queue(client, monkeypatch):
     s.jobs['abcdefghij1'] = ('preparing', time.monotonic())
     assert s.schedule(VID, prefetch=True) == 'busy'
 
-def test_stream_test_is_local_and_uses_hls(client, monkeypatch):
+def test_local_playback_sample_never_contacts_youtube(client, monkeypatch):
     monkeypatch.setattr(s, 'run_ytdlp', lambda *a, **kw: pytest.fail('contacted YouTube'))
-    r = client.get('/feeds/api/videos?q=stream+test')
-    assert r.status_code == 200 and b'Streaming test' in r.data
-    r = client.get('/getvideo/' + s.STREAM_TEST_ID)
-    assert r.status_code == 302 and r.location == '/stream-test/index.m3u8'
-    playlist = client.get(r.location)
-    assert playlist.status_code == 200 and b'#EXT-X-VERSION:2' in playlist.data
-    names = [v for v in playlist.data.decode().splitlines() if v.endswith('.ts')]
-    assert names
-    chunk = client.get('/stream-test/' + names[0])
-    assert chunk.mimetype == 'video/mp2t' and chunk.data[0] == 0x47
+    for query in ['playback+test', 'stream+test']:
+        r = client.get('/feeds/api/videos?q=' + query)
+        assert r.status_code == 200 and b'Playback test' in r.data
+        assert s.PLAYBACK_TEST_ID.encode() in r.data
+    for vid in s.LOCAL_TEST_IDS:
+        r = client.get('/feeds/api/videos/' + vid)
+        assert r.status_code == 200
+        r = client.get('/getvideo/' + vid)
+        assert r.status_code == 200 and r.mimetype == 'video/mp4'
+        assert 'Location' not in r.headers
+        assert r.data == (s.ROOT / 'static/test.mp4').read_bytes()
+        assert client.get('/status/' + vid).json == {'status': 'ready'}
+    assert client.get('/thumb/' + s.PLAYBACK_TEST_ID).mimetype == 'image/jpeg'
 
-def test_stream_test_works_with_read_only_build_files(client, monkeypatch):
-    # Render runs as youtube2g; image-built sample files belong to root. Reads
-    # succeed, but changing the sample directory's timestamps is forbidden.
+def test_local_sample_works_with_read_only_build_files(client, monkeypatch):
     original_utime = s.os.utime
     def read_only_sample(path, *args, **kwargs):
-        if Path(path) == s.ROOT / 'static' / 'hls-test':
-            raise PermissionError('build-generated sample directory is read-only')
+        if Path(path).is_relative_to(s.ROOT / 'static'):
+            raise PermissionError('build-generated sample files are read-only')
         return original_utime(path, *args, **kwargs)
     monkeypatch.setattr(s.os, 'utime', read_only_sample)
-    playlist = client.get('/getvideo/' + s.STREAM_TEST_ID, follow_redirects=True)
-    assert playlist.status_code == 200
-    assert b'#EXT-X-VERSION:2' in playlist.data
-    name = next(v for v in playlist.data.decode().splitlines() if v.endswith('.ts'))
-    chunk = client.get('/stream-test/' + name, headers={'Range': 'bytes=0-187'})
-    assert chunk.status_code == 206 and len(chunk.data) == 188
-    assert chunk.data[0] == 0x47
-    head = client.head('/stream-test/index.m3u8')
+    path = '/getvideo/' + s.PLAYBACK_TEST_ID
+    chunk = client.get(path, headers={'Range': 'bytes=0-31'})
+    assert chunk.status_code == 206 and len(chunk.data) == 32
+    assert chunk.mimetype == 'video/mp4' and chunk.data[4:8] == b'ftyp'
+    head = client.head(path)
     assert head.status_code == 200 and not head.data
+    assert int(head.headers['Content-Length']) == (s.ROOT / 'static/test.mp4').stat().st_size
 
-def test_partial_hls_can_play_before_conversion_finishes(client, monkeypatch):
+def test_old_hls_setting_cannot_replace_mp4_playback(client, monkeypatch):
     monkeypatch.setenv('PLAYBACK_MODE', 'hls')
-    d = s.HLS / VID; d.mkdir()
-    (d/'index.m3u8').write_text('#EXTM3U\n#EXT-X-VERSION:2\n#EXT-X-TARGETDURATION:2\n'+
-        ''.join(f'#EXTINF:2,\npart-{i:05d}.ts\n' for i in range(3)))
-    for i in range(3): (d/f'part-{i:05d}.ts').write_bytes(b'G' + b'x'*187)
-    s.jobs[VID] = ('preparing', time.monotonic())
-    r = client.get('/getvideo/' + VID)
-    assert r.status_code == 302 and r.location == f'/stream/{VID}/index.m3u8'
-    assert client.get('/status/' + VID).json == {'status': 'streaming'}
-    assert client.get(r.location).status_code == 200
-    assert client.get(f'/stream/{VID}/part-00000.ts', headers={'Range':'bytes=0-9'}).status_code == 206
-    assert client.get(f'/stream/{VID}/cookies.txt').status_code == 404
+    sample = (s.ROOT / 'static/test.mp4').read_bytes()
+    (s.MEDIA / (VID + '.mp4')).write_bytes(sample)
+    for route in ['/getvideo/', '/video/sd/', '/video/hd/']:
+        r = client.get(route + VID)
+        assert r.status_code == 200 and r.mimetype == 'video/mp4'
+        assert r.data == sample and 'Location' not in r.headers
+    assert client.get('/diagnostics').json['playback_mode'] == 'mp4'
+    assert client.get('/status/' + VID).json == {'status': 'ready'}
+    r = client.get('/stream-test/index.m3u8', follow_redirects=True)
+    assert r.status_code == 200 and r.data == sample
 
-def test_real_hls_is_available_while_encoder_is_running(client):
-    d = s.HLS / VID; d.mkdir()
-    cmd = s.hls_args(s.ROOT / 'static/test.mp4', d)
-    cmd.insert(cmd.index('-i'), '-re')
-    p = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-    try:
-        deadline = time.monotonic() + 15
-        while not s.hls_ready(VID) and p.poll() is None and time.monotonic() < deadline:
-            time.sleep(.1)
-        assert s.hls_ready(VID)
-        assert p.poll() is None, 'the stream only became available after full conversion'
-        text = (d / 'index.m3u8').read_text()
-        assert '#EXT-X-VERSION:2' in text
-        assert '#EXT-X-ENDLIST' not in text
-        assert '.000' not in text
-        first = next(d.glob('part-*.ts'))
-        probe = json.loads(subprocess.check_output(['ffprobe', '-v', 'error',
-            '-show_streams', '-of', 'json', str(first)]))
-        streams = probe['streams']
-        video = next(v for v in streams if v['codec_type'] == 'video')
-        audio = next(v for v in streams if v['codec_type'] == 'audio')
-        assert video['profile'] == 'Constrained Baseline' and video['level'] == 30
-        assert (video['width'], video['height']) == (320, 240)
-        assert audio['codec_name'] == 'aac' and audio['profile'] == 'LC'
-    finally:
-        if p.poll() is None: p.terminate()
-        p.wait(timeout=5)
+def test_conversion_publishes_mp4_despite_old_hls_setting(client, monkeypatch):
+    monkeypatch.setenv('PLAYBACK_MODE', 'hls')
+    def download(args, **kwargs):
+        source = Path(args[args.index('-o') + 1])
+        source.write_bytes((s.ROOT / 'static/test.mp4').read_bytes())
+        return ''
+    monkeypatch.setattr(s, 'run_ytdlp', download)
+    s.convert(VID, hint=ITEM)
+    assert s.jobs[VID][0] == 'ready'
+    r = client.get('/getvideo/' + VID)
+    assert r.status_code == 200 and r.mimetype == 'video/mp4'
+    assert r.data.index(b'moov') < r.data.index(b'mdat')
+    assert not list(s.STATE.glob('source-*'))
 
 def test_feed_valid_xml_and_http_urls(client, monkeypatch):
     monkeypatch.setattr(s, 'search', lambda *a, **k: [ITEM])

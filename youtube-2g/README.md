@@ -1,163 +1,105 @@
 # YouTube 2G server
 
 Backend for the original stock YouTube app on a jailbroken iPhone 2G running
-iPhone OS 3.1.3. Uses TubeRepair to supply legacy GData feeds and converts videos
-to 320x240 H.264 Baseline / AAC MP4. No home computer needs to remain running.
+iPhone OS 3.1.3. Uses TubeRepair for legacy GData feeds and ordinary MP4 playback.
+The server runs on free Render; no home computer needs to remain running.
+
+## Deploy version 1.3
+
+1. Open Render, select `youtube-2g`, then **Manual Deploy → Deploy latest commit**.
+2. Wait for **Live**. The deployed commit starts with the version 1.3 recovery change.
+3. Open https://aydreyoutube2g.duckdns.org/diagnostics and check
+   `version: 2g-1.3` and `playback_mode: mp4`.
+4. Reopen the original YouTube app, search **playback test**, and play **Playback test**.
+   This uses the same locally generated MP4 as the working Safari compatibility test.
+
+No new environment variables, payment method, domain, or phone tweak is required.
+`PLAYBACK_MODE=hls` from an earlier deployment is ignored, so it cannot select
+an incompatible player path. The old streaming test ID also serves MP4 directly.
+The new test ID avoids the previously rejected movie entry in the phone's cache.
 
 ## Current setup
 
 - GitHub branch: `youtube-2g-server`
 - Render service: `youtube-2g`, Free compute, Hobby workspace
-- Working phone address: `https://aydreyoutube2g.duckdns.org/`
+- Phone address and TubeRepair Custom URL: `https://aydreyoutube2g.duckdns.org/`
 - Render environment: `PUBLIC_BASE_URL=https://aydreyoutube2g.duckdns.org`
-- Phone: TLSFix 1.1, root certificates, TubeRepair 1.2-Beta-1
-- TubeRepair Custom URL: `https://aydreyoutube2g.duckdns.org/`
+- Phone: TLSFix 1.1, modern root certificates, TubeRepair 1.2-Beta-1
 
-The user confirmed Safari compatibility-video playback, stock-app search, and
-playback of preparation/error clips. Actual YouTube downloads failed with
-“Sign in to confirm you’re not a bot.” Cookies were added as an optional recovery
-method. Live playback of an actual YouTube video is not yet verified.
+The user confirmed Safari sample playback, stock-app search, and playback of
+preparation/error clips. The corrected HLS sample was served successfully by
+version 1.2.1, but the phone still rejected it. Version 1.3 removes HLS conversion
+and delivery from the stock-app workflow and serves H.264 Baseline level 3.0 /
+AAC-LC MP4. It preserves byte ranges, HEAD, fast-start metadata, and atomic cache
+publication. Local test clips contain only original text and silent audio.
 
-## Deploy the faster playback update
+## Preparation and loading
 
-1. Open Render, select `youtube-2g`, and select **Manual Deploy → Deploy latest commit**.
-2. Wait for **Live**.
-3. Open https://aydreyoutube2g.duckdns.org/diagnostics. Confirm `version` is
-   `2g-1.2.1` and `token_provider_ready` is `true`.
-4. Keep the working phone Custom URL above. Search for **stream test** in the
-   original YouTube app and play **Streaming test**.
-5. If the sample plays, set `PLAYBACK_MODE=hls` in Render → Environment, then
-   choose **Save and deploy** from the save dropdown. Leave it unset if the sample fails.
+Only the top search result is prefetched, only if it is at most sixty seconds
+long and the conversion queue is idle. Opening video details also starts work.
+Known result metadata avoids a redundant extraction before downloading.
 
-Automatic preparation and the short playback wait work with the default MP4
-mode. HLS is optional until the phone passes the local streaming test.
+A playback GET can wait up to eight seconds under the player's normal loading
+indicator. If the MP4 finishes during that interval, it plays without the
+preparation clip or a second tap. Only two requests may wait at once. Cached
+videos play immediately. A new video still needs to be downloaded and converted
+before the compatible MP4 is published; long videos may still require a retry.
 
-There is no new paid service, domain, API key, or mandatory login for this update.
-The existing optional private cookie secret is retained. Do not add a payment
-method or upgrade compute to deploy this change.
+`PREFETCH_SECONDS=0` disables speculative preparation.
+`PLAYBACK_WAIT_SECONDS=0` disables the brief wait; the maximum is fifteen seconds.
+Neither setting bypasses YouTube access restrictions.
 
-## How the update works
+## YouTube download status
 
-The Docker image builds BgUtils PO-token provider 2.0.0 and runs it only on
-`127.0.0.1:4416`. yt-dlp nightly 2026.09.27.232945 uses the mobile-web and
-embedded YouTube clients; its provider plugin obtains playback tokens locally.
-Both downloaded source archives are version-pinned and checksum-verified.
+Actual YouTube playback is not yet verified. The most recent live diagnostics
+reported the token provider ready and no private cookies loaded; the tested
+Me at the zoo download returned `youtube-bot-check`. MP4 recovery fixes the
+rejected local sample path, not this separate upstream access failure.
 
-The supervisor waits for provider readiness, starts the legacy server, and
-shuts down both processes if either stops. Downloader processes are limited to
-one at a time to reduce memory usage on the free service. FFmpeg conversion
-settings remain compatible with the iPhone 2G.
+The image pins yt-dlp nightly 2026.09.27.232945 and BgUtils PO-token provider
+2.0.0, with checksum-verified source downloads. The provider runs on loopback
+only at `127.0.0.1:4416`. The supervisor starts and monitors both processes.
+Downloader requests are serialized to limit memory. A token does not guarantee
+access from a blocked hosting-provider IP.
 
-This follows current upstream guidance, but a token does not guarantee access
-from a blocked hosting-provider IP. The deployed version 1.1 provider was ready,
-but Me at the zoo still returned `youtube-bot-check`. No alternative public
-ARMv6 server was verified working.
+Optional recovery: export youtube.com cookies in Netscape format according to
+the official yt-dlp wiki. Store them only in Render → Environment → Secret Files
+as `youtube-cookies.txt`; Render mounts `/etc/secrets/youtube-cookies.txt`.
+The server makes a private writable copy for each downloader and deletes it on
+completion or failure. Never commit cookies to GitHub or paste them in chat.
+Use an account without private or sensitive content; authenticated public-server
+extraction can access content available to that account, and yt-dlp account use
+can risk suspension. Cookies may expire and may not overcome the IP block.
 
-## Optional private YouTube cookies
+## Diagnostics, limits, and verification
 
-Export only youtube.com cookies in Netscape format using the official yt-dlp wiki
-instructions. Use a separate account without private videos, memberships, or
-sensitive playlists: the playback server is public, and authenticated extraction
-can access content available to that account. Account use with yt-dlp can risk
-suspension. Never put cookie contents in GitHub, logs, or chat.
+`/healthz` and `/diagnostics` expose versions and readiness only.
+`/status/VIDEO_ID` reports a safe failure category such as `youtube-bot-check`,
+`cookies-expired`, `youtube-forbidden`, `timeout`, or `conversion-failed`.
+No cookie contents, account data, or generated tokens are returned.
 
-In Render → Environment → Secret Files, create `youtube-cookies.txt` and paste
-the export. Render mounts it at `/etc/secrets/youtube-cookies.txt`. The server
-automatically detects the file and gives each downloader an isolated writable
-copy, deleted when the request finishes or fails. Cookies may expire and may
-not overcome an IP block. `YOUTUBE_COOKIES_FILE` can override the file path.
+Free Render can sleep when idle; caches are temporary and can disappear on
+restart. The image supports videos up to ten minutes and converts one at a time.
+Live streams, comments, cloud playlists, and sign-in in the stock app are absent.
+Browse tabs use search-backed suggestions rather than official rankings.
 
-## Diagnostics and limits
-
-`/healthz` reports the application version. `/diagnostics` exposes only software
-versions and readiness flags: no generated tokens, cookie contents, or account
-information. `/status/VIDEO_ID` exposes a safe failure category such as
-`youtube-bot-check`, `youtube-forbidden`, `cookies-expired`, `timeout`, or
-`conversion-failed`. Private details remain in operator logs.
-
-Free Render sleeps after idle periods, and cached videos can disappear after
-sleep or restart. The image limits videos to ten minutes, converts one at a
-time, and uses a bounded cache. Comments, sign-in inside the old app, live
-streams, and cloud playlist management are not implemented. Browse tabs use
-search-backed suggestions rather than official YouTube rankings.
-
-## Verification
-
-- Twenty-two local tests cover feeds, XML escaping, ranges, queue limits, credential
-  copy cleanup, safe status reporting, and a real FFmpeg compatibility conversion.
-- The token provider installs and compiles under Node 24; its local `/ping` responds.
-- Both processes start through the supervisor; diagnostics report provider ready
-  and the expected downloader version, the sample MP4 is served, and shutdown works.
-- Version 1.1 built successfully on Render; its live provider was ready, but
-  the tested YouTube download was blocked. Version 1.2 and stock-app HLS need
-  the user's deployment and physical phone test.
+Twenty-two local tests cover feed XML, public playback routes, byte ranges,
+HEAD, immutable build-generated samples, migration from the old HLS setting,
+queue limits, short-job automatic playback, private-cookie cleanup, and safe
+error reporting. Real FFmpeg tests check H.264 Baseline/AAC-LC, MP4 fast-start
+layout, and the full conversion-to-cache path. These tests establish server
+behavior; they do not establish playback of a real YouTube video on the phone.
 
 ## Primary sources
 
+- https://developer.apple.com/library/archive/documentation/AppleApplications/Reference/SafariWebContent/CreatingVideoforSafarioniPhone/CreatingVideoforSafarioniPhone.html
+- https://github.com/Preloading/ios3tuberepairserver
 - https://github.com/yt-dlp/yt-dlp/wiki/PO-Token-Guide
+- https://github.com/yt-dlp/yt-dlp/wiki/Extractors#exporting-youtube-cookies
 - https://github.com/Brainicism/bgutil-ytdlp-pot-provider
-- https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/tag/2026.09.27.232945
 - https://render.com/docs/configure-environment-variables
 - https://render.com/docs/free
 - https://github.com/ObscureMosquito/TubeRepair-Client
 - https://github.com/ShahAndI123/Modified-Tuberepair-for-ios-2-6-built-in-YT-best-for-pre-iphone-4
 
 See NOTICE.md and LICENSE for attribution and licensing.
-
-
-## Faster playback update (2g-1.2.1)
-
-Short top search results (up to sixty seconds) begin preparing automatically
-when their feeds are served. Prefetching uses only an idle queue; the server
-does not download every visible result. Opening a video's details also starts
-preparation, and its known metadata avoids a repeated metadata extraction.
-A playback GET may wait up to eight seconds under the normal loading spinner
-and serve the completed MP4 directly if it finishes during that interval.
-Only two requests can wait at once, leaving server capacity for other routes.
-Cached videos remain immediate. New long videos can still require preparation.
-
-### Try progressive streaming in the stock app
-
-1. Deploy the latest commit. Keep the existing TubeRepair Custom URL.
-2. In the stock YouTube app search for **stream test**. Play the **Streaming test**
-   result. This is an original local sample and does not need YouTube access.
-3. If it plays, set Render environment variable `PLAYBACK_MODE=hls`, then choose
-   **Save and deploy** from the save dropdown. This reuses the existing build.
-4. If the stock app rejects the sample, leave `PLAYBACK_MODE` unset (MP4).
-
-An optional streaming mode serves HLS version 2 playlists with integer durations
-and separate MPEG-TS segments, H.264 Baseline level 3.0 / AAC-LC. Modern fragmented
-MP4 is avoided. The video can begin after three complete two-second segments
-are encoded while the rest continues. Full source download is still required
-before encoding starts, so this reduces conversion wait rather than guaranteeing
-instant playback. The original YouTube player must pass the phone test before
-streaming is enabled. Partial files are not served, and failed streams are removed.
-
-Settings: `PREFETCH_SECONDS=0` disables speculative prefetch;
-`PLAYBACK_WAIT_SECONDS=0` disables the brief automatic wait; default is eight
-seconds, capped at fifteen. The stream test always uses its own local files.
-
-The real-time FFmpeg test verifies that a version 2 playlist and playable codec
-segments appear while the encoder is still running. Routes, byte ranges, and
-partial-stream safety are covered locally. Stock-app HLS playback remains
-unverified on the physical phone.
-
-At the live test of version 1.1, the provider was ready but Me at the zoo still
-failed with `youtube-bot-check`, and diagnostics reported no private cookies
-loaded. Faster playback cannot independently fix that upstream access failure.
-
-Sources for legacy streaming:
-https://developer.apple.com/library/archive/documentation/NetworkingInternet/Conceptual/StreamingMediaGuide/UsingHTTPLiveStreaming/UsingHTTPLiveStreaming.html
-https://developer.apple.com/library/archive/referencelibrary/GettingStarted/AboutHTTPLiveStreaming/about/about.html
-https://ffmpeg.org/ffmpeg-formats.html
-
-### Streaming sample server-error fix
-
-The version 1.2 sample returned HTTP 502 on Render because the serving route
-tried to change the modification time of its root-owned, build-generated folder.
-This caused the phone's "This movie could not be played" message before it
-received the playlist or video segments. Version 1.2.1 reads sample files without
-modifying them; only writable runtime cache folders have access times updated.
-The regression test reproduces the forbidden modification and verifies playlist
-GET/HEAD, the stock playback redirect, and segment byte ranges after the fix.
-Actual stock-app HLS compatibility still requires the corrected phone test.
