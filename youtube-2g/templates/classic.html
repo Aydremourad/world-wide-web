@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="YouTube">
+<link rel="apple-touch-icon-precomposed" href="/classic/icon.png">
+<title>YouTube Classic</title>
+<style type="text/css">
+html,body{margin:0;padding:0;background:#e9e9e9;color:#111;font-family:Helvetica,Arial,sans-serif;-webkit-text-size-adjust:none}
+.top{height:44px;line-height:44px;text-align:center;font-weight:bold;font-size:20px;color:#222;text-shadow:0 1px 0 #fff;border-bottom:1px solid #777;background:#d9d9d9;background:-webkit-gradient(linear,left top,left bottom,from(#f7f7f7),to(#bdbdbd))}
+.brand{white-space:nowrap}.tube{color:#fff;text-shadow:0 -1px 0 #7c0000;background:#c31b1b;border:1px solid #8d0d0d;-webkit-border-radius:5px;padding:2px 5px;margin-left:2px}
+.searchbar{padding:8px;background:#c8ced6;border-bottom:1px solid #8b929b;text-align:center}
+.searchbar input.q{width:69%;font-size:16px;padding:6px 5px;border:1px solid #7c8288;-webkit-border-radius:7px;background:#fff}
+.searchbar input.go{font-size:15px;font-weight:bold;padding:5px 10px;margin-left:4px;color:#222;border:1px solid #777;-webkit-border-radius:6px;background:#eee;background:-webkit-gradient(linear,left top,left bottom,from(#fff),to(#c6c6c6))}
+.notice{padding:14px 12px;font-size:14px;line-height:19px;color:#444;text-align:center}
+.section{padding:6px 10px;background:#8b8b8b;color:#fff;font-weight:bold;font-size:13px;text-shadow:0 -1px 0 #555;border-top:1px solid #737373;border-bottom:1px solid #6d6d6d}
+.result{display:block;min-height:76px;padding:7px 8px;background:#fff;border-bottom:1px solid #c8c8c8;color:#111;text-decoration:none}
+.thumb{float:left;width:96px;height:72px;margin-right:9px;border:1px solid #999;background:#111}
+.rtitle{font-size:15px;font-weight:bold;line-height:18px;padding-top:1px}
+.meta{font-size:12px;color:#777;margin-top:5px;line-height:15px}
+.clear{clear:both;height:0;overflow:hidden}
+.empty{padding:20px 12px;text-align:center;color:#555}
+.footer{padding:14px 10px;text-align:center;font-size:12px;color:#777}
+.footer a{color:#245a9a}
+</style>
+</head>
+<body>
+<div class="top"><span class="brand">You<span class="tube">Tube</span> Classic</span></div>
+<form class="searchbar" action="/classic/search" method="get">
+<input class="q" type="text" name="q" value="{{ query|default('') }}" autocapitalize="off" autocorrect="off">
+<input class="go" type="submit" value="Search">
+</form>
+{% if error %}
+<div class="notice">{{ error }}</div>
+{% elif results is not none %}
+<div class="section">Results{% if query %} for "{{ query }}"{% endif %}</div>
+{% if results %}
+{% for item in results %}
+<a class="result" href="/classic/watch/{{ item.videoId }}">
+<img class="thumb" src="/thumb/{{ item.videoId }}" alt="">
+<div class="rtitle">{{ item.title }}</div>
+<div class="meta">{{ item.author }}{% if item.durationLabel %} &bull; {{ item.durationLabel }}{% endif %}</div>
+<div class="clear"></div>
+</a>
+{% endfor %}
+{% else %}
+<div class="empty">No videos found.</div>
+{% endif %}
+{% else %}
+<div class="notice">
+Search YouTube above. This app is independent of TubeRepair and the stock YouTube app.
+<br><br>
+Tap a result once. The server will prepare an iPhone-compatible copy and open it automatically when ready.
+<br><br>
+<b>Add this page to your Home Screen</b> to use it like an app.
+</div>
+<div class="section">Player Test</div>
+<a class="result" href="/classic/watch/MP4TEST0002">
+<img class="thumb" src="/thumb/MP4TEST0002" alt="">
+<div class="rtitle">Playback Test</div>
+<div class="meta">Known-compatible local MP4</div>
+<div class="clear"></div>
+</a>
+{% endif %}
+<div class="footer">YouTube Classic for iPhone OS 3 &bull; <a href="/diagnostics">Server status</a></div>
+</body>
+</html>
