@@ -9,7 +9,8 @@
 html,body{margin:0;padding:0;background:#f6f6f6;color:#202122;font-family:Arial,Helvetica,sans-serif;font-size:13px;-webkit-text-size-adjust:none}
 #page{width:320px;margin:0 auto;min-height:480px}
 #top{height:44px;line-height:44px;text-align:center;background:#fff;border-bottom:1px solid #aaa;font-family:Georgia,"Times New Roman",serif;font-size:20px;position:relative}
-#back{position:absolute;left:8px;top:7px;height:29px;line-height:31px;padding:0 9px;border:1px solid #888;-webkit-border-radius:6px;border-radius:6px;background:#eee;background:-webkit-gradient(linear,left top,left bottom,from(#fff),to(#ccc));font:bold 11px Arial;color:#333;text-decoration:none}
+#back{position:absolute;left:8px;top:7px;height:29px;line-height:29px;padding:0 9px;border:1px solid #888;-webkit-border-radius:6px;border-radius:6px;background:#eee;background:-webkit-gradient(linear,left top,left bottom,from(#fff),to(#ccc));font:bold 11px Arial;color:#333;text-decoration:none}
+#back span{position:relative;top:3px}
 #content{padding:10px 9px 20px}
 .article{background:#fff;border:2px solid #78818a;-webkit-border-radius:10px;border-radius:10px;padding:11px;-webkit-box-shadow:0 1px 1px rgba(0,0,0,.15)}
 h1{font-family:Georgia,"Times New Roman",serif;font-size:24px;font-weight:normal;line-height:27px;margin:0 0 7px;padding-bottom:6px;border-bottom:1px solid #aaa}
@@ -76,7 +77,7 @@ function wikiArticleCallback(data){
 </head>
 <body onload="init()">
 <div id="page">
-<div id="top"><a id="back" href="wikipedia.html">Wikipedia</a>Article</div>
+<div id="top"><a id="back" href="wikipedia.html"><span>Wikipedia</span></a>Article</div>
 <div id="content">
 <div id="article" class="article"><div class="msg">Loading article...</div></div>
 <div id="actions" class="actions"><a href="wikipedia.html">Wikipedia Home</a></div>
