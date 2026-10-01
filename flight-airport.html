@@ -179,7 +179,7 @@ function loadPart(hour,id,d){
   receivePart(data);
   try{window[cb]=null;}catch(e){}
  };
- var src='https://api.allorigins.win/get?callback='+cb+'&url='+encodeURIComponent(target);
+ var src='https://api.allorigins.win/get?callback='+cb+'&disableCache=true&url='+encodeURIComponent(target);
  var s=document.createElement('script');
  s.type='text/javascript';
  s.src=src;
