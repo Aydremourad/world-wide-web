@@ -1,8 +1,11 @@
 <!doctype html>
-<html manifest="cache.manifest">
+<html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=320">
+<meta http-equiv="cache-control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="pragma" content="no-cache">
+<meta http-equiv="expires" content="0">
 <title>Flight Track</title>
 <link rel="stylesheet" href="style.css">
 <style>
@@ -40,7 +43,7 @@ function airportBoard(){
  if(!a){return false;}
  if(a.length==4 && a.charAt(0)=='K'){a=a.substring(1);}
  if(!a.match(/^[A-Z0-9]{3}$/)){alert('Enter a three-letter airport code like FWA.');return false;}
- window.location='flight-airport.html?airport='+encodeURIComponent(a);
+ window.location='flight-airport.html?airport='+encodeURIComponent(a)+'&wwnocache='+(new Date().getTime());
  return false;
 }
 function routeSearch(){
@@ -49,7 +52,7 @@ function routeSearch(){
  if(d.length==4 && d.charAt(0)=='K'){d=d.substring(1);}
  if(a.length==4 && a.charAt(0)=='K'){a=a.substring(1);}
  if(!d.match(/^[A-Z0-9]{3}$/) || !a.match(/^[A-Z0-9]{3}$/)){alert('Enter airport codes like FWA and ORD.');return false;}
- window.location='flight-airport.html?airport='+encodeURIComponent(d)+'&type=departures&dest='+encodeURIComponent(a);
+ window.location='flight-airport.html?airport='+encodeURIComponent(d)+'&type=departures&dest='+encodeURIComponent(a)+'&wwnocache='+(new Date().getTime());
  return false;
 }
 </script>
@@ -89,8 +92,8 @@ function routeSearch(){
 <div class="group">
 <div class="group-title">Fort Wayne</div>
 <div class="list">
-<a href="flight-airport.html?airport=FWA&type=departures">FWA Departures</a>
-<a href="flight-airport.html?airport=FWA&type=arrivals">FWA Arrivals</a>
+<a href="flight-airport.html?airport=FWA&type=departures" onclick="this.href='flight-airport.html?airport=FWA&type=departures&wwnocache='+(new Date().getTime())">FWA Departures</a>
+<a href="flight-airport.html?airport=FWA&type=arrivals" onclick="this.href='flight-airport.html?airport=FWA&type=arrivals&wwnocache='+(new Date().getTime())">FWA Arrivals</a>
 </div>
 </div>
 
