@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="YouTube">
+<link rel="apple-touch-icon-precomposed" href="/classic/icon.png">
+{% if refresh %}<meta http-equiv="refresh" content="{{ refresh }};url=/classic/watch/{{ video_id }}">{% endif %}
+<title>{{ title }}</title>
+<style type="text/css">
+html,body{margin:0;padding:0;background:#111;color:#fff;font-family:Helvetica,Arial,sans-serif;-webkit-text-size-adjust:none}
+.top{height:44px;line-height:44px;text-align:center;font-weight:bold;font-size:18px;border-bottom:1px solid #000;background:#333;background:-webkit-gradient(linear,left top,left bottom,from(#555),to(#222))}
+.card{margin:30px 18px;padding:22px 15px;text-align:center;background:#222;border:1px solid #444;-webkit-border-radius:10px}
+.spinner{font-size:34px;line-height:40px}.title{font-size:18px;font-weight:bold;margin-top:8px}.sub{font-size:13px;color:#bbb;line-height:18px;margin-top:10px}
+.button{display:block;margin:18px auto 0;width:180px;padding:9px 0;color:#111;text-decoration:none;font-size:16px;font-weight:bold;border:1px solid #888;-webkit-border-radius:7px;background:#eee;background:-webkit-gradient(linear,left top,left bottom,from(#fff),to(#bbb))}
+</style>
+</head>
+<body>
+<div class="top">YouTube Classic</div>
+<div class="card">
+{% if failed %}
+<div class="spinner">!</div>
+<div class="title">{{ title }}</div>
+<div class="sub">{{ message }}</div>
+<a class="button" href="/classic">Back to Search</a>
+{% else %}
+<div class="spinner">&#8987;</div>
+<div class="title">Preparing video...</div>
+<div class="sub">Keep this screen open. It checks automatically and will open the video as soon as the iPhone-compatible MP4 is ready.</div>
+<a class="button" href="/classic">Cancel</a>
+{% endif %}
+</div>
+</body>
+</html>
