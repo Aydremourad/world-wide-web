@@ -7,4 +7,4 @@ services:
     dockerfilePath: ./youtube-2g/Dockerfile
     dockerContext: ./youtube-2g
     healthCheckPath: /healthz
-    autoDeployTrigger: "off"
+    autoDeployTrigger: "commit"
