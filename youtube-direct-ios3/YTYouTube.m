@@ -98,7 +98,7 @@ static NSData *YTGET(NSString *urlString, NSString **errorText) {
                                                        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
                                                    timeoutInterval:18.0];
     [req setHTTPMethod:@"GET"];
-    [req setValue:@"YouTubeDirect/0.2 (iPhone OS 3)" forHTTPHeaderField:@"User-Agent"];
+    [req setValue:@"Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_3 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7E18 Safari/528.16" forHTTPHeaderField:@"User-Agent"];\n    [req setValue:@"application/json,text/plain,*/*" forHTTPHeaderField:@"Accept"];
     NSURLResponse *response = nil;
     NSError *err = nil;
     NSData *data = [NSURLConnection sendSynchronousRequest:req returningResponse:&response error:&err];
@@ -281,22 +281,92 @@ static NSURL *YTInvidiousFormatURL(NSString *text) {
 
 + (NSArray *)search:(NSString *)query error:(NSString **)errorText {
     NSString *escaped = [query stringByAddingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
-    NSArray *instances = [NSArray arrayWithObjects:
+    NSMutableString *errors = [NSMutableString string];
+
+    // Primary search path: Piped. The public API documents /search as an
+    // unauthenticated endpoint and filter=videos returns StreamItem objects.
+    NSArray *piped = [NSArray arrayWithObjects:
+        @"https://pipedapi.kavin.rocks",
+        @"https://pipedapi.leptons.xyz",
+        @"https://pipedapi.nosebs.ru",
+        nil];
+
+    NSUInteger h;
+    for (h = 0; h < [piped count]; h++) {
+        NSString *host = [piped objectAtIndex:h];
+        NSString *url = [NSString stringWithFormat:@"%@/search?q=%@&filter=videos",
+                          host, escaped];
+        NSString *requestError = nil;
+        NSData *data = YTGET(url, &requestError);
+        if (!data) {
+            [errors appendFormat:@"%@=%@; ", host,
+             requestError ? requestError : @"no response"];
+            continue;
+        }
+
+        NSString *text = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease];
+        if (!text || ![text length]) {
+            [errors appendFormat:@"%@=empty; ", host];
+            continue;
+        }
+
+        NSArray *objects = YTJSONObjectStringsInArray(text, @"items");
+        NSMutableArray *results = [NSMutableArray array];
+        NSMutableSet *seen = [NSMutableSet set];
+        NSUInteger i;
+        for (i = 0; i < [objects count] && [results count] < 20; i++) {
+            NSString *obj = [objects objectAtIndex:i];
+            NSString *type = YTJSONStringForKey(obj, @"type", 0);
+            if (type && ![type isEqualToString:@"stream"]) continue;
+
+            NSString *relative = YTJSONStringForKey(obj, @"url", 0);
+            if (!relative) continue;
+
+            NSString *videoID = nil;
+            NSRange vr = [relative rangeOfString:@"v="];
+            if (vr.location != NSNotFound) {
+                NSUInteger start = vr.location + vr.length;
+                if (start + 11 <= [relative length])
+                    videoID = [relative substringWithRange:NSMakeRange(start, 11)];
+            }
+            if (!videoID || [videoID length] != 11 || [seen containsObject:videoID])
+                continue;
+
+            NSString *title = YTJSONStringForKey(obj, @"title", 0);
+            NSString *author = YTJSONStringForKey(obj, @"uploaderName", 0);
+            if (!title) title = videoID;
+            if (!author) author = @"YouTube";
+
+            [results addObject:[NSDictionary dictionaryWithObjectsAndKeys:
+                videoID, @"id", title, @"title", author, @"author", nil]];
+            [seen addObject:videoID];
+        }
+
+        if ([results count]) return results;
+        [errors appendFormat:@"%@=no video results; ", host];
+    }
+
+    // Fallback only: some Invidious public instances block anonymous API
+    // traffic with 403, so never make them the sole search path.
+    NSArray *invidious = [NSArray arrayWithObjects:
         @"https://inv.nadeko.net",
         @"https://invidious.nerdvpn.de",
         @"https://yt.chocolatemoo53.com",
         @"https://invidious.tiekoetter.com",
         nil];
 
-    NSString *lastError = nil;
-    NSUInteger h;
-    for (h = 0; h < [instances count]; h++) {
-        NSString *host = [instances objectAtIndex:h];
+    for (h = 0; h < [invidious count]; h++) {
+        NSString *host = [invidious objectAtIndex:h];
         NSString *url = [NSString stringWithFormat:
             @"%@/api/v1/search?q=%@&type=video&region=US&hl=en",
             host, escaped];
-        NSData *data = YTGET(url, &lastError);
-        if (!data) continue;
+        NSString *requestError = nil;
+        NSData *data = YTGET(url, &requestError);
+        if (!data) {
+            [errors appendFormat:@"%@=%@; ", host,
+             requestError ? requestError : @"no response"];
+            continue;
+        }
 
         NSString *text = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease];
         if (!text || ![text length]) continue;
@@ -309,25 +379,23 @@ static NSURL *YTInvidiousFormatURL(NSString *text) {
             NSString *obj = [objects objectAtIndex:i];
             NSString *type = YTJSONStringForKey(obj, @"type", 0);
             if (type && ![type isEqualToString:@"video"]) continue;
-
             NSString *videoID = YTJSONStringForKey(obj, @"videoId", 0);
             if (!videoID || [videoID length] != 11 || [seen containsObject:videoID]) continue;
             NSString *title = YTJSONStringForKey(obj, @"title", 0);
             NSString *author = YTJSONStringForKey(obj, @"author", 0);
             if (!title) title = videoID;
             if (!author) author = @"YouTube";
-
             [results addObject:[NSDictionary dictionaryWithObjectsAndKeys:
                 videoID, @"id", title, @"title", author, @"author", nil]];
             [seen addObject:videoID];
         }
         if ([results count]) return results;
-        lastError = [NSString stringWithFormat:@"No video results from %@", host];
+        [errors appendFormat:@"%@=no video results; ", host];
     }
 
     if (errorText) {
-        *errorText = [NSString stringWithFormat:@"Search resolver failed. Last error: %@",
-                      lastError ? lastError : @"no response"];
+        *errorText = [NSString stringWithFormat:@"All public search resolvers failed: %@",
+                      [errors length] ? errors : @"no response"];
     }
     return nil;
 }
