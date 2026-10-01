@@ -51,6 +51,25 @@ export TARGET_LD="$LINK_WRAPPER"
 echo "Using armv6 linker: $LEGACY_LD"
 make clean SDKVERSION="$SDKVER" FINALPACKAGE=1
 make package SDKVERSION="$SDKVER" FINALPACKAGE=1
+
+BIN=".theos/obj/release/armv6/YouTubeDirect.app/YouTubeDirect"
+if [ ! -f "$BIN" ]; then
+  BIN=".theos/obj/debug/armv6/YouTubeDirect.app/YouTubeDirect"
+fi
+echo
+echo "Checking Mach-O load commands..."
+if [ -f "$BIN" ]; then
+  xcrun otool -hv "$BIN" || true
+  xcrun otool -l "$BIN" | egrep "LC_MAIN|LC_UNIXTHREAD|LC_VERSION_MIN_IPHONEOS|LC_BUILD_VERSION|version|minos" || true
+  if xcrun otool -l "$BIN" | grep -q "LC_MAIN"; then
+    echo "ERROR: Binary still contains LC_MAIN; iPhone OS 3 cannot launch it."
+    exit 3
+  fi
+  if ! xcrun otool -l "$BIN" | grep -q "LC_UNIXTHREAD"; then
+    echo "ERROR: Binary does not contain LC_UNIXTHREAD."
+    exit 4
+  fi
+fi
 echo
 echo "Built packages:"
 find packages -type f -name '*.deb' -maxdepth 2 -print
