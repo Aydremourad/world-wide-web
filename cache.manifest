@@ -1,5 +1,5 @@
 CACHE MANIFEST
-# World Wide Web cache v37
+# World Wide Web cache v38
 
 CACHE:
 index.html
@@ -20,9 +20,7 @@ canterbury-logo.png
 canterbury-touch-icon.png
 www-touch-icon-57-v2.png
 www-touch-icon-114.png
-apple-touch-icon-precomposed.png
 apple-touch-icon.png
-apple-touch-icon-57-precomposed.png
 apple-touch-icon-114-precomposed.png
 
 NETWORK:
