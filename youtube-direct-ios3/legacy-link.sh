@@ -7,5 +7,6 @@ if [ ! -x "$LEGACY_LD" ]; then
   exit 1
 fi
 
-# Keep the current Apple clang driver, but force cctools-port ld64.
-exec xcrun clang -fuse-ld="$LEGACY_LD" "$@"
+# iPhone OS 3 predates LC_MAIN and PIE startup semantics used by modern ld64.
+# Force the classic LC_UNIXTHREAD-style entry point and a non-PIE executable.
+exec xcrun clang -fuse-ld="$LEGACY_LD" -Wl,-no_new_main -Wl,-no_pie "$@"
