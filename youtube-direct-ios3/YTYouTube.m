@@ -584,9 +584,6 @@ static NSURL *YTDownloadVideoLocally(NSURL *remoteURL, NSString *videoID, NSStri
 static NSString *YTFFmpegPath(void) {
     NSArray *paths = [NSArray arrayWithObjects:
         @"/usr/libexec/ytdirect-ffmpeg",
-        @"/usr/bin/ffmpeg",
-        @"/usr/local/bin/ffmpeg",
-        @"/bin/ffmpeg",
         nil];
     NSUInteger i;
     for (i = 0; i < [paths count]; i++) {
