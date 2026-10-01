@@ -46,7 +46,7 @@ LOCAL_TEST_IDS = {PLAYBACK_TEST_ID, STREAM_TEST_ID}
 PLAYBACK_TEST_ITEM = dict(videoId=PLAYBACK_TEST_ID, title='Playback test',
     author='YouTube 2G', authorId='unknown', description='A local playback test.',
     published=0, lengthSeconds=8, viewCount=0)
-VERSION = '2g-1.3'
+VERSION = '2g-1.4'
 
 
 def media_ready(vid):
@@ -62,7 +62,9 @@ class DownloadError(RuntimeError):
         self.code = ('youtube-bot-check' if 'confirm' in lower and 'bot' in lower else
                      'cookies-expired' if 'cookies' in lower and ('expired' in lower or 'no longer valid' in lower) else
                      'youtube-forbidden' if '403' in lower else
-                     'no-playable-format' if 'requested format' in lower else
+                     'no-playable-format' if ('requested format' in lower or
+                                              'no video formats found' in lower or
+                                              'no formats found' in lower) else
                      'download-failed')
 
 
@@ -79,31 +81,49 @@ def base_url():
 
 
 def run_ytdlp(args, timeout=90):
-    # Credentials are read only from a private, operator-managed secret file.
-    cmd = [sys.executable, '-m', 'yt_dlp', '--ignore-config', '--no-warnings',
-           '--no-playlist', '--socket-timeout', '15', '--retries', '1',
-           '--extractor-retries', '1']
+    # YouTube's current rollout can return zero usable formats specifically for
+    # logged-in mweb/web_embedded sessions. Include yt-dlp's normal clients and,
+    # when a private cookie jar is available, retry once without it. This keeps
+    # cookies useful for Render IP bot checks without making a bad account-side
+    # experiment a single point of failure.
+    base_cmd = [sys.executable, '-m', 'yt_dlp', '--ignore-config', '--no-warnings',
+                '--no-playlist', '--socket-timeout', '15', '--retries', '1',
+                '--extractor-retries', '1']
     if os.environ.get('YOUTUBE_POT_ENABLED') == '1':
-        cmd += ['--extractor-args', 'youtube:player_client=mweb,web_embedded',
-                '--extractor-args', 'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416']
-    cmd += args
+        base_cmd += [
+            '--extractor-args', 'youtube:player_client=default,mweb,web_embedded',
+            '--extractor-args', 'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416',
+        ]
+
     configured = os.environ.get('YOUTUBE_COOKIES_FILE')
     secret = Path(configured or '/etc/secrets/youtube-cookies.txt')
     if configured and not secret.is_file():
         raise RuntimeError('Configured YouTube cookie file is missing')
-    # yt-dlp writes its cookie jar. Give each request its own writable copy,
-    # leaving the mounted secret untouched and deleting the copy on all exits.
-    with tempfile.TemporaryDirectory(prefix='cookies-', dir=STATE) as work:
-        if secret.is_file():
-            jar = Path(work) / 'cookies.txt'
-            shutil.copyfile(secret, jar)
-            jar.chmod(0o600)
-            cmd[4:4] = ['--cookies', str(jar)]
-        with downloads:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    if result.returncode:
-        raise DownloadError(result.stderr[-1200:] or 'YouTube request failed')
-    return result.stdout
+
+    attempts = (True, False) if secret.is_file() else (False,)
+    failures = []
+    for use_cookies in attempts:
+        cmd = list(base_cmd)
+        with tempfile.TemporaryDirectory(prefix='cookies-', dir=STATE) as work:
+            if use_cookies:
+                # yt-dlp writes its cookie jar. Work on a private copy and leave
+                # the Render secret file untouched.
+                jar = Path(work) / 'cookies.txt'
+                shutil.copyfile(secret, jar)
+                jar.chmod(0o600)
+                cmd[4:4] = ['--cookies', str(jar)]
+            cmd += args
+            with downloads:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if result.returncode == 0:
+            if failures:
+                log.info('yt-dlp anonymous fallback succeeded after cookie-session failure')
+            return result.stdout
+        failures.append(result.stderr[-1200:] or 'YouTube request failed')
+        if use_cookies:
+            log.warning('yt-dlp cookie-session extraction failed; retrying without cookies')
+
+    raise DownloadError(failures[-1])
 
 
 def normalize(item):
@@ -227,7 +247,8 @@ def diagnostics():
     # Only readiness flags and versions; no tokens, file contents, or account data.
     return jsonify(version=VERSION, downloader=version('yt-dlp'),
                    token_provider_ready=provider, cookies_loaded=secret.is_file(),
-                   playback_mode='mp4')
+                   playback_mode='mp4', youtube_clients='default,mweb,web_embedded',
+                   cookie_fallback='anonymous')
 
 
 @app.get('/feeds/api/videos')
