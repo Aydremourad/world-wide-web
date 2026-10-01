@@ -72,6 +72,15 @@ if [ -f "$BIN" ]; then
     echo "ERROR: Binary does not contain LC_UNIXTHREAD."
     exit 4
   fi
+  if xcrun otool -hv "$BIN" | grep -q " PIE"; then
+    echo "ERROR: Binary is still PIE; iPhone OS 3 build must be non-PIE."
+    exit 5
+  fi
+  if xcrun otool -l "$BIN" | grep -q "LC_BUILD_VERSION"; then
+    echo "ERROR: Binary contains modern LC_BUILD_VERSION."
+    exit 6
+  fi
+  echo "Mach-O check passed: LC_UNIXTHREAD, non-PIE, legacy version command."
 fi
 echo
 echo "Built packages:"
