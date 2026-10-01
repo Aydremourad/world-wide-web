@@ -9,5 +9,6 @@
     UIActivityIndicatorView *_spinner;
     UILabel *_statusLabel;
     MPMoviePlayerController *_moviePlayer;
+    NSDate *_movieStartedAt;
 }
 @end
