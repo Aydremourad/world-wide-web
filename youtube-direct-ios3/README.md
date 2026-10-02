@@ -226,3 +226,38 @@ for <=256x144 software video. Larger fallback sources retain swscale and conserv
 frame dropping. If Apple's native player rejects a combined stream, the app now
 resolves a 144p stream before entering the software player rather than decoding the
 same large combined file in software.
+
+
+## 1.0.0-debug2
+
+Debug2 addresses two device findings from debug1: the main navigation UI could remain
+under the restored status bar after closing a video, and software playback measured
+about 4 displayed frames per second on the original iPhone.
+
+The root controller now explicitly restores the visible status bar and the screen's
+application frame when it reappears. The player restores the status bar before
+dismissal, so UIKit never reveals the underlying navigation controller while it is
+still laid out as a 320x480 fullscreen view.
+
+The playback pipeline is tuned around the ARM1176JZF-S rather than asking it to
+decode a 30 fps Main-profile stream it cannot sustain. Software playback prefers
+itag 597 when available (144p, lower bitrate and nominally 15 fps), while itag 160
+remains a fallback. The app build itself now uses -O3 and ARM1176-specific code
+generation.
+
+AAC first attempts direct compressed AudioQueue playback with the MP4 magic cookie.
+If iPhone OS rejects that compressed queue, the existing AudioConverter-to-PCM path
+remains the automatic fallback. Direct mode removes our PCM conversion work from
+the application playback thread budget and tracks actual AAC frames per returned
+queue buffer so the audio clock remains frame-based.
+
+The video handoff is now zero-copy: converted RGB565 buffers are transferred into
+NSData ownership rather than copied into a second 74 KiB allocation for every
+presented 256x144 frame. The OpenGL drawable is RGB565 as well, matching the texture
+and avoiding a 32-bit RGBA backbuffer. Video receives a higher worker priority;
+direct AAC refill receives a lower one.
+
+Debug2's player title reports two live rates: D is decoded video frames per second
+and P is frames actually presented on screen. For example, "144p D13.8 P13.4"
+means decoding and rendering are both near the 15 fps source rate; a high D with a
+low P points to the render/handoff path instead.

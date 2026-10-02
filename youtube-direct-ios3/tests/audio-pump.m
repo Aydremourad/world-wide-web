@@ -28,6 +28,8 @@ typedef struct {
     BOOL draining;
     BOOL stuck;
     BOOL drifting;
+    BOOL compressed;
+    UInt32 framesPerPacket;
     double artificialClock;
     unsigned pauses;
 } FakeQueue;
@@ -35,11 +37,15 @@ static OSStatus YTFakeEnqueue(void *opaque, AudioQueueBufferRef buffer, UInt32 p
                         AudioStreamPacketDescription *descriptions) {
     FakeQueue *queue=opaque;
     assert(packets && buffer->mAudioDataByteSize && buffer->mAudioDataByteSize <= YT_AUDIO_BUFFER_BYTES);
-    assert(descriptions==NULL && buffer->mAudioDataByteSize==packets*4);
+    UInt32 frames=packets;
+    if(queue->compressed) {
+        assert(descriptions!=NULL && queue->framesPerPacket>0);
+        frames=packets*queue->framesPerPacket;
+    } else assert(descriptions==NULL && buffer->mAudioDataByteSize==packets*4);
     pthread_mutex_lock(&queue->mutex);
     assert(queue->count < 16);
     for (unsigned i=0;i<queue->count;i++) assert(queue->buffers[i] != buffer);
-    queue->buffers[queue->count]=buffer; queue->packets[queue->count++]=packets;
+    queue->buffers[queue->count]=buffer; queue->packets[queue->count++]=frames;
     pthread_mutex_unlock(&queue->mutex);
     return noErr;
 }
@@ -86,6 +92,24 @@ static void YTFakeSetUpAtTime(YTAudio *audio, FakeQueue *queue, volatile BOOL *s
 }
 static void YTFakeSetUp(YTAudio *audio,FakeQueue *queue,volatile BOOL *stop,volatile BOOL *paused) {
     YTFakeSetUpAtTime(audio,queue,stop,paused,0);
+}
+static void YTFakeSetUpDirect(YTAudio *audio,FakeQueue *queue,volatile BOOL *stop,volatile BOOL *paused) {
+    memset(audio,0,sizeof(*audio)); memset(queue,0,sizeof(*queue));
+    pthread_mutex_init(&queue->mutex,NULL);
+    audio->startTime=0; audio->stop=stop; audio->paused=paused;
+    audio->source=[[YTMediaSource alloc] initWithURL:[NSURL URLWithString:@"https://movie.example/combined.mp4"]
+        length:[Movie length] userAgent:@"fixture"];
+    assert(YTAudioOpen(audio)==noErr);
+    audio->directAAC=YES; audio->discardFrames=0;
+    queue->compressed=YES; queue->framesPerPacket=audio->inputFormat.mFramesPerPacket;
+    audio->sink=(YTAudioSink){queue,YTFakeEnqueue,YTFakeRunning,YTFakeStart,YTFakeDrain,YTFakePause,YTFakeClock};
+    for(unsigned i=0;i<YT_AUDIO_BUFFERS;i++) {
+        AudioQueueBuffer initial={.mAudioDataBytesCapacity=YT_AUDIO_BUFFER_BYTES,.mAudioData=malloc(YT_AUDIO_BUFFER_BYTES)};
+        audio->buffers[i]=malloc(sizeof(initial)); memcpy(audio->buffers[i],&initial,sizeof(initial));
+    }
+    assert(YTAudioBegin(audio)==noErr && audio->pending>0);
+    audio->started=YES; YTFakeStart(queue);
+    if(audio->eof) YTFakeDrain(queue);
 }
 
 static BOOL YTFakeConsume(YTAudio *audio, FakeQueue *queue, double *slowest) {
@@ -138,6 +162,22 @@ int main(int argc,char **argv) {
     assert(queue.starts > 1 && Requests > 8 && slowest < 0.10);
     NSLog(@"Delayed audio test passed: %llu PCM frames consumed across %d network chunks, %u queue starts, longest callback %.4f seconds.",
         (unsigned long long)queue.consumed,Requests,queue.starts,slowest);
+    YTFakeCleanUp(&audio,&queue);
+
+    // Direct AAC mode must enqueue compressed packets with packet descriptions
+    // while preserving the same frame-based playback clock used for A/V sync.
+    Requests=0; YTFakeSetUpDirect(&audio,&queue,&stop,&paused);
+    deadline=[NSDate timeIntervalSinceReferenceDate]+12; finished=NO;
+    while([NSDate timeIntervalSinceReferenceDate]<deadline && !audio.failed) {
+        BOOL empty=YTFakeConsume(&audio,&queue,&slowest);
+        if(audio.eof && empty) { finished=YES; break; }
+        [NSThread sleepForTimeInterval:0.005];
+    }
+    assert(finished && !audio.failed && audio.directAAC);
+    assert(queue.consumed==audio.decodedFrames && audio.playedFrames==audio.decodedFrames);
+    assert(audio.packet==(SInt64)expected && queue.consumed>1000000);
+    NSLog(@"Direct AAC queue test passed: %llu decoded audio frames without PCM conversion.",
+        (unsigned long long)queue.consumed);
     YTFakeCleanUp(&audio,&queue);
     // A queue may report running while neither callbacks nor its clock advance.
     Requests=0; YTFakeSetUp(&audio,&queue,&stop,&paused);
