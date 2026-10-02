@@ -14,10 +14,15 @@ int main(void) {
         double now=i*0.05;
         if (YTShouldPresentFrame(-2,now,last)) { presented++; last=now; }
     }
-    assert(presented>=30 && presented<=41);
-    assert(YTNeedsVideoCatchUp(1,4,1,0));
-    assert(!YTNeedsVideoCatchUp(1,4,1,1));
-    assert(!YTNeedsVideoCatchUp(1,4,0,0));
-    puts("Player timing passed: late frames keep updating, keyframe catch-up and restart clock continuity.");
+    assert(presented>=95 && presented<=105);
+    assert(YTClampSeekTime(-5,40)==0);
+    assert(YTClampSeekTime(10,40)==10);
+    assert(YTClampSeekTime(100,40)==39.9);
+    assert(YTClampSeekTime(NAN,40)==0);
+    assert(!YTNeedsVideoResync(10,12,100,0));
+    assert(YTNeedsVideoResync(10,14,100,0));
+    assert(!YTNeedsVideoResync(10,14,102,100));
+    assert(YTNeedsVideoResync(10,14,105,100));
+    puts("Player timing passed: late display has no four-fps cap, bounded seeks and restart clock continuity.");
     return 0;
 }

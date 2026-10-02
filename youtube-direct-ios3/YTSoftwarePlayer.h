@@ -7,18 +7,23 @@
     UILabel *_message, *_elapsedLabel, *_durationLabel;
     UIActivityIndicatorView *_spinner;
     UIToolbar *_topBar, *_transportBar;
-    UIBarButtonItem *_playItem, *_fitItem;
+    UIBarButtonItem *_playItem, *_fitItem, *_backItem, *_forwardItem;
     UIView *_bottomControls;
-    UIProgressView *_progress;
+    UISlider *_progress;
     UISlider *_volume;
     NSTimer *_controlsTimer;
-    YTMediaSource *_videoSource, *_audioSource;
+    YTMediaSource *_videoSource, *_audioSource, *_videoCache, *_audioCache;
+    NSCondition *_seekCondition;
+    NSDictionary *_pendingFrame;
+    double _seekTime;
+    unsigned _seekSerial;
     AudioQueueRef _outputQueue;
     void *_audioPump;
     double _duration, _sampleRate, _lastClock, _clockOffset;
     NSTimeInterval _lastControlTouch;
-    BOOL _controlsHidden, _oldStatusHidden, _finished;
-    volatile BOOL _stop, _paused;
+    BOOL _controlsHidden, _oldStatusHidden, _finished, _scrubbing, _wasPaused;
+    BOOL _seekPending, _frameScheduled;
+    volatile BOOL _stop, _paused, _sessionStop;
 }
 - (id)initWithStreams:(NSDictionary *)streams;
 @end

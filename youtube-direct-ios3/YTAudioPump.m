@@ -5,6 +5,7 @@
 #include <string.h>
 #include <sys/time.h>
 #include <time.h>
+#include <math.h>
 
 static BOOL YTAudioStopped(YTAudio *audio) {
     return audio->localStop || (audio->stop && *audio->stop);
@@ -54,7 +55,7 @@ double YTAudioMediaTime(YTAudio *audio) {
     if(media<audio->mediaTime) media=audio->mediaTime;
     audio->mediaTime=media;
     pthread_mutex_unlock(&audio->mutex);
-    return media;
+    return audio->startTime + media;
 }
 BOOL YTAudioIsDrained(YTAudio *audio) {
     pthread_mutex_lock(&audio->mutex); BOOL drained=audio->eof && !audio->pending; pthread_mutex_unlock(&audio->mutex);
@@ -144,6 +145,16 @@ static OSStatus YTProduceAudio(YTAudio *audio, unsigned slot) {
         if(audio->started) audio->sink.drain(audio->sink.context);
         return noErr;
     }
+    // Seek to an independently decodable AAC packet, then remove the PCM
+    // before the requested sample. Never enqueue audio from before the seek.
+    if(audio->discardFrames) {
+        UInt32 discard=audio->discardFrames < frames ? audio->discardFrames : frames;
+        frames-=discard; audio->discardFrames-=discard;
+        data.mBuffers[0].mDataByteSize=frames*audio->format.mBytesPerFrame;
+        memmove(buffer->mAudioData,(char *)buffer->mAudioData+discard*audio->format.mBytesPerFrame,
+            data.mBuffers[0].mDataByteSize);
+        if(!frames) return YTProduceAudio(audio,slot);
+    }
     buffer->mAudioDataByteSize=data.mBuffers[0].mDataByteSize;
     pthread_mutex_lock(&audio->mutex); audio->decodedFrames+=frames; audio->pending++; pthread_mutex_unlock(&audio->mutex);
     status=audio->sink.enqueue(audio->sink.context,buffer,frames,NULL);
@@ -198,6 +209,12 @@ OSStatus YTAudioOpen(YTAudio *audio) {
     if(audio->inputFormat.mFormatID!=kAudioFormatMPEG4AAC || audio->inputFormat.mSampleRate<=0 ||
        audio->inputFormat.mChannelsPerFrame<1 || audio->inputFormat.mChannelsPerFrame>2)
         return kAudioFileUnsupportedDataFormatError;
+    if(!isfinite(audio->startTime) || audio->startTime<0) audio->startTime=0;
+    UInt32 packetFrames=audio->inputFormat.mFramesPerPacket;
+    if(!packetFrames) return kAudioFileUnsupportedDataFormatError;
+    UInt64 target=(UInt64)llround(audio->startTime*audio->inputFormat.mSampleRate);
+    audio->packet=(SInt64)(target/packetFrames);
+    audio->discardFrames=(UInt32)(target%packetFrames);
     UInt32 maximum=0; size=sizeof(maximum);
     result=AudioFileGetProperty(audio->file,kAudioFilePropertyPacketSizeUpperBound,&size,&maximum);
     if(result!=noErr || !maximum || maximum>YT_AUDIO_BUFFER_BYTES) return kAudioFileUnspecifiedError;

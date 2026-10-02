@@ -2,16 +2,19 @@
 #include <libavutil/mem.h>
 #include <errno.h>
 #include <string.h>
+#include <math.h>
 
 static int YTAllowedVideoSize(int width, int height) {
     return width > 0 && height > 0 && width <= 640 && height <= 640 && width * height <= 307200;
 }
 int YTOpenH264Decoder(AVCodecContext *codec) {
-    if (!codec || codec->codec_id != AV_CODEC_ID_H264 || !YTAllowedVideoSize(codec->width, codec->height))
+    if (!codec || (codec->codec_id != AV_CODEC_ID_H264 && codec->codec_id != AV_CODEC_ID_MPEG4) || !YTAllowedVideoSize(codec->width, codec->height))
         return AVERROR(EINVAL);
     codec->thread_count = 1;
     codec->flags2 |= AV_CODEC_FLAG2_FAST;
-    if (codec->width * codec->height > 38400) {
+    int mainProfile=codec->codec_id==AV_CODEC_ID_H264 && codec->extradata_size>=4 &&
+        codec->extradata[0]==1 && codec->extradata[1]!=66;
+    if (codec->width * codec->height > 38400 || mainProfile) {
         // Retain all reference pictures; omit non-reference B pictures to reduce
         // work on ARMv6. The audio clock still determines presentation time.
         codec->skip_frame = AVDISCARD_NONREF;
@@ -19,6 +22,18 @@ int YTOpenH264Decoder(AVCodecContext *codec) {
     } else codec->skip_loop_filter = AVDISCARD_NONREF;
     AVCodec *decoder = avcodec_find_decoder(codec->codec_id);
     return decoder ? avcodec_open2(codec, decoder, NULL) : AVERROR_DECODER_NOT_FOUND;
+}
+double YTVideoTimeOrigin(AVStream *stream) {
+    return stream->start_time==AV_NOPTS_VALUE ? 0 : stream->start_time*av_q2d(stream->time_base);
+}
+int YTSeekVideoToTime(AVFormatContext *format,int track,AVCodecContext *codec,double seconds) {
+    if(!format || !codec || track<0 || track>=(int)format->nb_streams || !isfinite(seconds) || seconds<0)
+        return AVERROR(EINVAL);
+    AVStream *stream=format->streams[track];
+    int64_t stamp=(int64_t)llround((seconds+YTVideoTimeOrigin(stream))/av_q2d(stream->time_base));
+    int result=av_seek_frame(format,track,stamp,AVSEEK_FLAG_BACKWARD);
+    if(result>=0) avcodec_flush_buffers(codec);
+    return result;
 }
 int YTConvertVideoFrame(YTVideoImage *image, const AVFrame *frame) {
     if (!YTAllowedVideoSize(frame->width, frame->height)) return AVERROR(EINVAL);

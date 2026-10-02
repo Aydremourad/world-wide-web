@@ -25,4 +25,5 @@
 - (void)shareCacheWithSource:(YTMediaSource *)source;
 - (void)enableStreamingReadAhead;
 - (void)setRequestTimeout:(NSTimeInterval)seconds;
+- (YTMediaSource *)newReader;
 @end

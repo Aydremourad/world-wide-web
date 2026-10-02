@@ -2,6 +2,26 @@
 #include "combined-player.m"
 #undef main
 #include "YTPlayerTiming.h"
+static double FirstPictureAfterSeek(AVFormatContext *format,int track,AVCodecContext *codec,AVFrame *frame,double target) {
+    assert(YTSeekVideoToTime(format,track,codec,target)==0);
+    AVPacket packet; int decoded=0;
+    while(av_read_frame(format,&packet)>=0) {
+        if(packet.stream_index==track) {
+            AVPacket part=packet;
+            while(part.size>0) {
+                int got=0,used=avcodec_decode_video2(codec,frame,&got,&part); assert(used>=0);
+                if(got) {
+                    decoded++;
+                    double seconds=av_frame_get_best_effort_timestamp(frame)*av_q2d(format->streams[track]->time_base)-YTVideoTimeOrigin(format->streams[track]);
+                    if(seconds>=target-0.025) { av_free_packet(&packet); assert(decoded<120); return seconds; }
+                }
+                if(!used) break; part.data+=used; part.size-=used;
+            }
+        }
+        av_free_packet(&packet);
+    }
+    assert(0); return -1;
+}
 int main(int argc,char **argv) {
     assert(argc==2); NSAutoreleasePool *pool=[[NSAutoreleasePool alloc] init];
     Movie=[[NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[1]]] retain];
@@ -13,45 +33,38 @@ int main(int argc,char **argv) {
     format->pb=io; format->flags|=AVFMT_FLAG_CUSTOM_IO;
     assert(avformat_open_input(&format,NULL,NULL,NULL)==0);
     int track=-1;
-    for (unsigned i=0;i<format->nb_streams;i++) if(format->streams[i]->codec->codec_type==AVMEDIA_TYPE_VIDEO) track=i;
+    for(unsigned i=0;i<format->nb_streams;i++) if(format->streams[i]->codec->codec_type==AVMEDIA_TYPE_VIDEO) track=i;
     assert(track>=0); AVCodecContext *codec=format->streams[track]->codec;
     assert(YTOpenH264Decoder(codec)==0);
     AVFrame *frame=av_frame_alloc(); YTVideoImage image={0};
-    AVPacket packet; int catchUp=0,pictures=0,skipped=0; double lastTime=0;
+    AVPacket packet; int pictures=0,nonkeys=0,presented=0; double lastTime=0,lastDisplay=0;
+    // Every reference-bearing packet reaches the decoder even when audio is
+    // ahead. Non-reference B pictures may be dropped by FFmpeg; whole GOPs may not.
     while(av_read_frame(format,&packet)>=0) {
         if(packet.stream_index==track) {
-            int key=(packet.flags&AV_PKT_FLAG_KEY)!=0;
-            double videoTime=packet.pts*av_q2d(format->streams[track]->time_base);
-            // Model a decoder two seconds behind audio for the entire video.
-            if(YTNeedsVideoCatchUp(videoTime,videoTime+2,1,key)) catchUp=1;
-            if(catchUp && !key) { skipped++; av_free_packet(&packet); continue; }
-            int catchUpKey=catchUp && key;
-            if(catchUp) { avcodec_flush_buffers(codec); catchUp=0; }
             AVPacket part=packet;
             while(part.size>0) {
                 int got=0,used=avcodec_decode_video2(codec,frame,&got,&part); assert(used>=0);
                 if(got) {
                     assert(YTConvertVideoFrame(&image,frame)==0);
                     lastTime=av_frame_get_best_effort_timestamp(frame)*av_q2d(format->streams[track]->time_base);
-                    pictures++;
+                    pictures++; if(!frame->key_frame) nonkeys++;
+                    double now=pictures*0.05;
+                    if(YTShouldPresentFrame(-2,now,lastDisplay)) { presented++; lastDisplay=now; }
                 }
                 if(!used) break; part.data+=used; part.size-=used;
-            }
-            if(catchUpKey) {
-                AVPacket empty; av_init_packet(&empty); empty.data=NULL; empty.size=0;
-                for(int i=0;i<4;i++) {
-                    int got=0;
-                    if(avcodec_decode_video2(codec,frame,&got,&empty)<0 || !got) break;
-                    assert(YTConvertVideoFrame(&image,frame)==0);
-                    lastTime=av_frame_get_best_effort_timestamp(frame)*av_q2d(format->streams[track]->time_base);
-                    pictures++;
-                }
             }
         }
         av_free_packet(&packet);
     }
-    assert(pictures>=12 && skipped>100 && lastTime>30);
-    NSLog(@"Video catch-up passed: %d pictures across %.1f seconds, %d stale packets skipped.",pictures,lastTime,skipped);
+    assert(pictures>180 && nonkeys>100 && lastTime>35 && presented>80);
+    NSLog(@"Video continuity passed: %d pictures (%d non-key), %.1f seconds, %d late presentations; no GOP slideshow.",pictures,nonkeys,lastTime,presented);
+    const double targets[]={22.25,4.75,31.15,0,15.5};
+    for(unsigned i=0;i<sizeof(targets)/sizeof(targets[0]);i++) {
+        double actual=FirstPictureAfterSeek(format,track,codec,frame,targets[i]);
+        assert(actual>=targets[i]-0.025 && actual<targets[i]+0.2);
+        NSLog(@"Video seek %.2f -> first picture %.3f",targets[i],actual);
+    }
     YTFreeVideoImage(&image); av_frame_free(&frame); avcodec_close(codec);
     avformat_close_input(&format); av_free(io->buffer); av_free(io); [source release];
     [NSURLProtocol unregisterClass:[YTMovieProtocol class]]; [Movie release]; [pool release]; return 0;

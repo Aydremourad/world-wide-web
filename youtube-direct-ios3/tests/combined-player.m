@@ -70,6 +70,12 @@ int main(int argc, char **argv) {
     unsigned char peek[12];
     assert([audio readAtOffset:0 into:peek count:12]==12); int before=Requests;
     assert([sibling readAtOffset:0 into:peek count:12]==12 && Requests==before);
+    YTMediaSource *session=[audio newReader];
+    assert([session readAtOffset:0 into:peek count:12]==12);
+    [session cancel]; assert([session readAtOffset:0 into:peek count:12]<0);
+    YTMediaSource *replacement=[audio newReader];
+    assert([replacement readAtOffset:0 into:peek count:12]==12 && Requests==before);
+    [session release]; [replacement release];
     [sibling release];
     AudioFileID file=NULL;
     OSStatus status=YTOpenAudioFile(audio, &file);

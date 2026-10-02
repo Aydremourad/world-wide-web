@@ -163,7 +163,7 @@
     if(streams) {
         NSDictionary *info=[streams objectForKey:@"nativeInfo"];
         NSString *route=[[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue] ? @"Apple player" : @"Software player";
-        NSString *diagnostic=[NSString stringWithFormat:@"YouTube 0.9.1\nPlayer: %@\nHeight: %@\nNative probe: %@\n",route,[streams objectForKey:@"height"],info ? info : @"separate tracks"];
+        NSString *diagnostic=[NSString stringWithFormat:@"YouTube 0.9.2\nPlayer: %@\nHeight: %@\nNative probe: %@\n",route,[streams objectForKey:@"height"],info ? info : @"separate tracks"];
         [diagnostic writeToFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"YouTube-playback.txt"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
     }
     NSDictionary *payload = [NSDictionary dictionaryWithObjectsAndKeys:

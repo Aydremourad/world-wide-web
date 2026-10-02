@@ -1,3 +1,4 @@
+#include <limits.h>
 #import "YTYouTube.h"
 #import "YTMediaSource.h"
 #include <stdlib.h>
@@ -337,18 +338,28 @@ static NSString *YTChooseFormat(NSArray *formats, BOOL video) {
     }
     return best;
 }
+static BOOL YTMimeNativeCandidate(NSString *mime) {
+    return [mime length] && ([mime rangeOfString:@"avc1.42" options:NSCaseInsensitiveSearch].location!=NSNotFound ||
+        [mime rangeOfString:@"mp4v.20.3" options:NSCaseInsensitiveSearch].location!=NSNotFound);
+}
 static NSString *YTChooseCombinedMP4(NSArray *formats) {
+    NSString *best=nil; long long bestRank=LLONG_MAX;
     for (NSString *format in formats) {
-        if (YTJSONIntForKey(format, @"itag") != 18 || !YTFormatURL(format)) continue;
+        if (!YTFormatURL(format)) continue;
         NSString *mime = YTJSONStringForKey(format, @"mimeType", 0);
-        if ([mime length] && ([mime rangeOfString:@"video/mp4"].location == NSNotFound ||
-                             [mime rangeOfString:@"avc1"].location == NSNotFound ||
+        if (![mime length] && YTJSONIntForKey(format,@"itag")!=18) continue;
+        if ([mime length] && (([mime rangeOfString:@"video/mp4"].location == NSNotFound &&
+                              [mime rangeOfString:@"video/3gpp"].location == NSNotFound) ||
+                             ([mime rangeOfString:@"avc1"].location == NSNotFound &&
+                              [mime rangeOfString:@"mp4v.20"].location == NSNotFound) ||
                              [mime rangeOfString:@"mp4a.40.2"].location == NSNotFound)) continue;
         NSInteger width = YTJSONIntForKey(format, @"width"), height = YTJSONIntForKey(format, @"height");
         if (width > 640 || height > 640 || (width > 0 && height > 0 && width * height > 307200)) continue;
-        return format;
+        long long pixels=width>0 && height>0 ? width*height : 307200;
+        long long rank=pixels+(YTMimeNativeCandidate(mime) ? 0 : 1000000000LL);
+        if(rank<bestRank) { best=format; bestRank=rank; }
     }
-    return nil;
+    return best;
 }
 static NSString *YTFormatAccess(NSString *format) {
     if (YTFormatURL(format)) return @"URL";
@@ -504,7 +515,7 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
     NSString *combinedMime=YTJSONStringForKey(mp4,@"mimeType",0);
     // A native-capable progressive video avoids CPU decoding, even when a
     // separate Main-profile 144p video is also exposed by this client.
-    BOOL nativeCandidate=mp4 && [combinedMime length] && [combinedMime rangeOfString:@"avc1.42" options:NSCaseInsensitiveSearch].location!=NSNotFound;
+    BOOL nativeCandidate=mp4 && YTMimeNativeCandidate(combinedMime);
     if (nativeCandidate || !video || !audio) {
         if (mp4) { video = audio = mp4; combined = YES; }
     }

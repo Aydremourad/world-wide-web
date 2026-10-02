@@ -24,6 +24,8 @@ typedef struct {
     AudioStreamBasicDescription inputFormat;
     void *compressed;
     UInt64 decodedFrames, playedFrames;
+    double startTime;
+    UInt32 discardFrames;
     double mediaBase, rawBase, rawPrevious, mediaTime;
     BOOL mediaClockReady, heldForPause;
     AudioQueueRef queue;

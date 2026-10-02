@@ -76,7 +76,7 @@ modern collection literals and `NSJSONSerialization`.
   Other codecs and sources above 640 pixels per side or 307200 pixels per
   frame are rejected. Decoding format 18 may be too slow for smooth playback
   on a physical 2G; source resolution still determines H.264 decoding work.
-- No seek control, offline downloads, sign-in or live streams yet.
+- Offline downloads, sign-in and live streams are not implemented.
 - Restricted videos can fail, and YouTube can change client access.
 - Googlevideo must honor byte ranges. Whole-file and non-media responses are
   rejected before they can fill the phone's memory.
@@ -141,3 +141,35 @@ unchanged; compatible streams use Apple's native player controls.
 Combined audio/video readers now share a synchronized 1 MiB chunk cache. The
 loopback bridge shares this cache across native player requests too, avoiding
 duplicate downloads while retaining separate file positions and cancellation.
+
+
+## 0.9.2 playback and seeking
+
+The software player has a draggable timeline and native UIKit rewind/forward
+buttons (15 seconds per tap), remaining time and replay after the end. A seek
+cancels the old readers, joins the old audio producer and monitor, disposes the
+old queue, and starts fresh video/AAC decoders at the same requested media time.
+The video decoder seeks to the preceding keyframe and suppresses preroll; the
+AAC reader selects a packet and trims PCM to the requested sample. User pause
+is preserved, including a preview of the sought frame while paused. Rapid seeks
+replace pending targets and reject frames from earlier sessions.
+
+Playback cache storage survives seeks; each session has independent reader
+cancellation. Main-thread drawing coalesces into one pending frame, so decoding
+no longer waits for every OpenGL presentation. Late pictures can update at up
+to 15 fps instead of the previous hard four-fps limit. Main-profile decoding
+omits non-reference pictures and deblocking, including for small streams.
+Normal late playback no longer skips entire groups to their keyframes. More
+than three seconds of drift permits a video-only reposition, no more than once
+in five seconds; audio remains on its current queue.
+
+Native stream selection examines compatible combined formats regardless of
+itag, and can recognize MPEG-4 Simple Profile with AAC-LC as well as Baseline
+H.264. Actual codec headers still determine eligibility. MPEG-4 support is also
+linked into the fallback decoder. These changes do not convert Main-profile
+H.264 into Baseline, establish live availability of format 17, or prove smooth
+playback on the physical 2G. The Home Screen installer fix from 0.9.1-1 remains.
+
+The regression suite exercises bidirectional MP4 seeks, sought AAC PCM lengths
+and media-clock origins, continuing non-key pictures under ordinary lateness,
+reader cancellation isolation, and the native MPEG-4 Simple Profile probe.

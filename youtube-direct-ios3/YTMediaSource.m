@@ -124,6 +124,12 @@
 - (int64_t)length { return _length; }
 - (NSString *)errorText { return _errorText; }
 - (void)cancel { _cancelled = YES; }
+- (YTMediaSource *)newReader {
+    YTMediaSource *reader=[[YTMediaSource alloc] initWithURL:_url length:_length userAgent:_userAgent];
+    [reader shareCacheWithSource:self];
+    reader->_rangeMode=_rangeMode; reader->_requestTimeout=_requestTimeout;
+    return reader;
+}
 
 - (void)shareCacheWithSource:(YTMediaSource *)source {
     // Attach before either reader starts. File positions and errors remain independent.

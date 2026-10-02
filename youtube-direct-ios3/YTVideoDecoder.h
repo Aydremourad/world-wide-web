@@ -1,6 +1,7 @@
 #ifndef YT_VIDEO_DECODER_H
 #define YT_VIDEO_DECODER_H
 #include <libavcodec/avcodec.h>
+#include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 
 typedef struct {
@@ -12,6 +13,8 @@ typedef struct {
 } YTVideoImage;
 
 int YTOpenH264Decoder(AVCodecContext *codec);
+double YTVideoTimeOrigin(AVStream *stream);
+int YTSeekVideoToTime(AVFormatContext *format,int track,AVCodecContext *codec,double seconds);
 int YTConvertVideoFrame(YTVideoImage *image, const AVFrame *frame);
 void YTFreeVideoImage(YTVideoImage *image);
 #endif

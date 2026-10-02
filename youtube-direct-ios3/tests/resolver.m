@@ -107,6 +107,13 @@ int main(void) {
     result = Resolve([NSString stringWithFormat:@"%@,%@,%@",
         @"{\"itag\":597,\"url\":\"https://media.example/no-length\"}", Video, Audio]);
     assert([[result objectForKey:@"videoLength"] longLongValue] == 70000);
+    NSString *anotherBaseline=[baseline stringByReplacingOccurrencesOfString:@"\"itag\":18" withString:@"\"itag\":777"];
+    result=Resolve([NSString stringWithFormat:@"%@,%@,%@,%@",Combined,anotherBaseline,Video,Audio]);
+    assert([[result objectForKey:@"combined"] boolValue] && [[result objectForKey:@"videoURL"] isEqual:[result objectForKey:@"audioURL"]]);
+    NSString *simple=@"{\"itag\":17,\"mimeType\":\"video/3gpp; codecs=\\\"mp4v.20.3, mp4a.40.2\\\"\",\"width\":176,\"height\":144,\"url\":\"https://media.example/simple?clen=12000\"}";
+    result=Resolve([NSString stringWithFormat:@"%@,%@,%@,%@",Combined,simple,Video,Audio]);
+    assert([[result objectForKey:@"combined"] boolValue] && [[result objectForKey:@"height"] intValue]==144);
+    assert([[[result objectForKey:@"videoURL"] path] isEqualToString:@"/simple"]);
     NSString *error = nil;
     assert(![YTYouTube streamsFromPlayerResponse:Player([NSString stringWithFormat:@"%@,%@", Video,
         @"{\"itag\":139,\"mimeType\":\"audio/mp4; codecs=\\\"mp4a.40.5\\\"\",\"url\":\"https://media.example/HE\"}"])

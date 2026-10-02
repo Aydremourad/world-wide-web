@@ -41,9 +41,20 @@ NSDictionary *YTNativeStreamInfo(NSDictionary *streams) {
             AVCodecContext *codec=video->codec;
             int profile=codec->profile,level=codec->level;
             if(codec->extradata_size>=4 && codec->extradata[0]==1) { profile=codec->extradata[1]; level=codec->extradata[3]; }
+            BOOL supportedVideo=codec->codec_id==AV_CODEC_ID_H264 && profile==66 && level>0 && level<=30;
+            if(codec->codec_id==AV_CODEC_ID_MPEG4) {
+                // MPEG-4 Visual Object Sequence: Simple Profile levels 1-6.
+                // Reject Advanced Simple rather than assuming every mp4v is supported.
+                for(int i=0;i+4<codec->extradata_size;i++) {
+                    if(!codec->extradata[i] && !codec->extradata[i+1] && codec->extradata[i+2]==1 && codec->extradata[i+3]==0xb0) {
+                        level=codec->extradata[i+4]; profile=level>>4;
+                        supportedVideo=level>=1 && level<=6; break;
+                    }
+                }
+            }
             int aacObject=audio->extradata_size>=2 ? audio->extradata[0]>>3 : 0;
             double fps=video->avg_frame_rate.den ? av_q2d(video->avg_frame_rate) : 0;
-            BOOL eligible=codec->codec_id==AV_CODEC_ID_H264 && profile==66 && level>0 && level<=30 &&
+            BOOL eligible=supportedVideo &&
                 codec->width>0 && codec->height>0 && codec->width<=640 && codec->height<=480 && fps<=30.1 &&
                 audio->codec_id==AV_CODEC_ID_AAC && aacObject==2 && audio->channels>0 && audio->channels<=2 &&
                 audio->sample_rate>0 && audio->sample_rate<=48000 && audio->bit_rate<=160000 &&

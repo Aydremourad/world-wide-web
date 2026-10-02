@@ -27,7 +27,7 @@ static void *FetchThread(void *opaque) {
     [pool release]; return NULL;
 }
 int main(int argc,char **argv) {
-    assert(argc==4); NSAutoreleasePool *pool=[[NSAutoreleasePool alloc] init];
+    assert(argc==5); NSAutoreleasePool *pool=[[NSAutoreleasePool alloc] init];
     [NSURLProtocol registerClass:[YTMovieProtocol class]];
     Movie=[[NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[1]]] retain];
     NSDictionary *info=YTNativeStreamInfo(Streams());
@@ -35,6 +35,17 @@ int main(int argc,char **argv) {
     [Movie release]; Movie=[[NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[2]]] retain];
     info=YTNativeStreamInfo(Streams());
     assert(info && [[info objectForKey:@"eligible"] boolValue] && [[info objectForKey:@"profile"] intValue]==66);
+    [Movie release]; Movie=[[NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[4]]] retain];
+    info=YTNativeStreamInfo(Streams());
+    assert(info && [[info objectForKey:@"eligible"] boolValue] && [[info objectForKey:@"profile"] intValue]==0);
+    NSLog(@"Native MPEG-4 Simple Profile route passed.");
+    NSMutableData *advanced=[Movie mutableCopy]; unsigned char *headers=[advanced mutableBytes]; BOOL changed=NO;
+    for(NSUInteger i=0;i+4<[advanced length];i++) {
+        if(!headers[i] && !headers[i+1] && headers[i+2]==1 && headers[i+3]==0xb0) { headers[i+4]=0xf1; changed=YES; break; }
+    }
+    assert(changed); [Movie release]; Movie=advanced;
+    info=YTNativeStreamInfo(Streams());
+    assert(info && ![[info objectForKey:@"eligible"] boolValue]);
     [Movie release]; Movie=[[NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[3]]] retain];
     YTLoopbackServer *server=[[YTLoopbackServer alloc] initWithURL:[Streams() objectForKey:@"videoURL"] length:[Movie length] userAgent:@"fixture"];
     assert([server start]); NSURL *url=[server movieURL];

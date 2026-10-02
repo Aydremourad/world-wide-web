@@ -30,7 +30,10 @@ typedef struct {
     BOOL audioStarted;
     BOOL queuePaused;
     BOOL bufferingShown;
-    BOOL catchUp;
+    unsigned serial;
+    double startTime;
+    BOOL previewShown;
+    double lastResync;
     double lastDisplay;
     YTAudioTimeline timeline;
     NSTimeInterval wallStart;
@@ -44,8 +47,14 @@ typedef struct {
 
 @interface YTSoftwarePlayer ()
 - (void)presentFrame:(NSDictionary *)frame;
+- (void)queueFrame:(NSDictionary *)frame;
+- (void)displayPendingFrame;
+- (NSString *)playSessionAtTime:(double)time serial:(unsigned)serial;
+- (void)sessionFinished:(NSDictionary *)info;
+- (void)updateTransport;
+- (void)requestSeek:(double)seconds;
 - (void)workerFinished:(NSString *)message;
-- (void)setBuffering:(NSNumber *)value;
+- (void)setBuffering:(NSDictionary *)info;
 - (void)attachAudioQueue:(NSDictionary *)info;
 - (void)detachAudioQueue;
 - (void)controlsTick:(NSTimer *)timer;
@@ -94,12 +103,21 @@ static double YTPlaybackClock(YTPlayback *playback) {
     return YTAudioMediaTime(playback->audio);
 }
 static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRational timeBase) {
-    if (!YTWaitForPause(playback)) return NO;
     int64_t timestamp = av_frame_get_best_effort_timestamp(frame);
     double pts = timestamp == AV_NOPTS_VALUE ? playback->nextPTS : timestamp * av_q2d(timeBase);
     if (isnan(playback->firstPTS)) playback->firstPTS = pts;
     pts -= playback->firstPTS;
     playback->nextPTS = pts + playback->firstPTS + playback->frameDuration;
+    if(pts < playback->startTime-0.025) return !*playback->stop;
+    if(*playback->paused && !playback->audioStarted && !playback->previewShown) {
+        if(YTConvertVideoFrame(&playback->image,frame)<0) return NO;
+        NSDictionary *preview=[NSDictionary dictionaryWithObjectsAndKeys:
+            [NSData dataWithBytes:playback->image.pixels length:playback->image.pixelBytes],@"pixels",
+            [NSNumber numberWithInt:playback->image.width],@"width",[NSNumber numberWithInt:playback->image.height],@"height",
+            [NSNumber numberWithUnsignedInt:playback->serial],@"serial",nil];
+        [playback->controller queueFrame:preview]; playback->previewShown=YES;
+    }
+    if (!YTWaitForPause(playback)) return NO;
     if (!playback->audioStarted) {
         OSStatus result = AudioQueueStart(playback->audio->queue, NULL);
         if (result != noErr) { playback->audio->error = result; playback->audio->failed = YES; return NO; }
@@ -116,7 +134,8 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
         if (buffering != playback->bufferingShown) {
             playback->bufferingShown = buffering;
             [playback->controller performSelectorOnMainThread:@selector(setBuffering:)
-                withObject:[NSNumber numberWithBool:buffering] waitUntilDone:NO];
+                withObject:[NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithBool:buffering],@"buffering",
+                    [NSNumber numberWithUnsignedInt:playback->serial],@"serial",nil] waitUntilDone:NO];
         }
         [NSThread sleepForTimeInterval:wait < 0.02 ? wait : 0.02];
         wait = pts - YTPlaybackClock(playback);
@@ -132,16 +151,26 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     NSDictionary *payload = [NSDictionary dictionaryWithObjectsAndKeys:
         [NSData dataWithBytes:playback->image.pixels length:playback->image.pixelBytes], @"pixels",
         [NSNumber numberWithInt:playback->image.width], @"width",
-        [NSNumber numberWithInt:playback->image.height], @"height", nil];
-    [playback->controller performSelectorOnMainThread:@selector(presentFrame:)
-                                          withObject:payload waitUntilDone:YES];
+        [NSNumber numberWithInt:playback->image.height], @"height",
+        [NSNumber numberWithUnsignedInt:playback->serial], @"serial", nil];
+    [playback->controller queueFrame:payload];
     [pool release];
     return !*playback->stop;
 }
 
 @implementation YTSoftwarePlayer
 - (id)initWithStreams:(NSDictionary *)streams {
-    if ((self = [super init])) _streams = [streams retain];
+    if ((self = [super init])) {
+        _streams = [streams retain]; _seekCondition=[[NSCondition alloc] init];
+        _videoCache=[[_streams objectForKey:@"videoSource"] retain];
+        _audioCache=[[_streams objectForKey:@"audioSource"] retain];
+        if(!_videoCache) _videoCache=[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"videoURL"]
+            length:[[streams objectForKey:@"videoLength"] longLongValue] userAgent:[streams objectForKey:@"userAgent"]];
+        if(!_audioCache) _audioCache=[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"audioURL"]
+            length:[[streams objectForKey:@"audioLength"] longLongValue] userAgent:[streams objectForKey:@"userAgent"]];
+        [_videoCache enableStreamingReadAhead]; [_audioCache enableStreamingReadAhead];
+        if([[streams objectForKey:@"combined"] boolValue]) [_audioCache shareCacheWithSource:_videoCache];
+    }
     return self;
 }
 - (void)viewDidLoad {
@@ -177,12 +206,12 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     UIBarButtonItem *qualityItem=[[[UIBarButtonItem alloc] initWithCustomView:quality] autorelease];
     [_topBar setItems:[NSArray arrayWithObjects:done, space, qualityItem, space, _fitItem, nil]];
     [self.view addSubview:_topBar];
-    _bottomControls = [[UIView alloc] initWithFrame:CGRectMake(0, bounds.size.height-84, bounds.size.width, 84)];
+    _bottomControls = [[UIView alloc] initWithFrame:CGRectMake(0, bounds.size.height-100, bounds.size.width, 100)];
     _bottomControls.backgroundColor = [UIColor colorWithWhite:0 alpha:0.70];
     _bottomControls.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin;
     [self.view addSubview:_bottomControls];
-    _elapsedLabel = [[UILabel alloc] initWithFrame:CGRectMake(10, 3, 45, 22)];
-    _durationLabel = [[UILabel alloc] initWithFrame:CGRectMake(bounds.size.width-55, 3, 45, 22)];
+    _elapsedLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 3, 48, 26)];
+    _durationLabel = [[UILabel alloc] initWithFrame:CGRectMake(bounds.size.width-58, 3, 50, 26)];
     _durationLabel.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
     _durationLabel.textAlignment = UITextAlignmentRight;
     for (UILabel *label in [NSArray arrayWithObjects:_elapsedLabel, _durationLabel, nil]) {
@@ -190,17 +219,22 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
         label.font=[UIFont boldSystemFontOfSize:12]; label.text=@"0:00";
         [_bottomControls addSubview:label];
     }
-    _progress = [[UIProgressView alloc] initWithProgressViewStyle:UIProgressViewStyleBar];
-    _progress.frame=CGRectMake(60, 12, bounds.size.width-120, 9);
+    _progress = [[UISlider alloc] initWithFrame:CGRectMake(60, 0, bounds.size.width-124, 32)];
+    _progress.minimumValue=0; _progress.maximumValue=1; _progress.enabled=NO;
+    [_progress addTarget:self action:@selector(scrubStarted) forControlEvents:UIControlEventTouchDown];
+    [_progress addTarget:self action:@selector(scrubChanged) forControlEvents:UIControlEventValueChanged];
+    [_progress addTarget:self action:@selector(scrubEnded) forControlEvents:UIControlEventTouchUpInside | UIControlEventTouchUpOutside | UIControlEventTouchCancel];
     _progress.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     [_bottomControls addSubview:_progress];
-    _transportBar = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 22, bounds.size.width, 34)];
+    _transportBar = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 30, bounds.size.width, 40)];
     _transportBar.barStyle = UIBarStyleBlackTranslucent;
     _transportBar.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     _playItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemPause target:self action:@selector(togglePause)];
-    [_transportBar setItems:[NSArray arrayWithObjects:space, _playItem, space, nil]];
+    _backItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemRewind target:self action:@selector(skipBack)];
+    _forwardItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFastForward target:self action:@selector(skipForward)];
+    _backItem.enabled=_forwardItem.enabled=NO; [self updateTransport];
     [_bottomControls addSubview:_transportBar];
-    _volume = [[UISlider alloc] initWithFrame:CGRectMake(35, 54, bounds.size.width-70, 30)];
+    _volume = [[UISlider alloc] initWithFrame:CGRectMake(35, 70, bounds.size.width-70, 30)];
     _volume.minimumValue=0; _volume.maximumValue=1; _volume.value=1;
     _volume.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     [_volume addTarget:self action:@selector(volumeChanged) forControlEvents:UIControlEventValueChanged];
@@ -237,64 +271,142 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     _fitItem.title=_surface.aspectFill ? @"Fit" : @"Fill";
 }
 - (void)togglePause {
-    if (_finished) return;
+    if (_finished) { _paused=NO; [self requestSeek:0]; return; }
     _paused=!_paused; _lastControlTouch=[NSDate timeIntervalSinceReferenceDate];
-    // The playback worker owns pause/resume; issuing the same commands here
-    // races with the worker and can restart an old queue twice.
+    [self updateTransport];
+}
+- (void)updateTransport {
     [_playItem release];
-    _playItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:_paused ? UIBarButtonSystemItemPlay : UIBarButtonSystemItemPause target:self action:@selector(togglePause)];
+    _playItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:(_paused || _finished) ? UIBarButtonSystemItemPlay : UIBarButtonSystemItemPause target:self action:@selector(togglePause)];
     UIBarButtonItem *space=[[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil] autorelease];
-    [_transportBar setItems:[NSArray arrayWithObjects:space,_playItem,space,nil]];
+    NSMutableArray *items=[NSMutableArray array];
+    for(UIBarButtonItem *button in [NSArray arrayWithObjects:_backItem,_playItem,_forwardItem,nil]) {
+        [items addObject:[[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil] autorelease]];
+        [items addObject:button];
+    }
+    [items addObject:space]; [_transportBar setItems:items];
+}
+- (void)scrubStarted {
+    if(_duration<=0 || _stop) return;
+    _scrubbing=YES; _wasPaused=_paused; _paused=YES;
+    _lastControlTouch=[NSDate timeIntervalSinceReferenceDate]; [self setControlsHidden:NO];
+}
+- (void)scrubChanged {
+    _lastControlTouch=[NSDate timeIntervalSinceReferenceDate];
+    _elapsedLabel.text=[self timeString:_progress.value];
+    _durationLabel.text=[@"-" stringByAppendingString:[self timeString:_duration-_progress.value]];
+}
+- (void)scrubEnded {
+    if(!_scrubbing) return;
+    _scrubbing=NO; _paused=_wasPaused; [self requestSeek:_progress.value];
+}
+- (void)skipBack { [self requestSeek:(_audioPump ? YTAudioMediaTime((YTAudio *)_audioPump) : _progress.value)-15]; }
+- (void)skipForward { [self requestSeek:(_audioPump ? YTAudioMediaTime((YTAudio *)_audioPump) : _progress.value)+15]; }
+- (void)requestSeek:(double)seconds {
+    if(_stop || _duration<=0) return;
+    seconds=YTClampSeekTime(seconds,_duration);
+    if(_finished) _paused=NO;
+    _finished=NO; _outputQueue=NULL; _audioPump=NULL;
+    [_seekCondition lock];
+    _seekTime=seconds; _seekPending=YES; _seekSerial++; _sessionStop=YES;
+    [_videoSource cancel]; [_audioSource cancel];
+    [_pendingFrame release]; _pendingFrame=nil;
+    [_seekCondition signal]; [_seekCondition unlock];
+    _progress.value=seconds; [self scrubChanged]; [self updateTransport];
+    _message.text=@"Seeking..."; _message.hidden=NO; [_spinner startAnimating];
+    _lastControlTouch=[NSDate timeIntervalSinceReferenceDate]; [self setControlsHidden:NO];
 }
 - (void)volumeChanged {
     _lastControlTouch=[NSDate timeIntervalSinceReferenceDate];
     if (_outputQueue) AudioQueueSetParameter(_outputQueue,kAudioQueueParam_Volume,_volume.value);
 }
 - (void)attachAudioQueue:(NSDictionary *)info {
+    if(_stop || _sessionStop || [[info objectForKey:@"serial"] unsignedIntValue]!=_seekSerial) return;
     _outputQueue=[[info objectForKey:@"queue"] pointerValue];
     _audioPump=[[info objectForKey:@"audio"] pointerValue];
     _sampleRate=[[info objectForKey:@"rate"] doubleValue];
     _duration=[[info objectForKey:@"duration"] doubleValue];
-    _durationLabel.text=[self timeString:_duration]; [self volumeChanged];
+    _progress.maximumValue=_duration>0 ? _duration : 1; _progress.enabled=_duration>0;
+    _backItem.enabled=_forwardItem.enabled=_duration>0;
+    [self controlsTick:nil]; [self volumeChanged];
 }
 - (void)detachAudioQueue { _outputQueue=NULL; _audioPump=NULL; }
 - (void)controlsTick:(NSTimer *)timer {
     if (_stop) return;
-    if (_audioPump) {
+    if (_audioPump && !_scrubbing) {
         double seconds=YTAudioMediaTime((YTAudio *)_audioPump);
         _elapsedLabel.text=[self timeString:seconds];
-        _progress.progress=_duration > 0 ? fmin(1,seconds/_duration) : 0;
+        _progress.value=seconds;
+        _durationLabel.text=[@"-" stringByAppendingString:[self timeString:fmax(0,_duration-seconds)]];
     }
-    if (!_paused && !_finished && _message.hidden && [NSDate timeIntervalSinceReferenceDate]-_lastControlTouch > 5)
+    if (!_paused && !_finished && !_scrubbing && _message.hidden && [NSDate timeIntervalSinceReferenceDate]-_lastControlTouch > 5)
         [self setControlsHidden:YES];
 }
 - (void)close {
     _stop=YES; _outputQueue=NULL; _audioPump=NULL;
     [_controlsTimer invalidate];
-    [_videoSource cancel]; [_audioSource cancel];
+    [_seekCondition lock]; _sessionStop=YES;
+    [_videoSource cancel]; [_audioSource cancel]; [_pendingFrame release]; _pendingFrame=nil;
+    [_seekCondition signal]; [_seekCondition unlock];
     [[UIApplication sharedApplication] setStatusBarHidden:_oldStatusHidden animated:YES];
     [self dismissModalViewControllerAnimated:YES];
 }
 - (void)presentFrame:(NSDictionary *)frame {
-    if (_stop) return;
+    if (_stop || _sessionStop || [[frame objectForKey:@"serial"] unsignedIntValue]!=_seekSerial) return;
     _message.hidden=YES; [_spinner stopAnimating];
     [_surface displayRGB565:[frame objectForKey:@"pixels"] width:[[frame objectForKey:@"width"] intValue] height:[[frame objectForKey:@"height"] intValue]];
 }
-- (void)setBuffering:(NSNumber *)value {
-    if (_stop) return;
+- (void)queueFrame:(NSDictionary *)frame {
+    [_seekCondition lock];
+    if(!_stop && !_sessionStop && [[frame objectForKey:@"serial"] unsignedIntValue]==_seekSerial) {
+        [frame retain]; [_pendingFrame release]; _pendingFrame=frame;
+        if(!_frameScheduled) {
+            _frameScheduled=YES;
+            [self performSelectorOnMainThread:@selector(displayPendingFrame) withObject:nil waitUntilDone:NO];
+        }
+    }
+    [_seekCondition unlock];
+}
+- (void)displayPendingFrame {
+    [_seekCondition lock]; NSDictionary *frame=_pendingFrame; _pendingFrame=nil; _frameScheduled=NO; [_seekCondition unlock];
+    if(frame) [self presentFrame:frame]; [frame release];
+}
+- (void)setBuffering:(NSDictionary *)info {
+    if (_stop || _sessionStop || [[info objectForKey:@"serial"] unsignedIntValue]!=_seekSerial) return;
+    NSNumber *value=[info objectForKey:@"buffering"];
     _message.text=@"Buffering..."; _message.hidden=![value boolValue];
     if ([value boolValue]) [_spinner startAnimating]; else [_spinner stopAnimating];
 }
 - (void)workerFinished:(NSString *)message {
-    if (!_stop) {
-        _finished=YES; _message.text=message; _message.hidden=NO;
-        [_spinner stopAnimating]; _playItem.enabled=NO; [self setControlsHidden:NO];
-    }
     [_controlsTimer invalidate];
-    [_videoSource release]; _videoSource=nil; [_audioSource release]; _audioSource=nil;
     [self release];
 }
+- (void)sessionFinished:(NSDictionary *)info {
+    if(_stop || _seekPending || [[info objectForKey:@"serial"] unsignedIntValue]!=_seekSerial) return;
+    _finished=YES; _message.text=[info objectForKey:@"message"]; _message.hidden=NO;
+    [_spinner stopAnimating]; [self updateTransport]; [self setControlsHidden:NO];
+}
 - (void)playThread:(id)unused {
+    NSAutoreleasePool *pool=[[NSAutoreleasePool alloc] init];
+    double time=0;
+    while(!_stop) {
+        [_seekCondition lock];
+        if(_seekPending) { time=_seekTime; _seekPending=NO; }
+        _sessionStop=_stop; unsigned serial=_seekSerial; [_seekCondition unlock];
+        NSAutoreleasePool *sessionPool=[[NSAutoreleasePool alloc] init];
+        NSString *message=[self playSessionAtTime:time serial:serial];
+        NSDictionary *info=[NSDictionary dictionaryWithObjectsAndKeys:message,@"message",
+            [NSNumber numberWithUnsignedInt:serial],@"serial",nil];
+        [self performSelectorOnMainThread:@selector(sessionFinished:) withObject:info waitUntilDone:YES];
+        [sessionPool release];
+        [_seekCondition lock];
+        while(!_seekPending && !_stop) [_seekCondition wait];
+        [_seekCondition unlock];
+    }
+    [self performSelectorOnMainThread:@selector(workerFinished:) withObject:nil waitUntilDone:NO];
+    [pool release];
+}
+- (NSString *)playSessionAtTime:(double)time serial:(unsigned)serial {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     NSString *failure = nil;
     AVFormatContext *format = NULL;
@@ -307,22 +419,18 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     YTAudio audio;
     YTPlayback playback;
     memset(&io, 0, sizeof(io)); memset(&audio, 0, sizeof(audio)); memset(&playback, 0, sizeof(playback));
-    io.stop = &_stop;
-    audio.stop = &_stop; audio.paused = &_paused;
+    io.stop = &_sessionStop;
+    audio.stop = &_sessionStop; audio.paused = &_paused; audio.startTime=time;
     playback.controller = self; playback.audio = &audio;
-    playback.stop = &_stop; playback.paused = &_paused;
+    playback.stop = &_sessionStop; playback.paused = &_paused; playback.serial=serial; playback.startTime=time;
     playback.firstPTS = NAN; playback.frameDuration = 1.0 / 15.0;
-    _videoSource = [[_streams objectForKey:@"videoSource"] retain];
-    _audioSource = [[_streams objectForKey:@"audioSource"] retain];
-    if (!_videoSource) _videoSource = [[YTMediaSource alloc] initWithURL:[_streams objectForKey:@"videoURL"]
-        length:[[_streams objectForKey:@"videoLength"] longLongValue] userAgent:[_streams objectForKey:@"userAgent"]];
-    if (!_audioSource) _audioSource = [[YTMediaSource alloc] initWithURL:[_streams objectForKey:@"audioURL"]
-        length:[[_streams objectForKey:@"audioLength"] longLongValue] userAgent:[_streams objectForKey:@"userAgent"]];
-    [_videoSource enableStreamingReadAhead]; [_audioSource enableStreamingReadAhead];
-    if([[_streams objectForKey:@"combined"] boolValue]) [_audioSource shareCacheWithSource:_videoSource];
+    [_seekCondition lock];
+    _videoSource=[_videoCache newReader]; _audioSource=[_audioCache newReader];
+    if(_sessionStop) { [_videoSource cancel]; [_audioSource cancel]; }
+    [_seekCondition unlock];
     io.source = _videoSource; audio.source = _audioSource;
-    [NSThread setThreadPriority:0.25];
-    if (_stop) goto finished;
+    [NSThread setThreadPriority:0.5];
+    if (_sessionStop) goto finished;
     av_register_all();
     format = avformat_alloc_context();
     uint8_t *readBuffer = av_malloc(32768);
@@ -334,7 +442,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     format->probesize = 65536;
     format->max_analyze_duration = AV_TIME_BASE;
     format->interrupt_callback.callback = YTInterruptVideo;
-    format->interrupt_callback.opaque = (void *)&_stop;
+    format->interrupt_callback.opaque = (void *)&_sessionStop;
     if (avformat_open_input(&format, NULL, NULL, NULL) < 0) {
         failure = @"Could not open the MP4 video stream."; goto finished;
     }
@@ -345,7 +453,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     if (videoStream < 0) { failure = @"The response did not contain a video track."; goto finished; }
     codec = format->streams[videoStream]->codec;
     if (YTOpenH264Decoder(codec) < 0) {
-        failure = [NSString stringWithFormat:@"Could not start H.264 video (%dx%d).", codec->width, codec->height];
+        failure = [NSString stringWithFormat:@"Could not start video (%dx%d).", codec->width, codec->height];
         goto finished;
     }
     codecOpened = YES;
@@ -353,6 +461,11 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     if (!frame) { failure = @"Not enough memory for a video frame."; goto finished; }
     AVRational frameRate = format->streams[videoStream]->avg_frame_rate;
     if (frameRate.num > 0 && frameRate.den > 0) playback.frameDuration = av_q2d(av_inv_q(frameRate));
+    playback.firstPTS=YTVideoTimeOrigin(format->streams[videoStream]);
+    playback.nextPTS=playback.firstPTS+time;
+    if(time>0 && YTSeekVideoToTime(format,videoStream,codec,time)<0) {
+        failure=@"Could not seek to this part of the video."; goto finished;
+    }
     OSStatus audioResult = YTPrepareAudio(&audio);
     if (audioResult != noErr) {
         failure = [NSString stringWithFormat:@"Could not start AAC audio (%ld).", (long)audioResult]; goto finished;
@@ -361,55 +474,53 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
         [NSValue valueWithPointer:audio.queue], @"queue",
         [NSValue valueWithPointer:&audio], @"audio",
         [NSNumber numberWithDouble:audio.format.mSampleRate], @"rate",
-        [NSNumber numberWithDouble:format->duration > 0 ? (double)format->duration / AV_TIME_BASE : 0], @"duration", nil];
+        [NSNumber numberWithDouble:format->duration > 0 ? (double)format->duration / AV_TIME_BASE : 0], @"duration",
+        [NSNumber numberWithUnsignedInt:serial],@"serial", nil];
     [self performSelectorOnMainThread:@selector(attachAudioQueue:) withObject:queueInfo waitUntilDone:YES];
     AVPacket packet;
     int readResult = 0;
-    while (!_stop && !audio.failed && (readResult = av_read_frame(format, &packet)) >= 0) {
+    while (!_sessionStop && !audio.failed && (readResult = av_read_frame(format, &packet)) >= 0) {
         if (packet.stream_index == videoStream) {
-            BOOL key=(packet.flags & AV_PKT_FLAG_KEY) != 0;
-            int64_t stamp=packet.pts != AV_NOPTS_VALUE ? packet.pts : packet.dts;
-            if (playback.audioStarted && stamp != AV_NOPTS_VALUE && !isnan(playback.firstPTS)) {
-                double packetTime=stamp * av_q2d(format->streams[videoStream]->time_base) - playback.firstPTS;
-                if (YTNeedsVideoCatchUp(packetTime,YTPlaybackClock(&playback),codec->width*codec->height > 38400,key)) playback.catchUp=YES;
+            int64_t stamp=packet.pts!=AV_NOPTS_VALUE ? packet.pts : packet.dts;
+            double now=[NSDate timeIntervalSinceReferenceDate];
+            double audioTime=YTPlaybackClock(&playback);
+            if(playback.audioStarted && !_paused && stamp!=AV_NOPTS_VALUE &&
+                YTNeedsVideoResync(stamp*av_q2d(format->streams[videoStream]->time_base)-playback.firstPTS,
+                    audioTime,now,playback.lastResync)) {
+                // Reposition only after substantial drift, at most once in five
+                // seconds. Never switch normal late playback into keyframes-only.
+                playback.lastResync=now;
+                double target=fmax(time,audioTime-0.5);
+                av_free_packet(&packet);
+                if(YTSeekVideoToTime(format,videoStream,codec,target)>=0) {
+                    playback.startTime=target; playback.nextPTS=target+playback.firstPTS;
+                }
+                continue;
             }
-            if (playback.catchUp && !key) { av_free_packet(&packet); sched_yield(); continue; }
-            BOOL catchUpKey = playback.catchUp && key;
-            if (playback.catchUp) { avcodec_flush_buffers(codec); playback.catchUp=NO; }
             AVPacket part = packet;
-            while (part.size > 0 && !_stop && !audio.failed) {
+            while (part.size > 0 && !_sessionStop && !audio.failed) {
                 int gotFrame = 0;
                 int used = avcodec_decode_video2(codec, frame, &gotFrame, &part);
-                if (used < 0) { failure = @"The H.264 video could not be decoded."; break; }
+                if (used < 0) { failure = @"The video could not be decoded."; break; }
                 if (gotFrame) {
                     sawFrame = YES;
                     if (!YTDisplayDecodedFrame(&playback, frame, format->streams[videoStream]->time_base)) {
-                        if (!_stop && !audio.failed) failure = @"Could not display the video frame.";
+                        if (!_sessionStop && !audio.failed) failure = @"Could not display the video frame.";
                         break;
                     }
                 }
                 if (!used) break;
                 part.data += used; part.size -= used;
             }
-            // H.264 may hold a keyframe for B-picture reordering. Release it
-            // now when catch-up deliberately omits its following pictures.
-            if (catchUpKey && !failure && !_stop && !audio.failed) {
-                AVPacket empty; av_init_packet(&empty); empty.data=NULL; empty.size=0;
-                for (int i=0;i<4;i++) {
-                    int gotFrame=0;
-                    if (avcodec_decode_video2(codec,frame,&gotFrame,&empty)<0 || !gotFrame) break;
-                    sawFrame=YES;
-                    if (!YTDisplayDecodedFrame(&playback,frame,format->streams[videoStream]->time_base)) break;
-                }
-            }
+
         }
         av_free_packet(&packet);
         sched_yield();
         if (failure) break;
     }
-    if (!_stop && !failure && !audio.failed && readResult == AVERROR_EOF) {
+    if (!_sessionStop && !failure && !audio.failed && readResult == AVERROR_EOF) {
         av_init_packet(&packet); packet.data = NULL; packet.size = 0;
-        for (int i = 0; i < 16 && !_stop; i++) {
+        for (int i = 0; i < 16 && !_sessionStop; i++) {
             int gotFrame = 0;
             if (avcodec_decode_video2(codec, frame, &gotFrame, &packet) < 0 || !gotFrame) break;
             sawFrame = YES;
@@ -417,15 +528,15 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
         }
         // Let the final queued AAC buffers finish, with a bound for truncated streams.
         NSTimeInterval deadline = [NSDate timeIntervalSinceReferenceDate] + 5.0;
-        while (playback.audioStarted && !_stop && !audio.failed &&
+        while (playback.audioStarted && !_sessionStop && !audio.failed &&
                [NSDate timeIntervalSinceReferenceDate] < deadline) {
             if (!YTWaitForPause(&playback)) break;
             UInt32 running = 0, size = sizeof(running);
             if (AudioQueueGetProperty(audio.queue, kAudioQueueProperty_IsRunning, &running, &size) != noErr || !running) break;
             [NSThread sleepForTimeInterval:0.03];
         }
-    } else if (!_stop && !failure && !audio.failed && readResult < 0) failure = @"The video stream stopped unexpectedly.";
-    if (!_stop && !sawFrame && !failure) failure = @"The decoder did not produce a video frame.";
+    } else if (!_sessionStop && !failure && !audio.failed && readResult < 0) failure = @"The video stream stopped unexpectedly.";
+    if (!_sessionStop && !sawFrame && !failure) failure = @"The decoder did not produce a video frame.";
 finished:
     [self performSelectorOnMainThread:@selector(detachAudioQueue) withObject:nil waitUntilDone:YES];
     YTShutdownAudio(&audio);
@@ -434,21 +545,26 @@ finished:
     if (codecOpened) avcodec_close(codec);
     if (format) avformat_close_input(&format);
     if (ioContext) { av_free(ioContext->buffer); av_free(ioContext); }
-    if (!_stop) {
+    if (!_sessionStop) {
         NSString *networkError = [_videoSource errorText];
         if (![networkError length]) networkError = [_audioSource errorText];
         if ([networkError length]) failure = networkError;
         else if (audio.failed) failure = [NSString stringWithFormat:@"AAC playback stopped (%ld).", (long)audio.error];
     }
-    NSString *message = failure ? failure : @"Finished.";
-    [self performSelectorOnMainThread:@selector(workerFinished:) withObject:message waitUntilDone:NO];
+    NSString *message = [(failure ? failure : @"Finished.") retain];
+    [_seekCondition lock];
+    [_videoSource release]; _videoSource=nil; [_audioSource release]; _audioSource=nil;
+    [_seekCondition unlock];
     [pool release];
+    return [message autorelease];
 }
 - (void)dealloc {
     [_controlsTimer invalidate]; [_controlsTimer release];
     [_streams release]; [_surface release]; [_message release]; [_spinner release];
     [_elapsedLabel release]; [_durationLabel release]; [_topBar release]; [_transportBar release];
-    [_playItem release]; [_fitItem release]; [_bottomControls release]; [_progress release]; [_volume release];
+    [_playItem release]; [_fitItem release]; [_backItem release]; [_forwardItem release];
+    [_bottomControls release]; [_progress release]; [_volume release];
+    [_videoCache release]; [_audioCache release]; [_pendingFrame release]; [_seekCondition release];
     [super dealloc];
 }
 @end

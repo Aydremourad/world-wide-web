@@ -3,6 +3,7 @@
 #include "combined-player.m"
 #undef main
 #import "YTAudioPump.h"
+#include <math.h>
 
 static volatile int LongDelay, LongDelayStarted, LongDelayFinished;
 @interface YTSlowMovieProtocol : YTMovieProtocol
@@ -67,10 +68,10 @@ static void YTFakeDrain(void *opaque) {
     FakeQueue *queue=opaque;
     pthread_mutex_lock(&queue->mutex); queue->draining=YES; pthread_mutex_unlock(&queue->mutex);
 }
-static void YTFakeSetUp(YTAudio *audio, FakeQueue *queue, volatile BOOL *stop, volatile BOOL *paused) {
+static void YTFakeSetUpAtTime(YTAudio *audio, FakeQueue *queue, volatile BOOL *stop, volatile BOOL *paused,double startTime) {
     memset(audio,0,sizeof(*audio)); memset(queue,0,sizeof(*queue));
     pthread_mutex_init(&queue->mutex,NULL);
-    audio->stop=stop; audio->paused=paused;
+    audio->startTime=startTime; audio->stop=stop; audio->paused=paused;
     audio->source=[[YTMediaSource alloc] initWithURL:[NSURL URLWithString:@"https://movie.example/combined.mp4"]
         length:[Movie length] userAgent:@"fixture"];
     assert(YTAudioOpen(audio) == noErr);
@@ -83,6 +84,10 @@ static void YTFakeSetUp(YTAudio *audio, FakeQueue *queue, volatile BOOL *stop, v
     audio->started=YES; YTFakeStart(queue);
     if(audio->eof) YTFakeDrain(queue);
 }
+static void YTFakeSetUp(YTAudio *audio,FakeQueue *queue,volatile BOOL *stop,volatile BOOL *paused) {
+    YTFakeSetUpAtTime(audio,queue,stop,paused,0);
+}
+
 static BOOL YTFakeConsume(YTAudio *audio, FakeQueue *queue, double *slowest) {
     pthread_mutex_lock(&queue->mutex);
     AudioQueueBufferRef buffer=NULL;
@@ -198,6 +203,26 @@ int main(int argc,char **argv) {
     YTFakeCleanUp(&audio,&queue);
     NSLog(@"Single-owner pause and resume passed.");
     [NSThread sleepForTimeInterval:0.3]; // Let cancelled fixture callbacks finish before resetting counters.
+    // Open fresh AAC decoders at forwards/backwards targets and drain the
+    // real converted PCM. Seeking must not play the prefix again.
+    const double targets[]={22.25,4.75,31.15};
+    for(unsigned i=0;i<sizeof(targets)/sizeof(targets[0]);i++) {
+        Requests=0; YTFakeSetUpAtTime(&audio,&queue,&stop,&paused,targets[i]);
+        assert(fabs(YTAudioMediaTime(&audio)-targets[i])<0.01);
+        UInt64 totalFrames=expected*audio.inputFormat.mFramesPerPacket;
+        UInt64 wanted=totalFrames-(UInt64)llround(targets[i]*audio.format.mSampleRate);
+        deadline=[NSDate timeIntervalSinceReferenceDate]+12; finished=NO;
+        while([NSDate timeIntervalSinceReferenceDate]<deadline && !audio.failed) {
+            BOOL empty=YTFakeConsume(&audio,&queue,&slowest);
+            if(audio.eof && empty) { finished=YES; break; }
+            [NSThread sleepForTimeInterval:0.005];
+        }
+        assert(finished && !audio.failed && queue.consumed==audio.decodedFrames);
+        assert(llabs((long long)queue.consumed-(long long)wanted)<=2048);
+        assert(fabs(YTAudioMediaTime(&audio)-(targets[i]+queue.consumed/audio.format.mSampleRate))<0.01);
+        NSLog(@"AAC seek %.2f passed: %llu remaining PCM frames, media clock %.3f.",targets[i],(unsigned long long)queue.consumed,YTAudioMediaTime(&audio));
+        YTFakeCleanUp(&audio,&queue);
+    }
     // A song shorter than the initial PCM prefill must still drain cleanly.
     [Movie release]; Movie=[[NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[2]]] retain];
     Requests=0; YTFakeSetUp(&audio,&queue,&stop,&paused); assert(audio.eof && !audio.workerCreated && audio.monitorCreated);
