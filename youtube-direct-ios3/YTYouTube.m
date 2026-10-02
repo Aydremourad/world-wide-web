@@ -616,10 +616,11 @@ static NSURL *YTConvertForOriginalIPhone(NSURL *downloadedURL,
     [[NSFileManager defaultManager] removeItemAtPath:logPath error:nil];
 
     // Original iPhone-safe target:
-    // MPEG-4 Part 2 Simple Profile video, no B-frames, 320x180, 24 fps,
-    // ~500 kbps. Keep YouTube's AAC-LC audio without re-encoding.
+    // MPEG-4 Part 2 Simple Profile video, no B-frames, 320x180, 15 fps,
+    // ~350 kbps. Keep YouTube's AAC-LC audio without re-encoding.
+    // Decoder fast mode + skipped loop filtering reduce ARM11 CPU cost.
     NSString *command = [NSString stringWithFormat:
-        @"'%@' -y -i '%@' -vcodec mpeg4 -profile:v 0 -b:v 500k -r 24 -s 320x180 -pix_fmt yuv420p -bf 0 -acodec copy -movflags +faststart '%@' >'%@' 2>&1",
+        @"'%@' -y -threads 1 -flags2 +fast -skip_loop_filter all -i '%@' -vcodec mpeg4 -profile:v 0 -b:v 350k -r 15 -s 320x180 -pix_fmt yuv420p -bf 0 -acodec copy -movflags +faststart '%@' >'%@' 2>&1",
         ffmpeg, inputPath, outputPath, logPath];
 
     int status = system([command UTF8String]);
