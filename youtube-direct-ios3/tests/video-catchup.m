@@ -25,6 +25,7 @@ int main(int argc,char **argv) {
             // Model a decoder two seconds behind audio for the entire video.
             if(YTNeedsVideoCatchUp(videoTime,videoTime+2,1,key)) catchUp=1;
             if(catchUp && !key) { skipped++; av_free_packet(&packet); continue; }
+            int catchUpKey=catchUp && key;
             if(catchUp) { avcodec_flush_buffers(codec); catchUp=0; }
             AVPacket part=packet;
             while(part.size>0) {
@@ -35,6 +36,16 @@ int main(int argc,char **argv) {
                     pictures++;
                 }
                 if(!used) break; part.data+=used; part.size-=used;
+            }
+            if(catchUpKey) {
+                AVPacket empty; av_init_packet(&empty); empty.data=NULL; empty.size=0;
+                for(int i=0;i<4;i++) {
+                    int got=0;
+                    if(avcodec_decode_video2(codec,frame,&got,&empty)<0 || !got) break;
+                    assert(YTConvertVideoFrame(&image,frame)==0);
+                    lastTime=av_frame_get_best_effort_timestamp(frame)*av_q2d(format->streams[track]->time_base);
+                    pictures++;
+                }
             }
         }
         av_free_packet(&packet);

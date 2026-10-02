@@ -384,6 +384,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
                 if (YTNeedsVideoCatchUp(packetTime,YTPlaybackClock(&playback),codec->width*codec->height > 38400,key)) playback.catchUp=YES;
             }
             if (playback.catchUp && !key) { av_free_packet(&packet); sched_yield(); continue; }
+            BOOL catchUpKey = playback.catchUp && key;
             if (playback.catchUp) { avcodec_flush_buffers(codec); playback.catchUp=NO; }
             AVPacket part = packet;
             while (part.size > 0 && !_stop && !audio.failed) {
@@ -399,6 +400,17 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
                 }
                 if (!used) break;
                 part.data += used; part.size -= used;
+            }
+            // H.264 may hold a keyframe for B-picture reordering. Release it
+            // now when catch-up deliberately omits its following pictures.
+            if (catchUpKey && !failure && !_stop && !audio.failed) {
+                AVPacket empty; av_init_packet(&empty); empty.data=NULL; empty.size=0;
+                for (int i=0;i<4;i++) {
+                    int gotFrame=0;
+                    if (avcodec_decode_video2(codec,frame,&gotFrame,&empty)<0 || !gotFrame) break;
+                    sawFrame=YES;
+                    if (!YTDisplayDecodedFrame(&playback,frame,format->streams[videoStream]->time_base)) break;
+                }
             }
         }
         av_free_packet(&packet);
