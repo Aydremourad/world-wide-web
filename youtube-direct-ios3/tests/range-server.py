@@ -37,7 +37,7 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             return
         end = min(end, LENGTH - 1)
-        if address.path == "/slow":
+        if address.path == "/slow" or (address.path == "/contended" and start == 65536):
             time.sleep(3)
         if address.path == "/ignore":
             start, end = 0, LENGTH - 1

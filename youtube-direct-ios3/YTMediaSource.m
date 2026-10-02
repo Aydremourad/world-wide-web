@@ -2,7 +2,7 @@
 #include <string.h>
 
 #define YT_CHUNK_BYTES (64 * 1024)
-#define YT_CACHED_CHUNKS 16
+#define YT_CACHE_BYTES (1024 * 1024)
 
 @interface YTBoundedRequest : NSObject {
 @public
@@ -114,7 +114,10 @@
         _userAgent = [userAgent copy];
         _chunks = [[NSMutableDictionary alloc] init];
         _order = [[NSMutableArray alloc] init];
-        _cacheLock = [[NSRecursiveLock alloc] init];
+        _cacheLock = [[NSCondition alloc] init];
+        _inflight = [[NSMutableSet alloc] init];
+        _chunkBytes = YT_CHUNK_BYTES;
+        _requestTimeout=12.0;
     }
     return self;
 }
@@ -128,25 +131,47 @@
     [_chunks release]; _chunks=[source->_chunks retain];
     [_order release]; _order=[source->_order retain];
     [_cacheLock release]; _cacheLock=[source->_cacheLock retain];
+    [_inflight release]; _inflight=[source->_inflight retain];
+    _chunkBytes=source->_chunkBytes;
+}
+- (void)setRequestTimeout:(NSTimeInterval)seconds { _requestTimeout=seconds<1 ? 1 : seconds>12 ? 12 : seconds; }
+- (void)enableStreamingReadAhead {
+    // Configure before playback readers start. Four larger requests per MiB
+    // avoid a new HTTPS exchange for every 64 KiB while keeping the same cap.
+    [_cacheLock lock];
+    if(!_inflight.count && _chunkBytes!=262144) {
+        _chunkBytes=262144; [_chunks removeAllObjects]; [_order removeAllObjects];
+    }
+    [_cacheLock unlock];
 }
 - (NSData *)chunkAt:(int64_t)start {
-    while (!_cancelled) {
-        if ([_cacheLock lockBeforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]]) {
-            NSData *result=[[self loadChunkAt:start] retain];
-            [_cacheLock unlock];
-            return [result autorelease];
+    NSNumber *key=[NSNumber numberWithLongLong:start];
+    [_cacheLock lock];
+    while(!_cancelled) {
+        NSData *cached=[_chunks objectForKey:key];
+        if(cached) {
+            [cached retain]; [_order removeObject:key]; [_order addObject:key];
+            [_cacheLock unlock]; return [cached autorelease];
+        }
+        if(![_inflight containsObject:key]) break;
+        [_cacheLock waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+    }
+    if(_cancelled) { [_cacheLock unlock]; return nil; }
+    [_inflight addObject:key]; [_cacheLock unlock];
+    // Never hold the shared cache lock during DNS, TLS or a network download.
+    // Cached audio and unrelated chunks remain readable while video is slow.
+    NSData *result=[[self loadChunkAt:start] retain];
+    [_cacheLock lock];
+    if(result) {
+        [_chunks setObject:result forKey:key]; [_order removeObject:key]; [_order addObject:key];
+        while([_order count]>YT_CACHE_BYTES/_chunkBytes) {
+            NSNumber *old=[_order objectAtIndex:0]; [_chunks removeObjectForKey:old]; [_order removeObjectAtIndex:0];
         }
     }
-    return nil;
+    [_inflight removeObject:key]; [_cacheLock broadcast]; [_cacheLock unlock];
+    return [result autorelease];
 }
 - (NSData *)loadChunkAt:(int64_t)start {
-    NSNumber *key = [NSNumber numberWithLongLong:start];
-    NSData *cached = [_chunks objectForKey:key];
-    if (cached) {
-        [_order removeObject:key];
-        [_order addObject:key];
-        return cached;
-    }
     if (_cancelled || start >= _length || _length <= 0) return nil;
     // Never send both selectors: a server may first slice the URL range and
     // then apply the HTTP range to that slice, causing 416 after the first chunk.
@@ -169,7 +194,7 @@
     BOOL retriedLength = NO;
     for (NSUInteger attempt = 0; attempt < 3 && !_cancelled; attempt++) {
         if (start >= _length) break;
-        int64_t end = start + YT_CHUNK_BYTES - 1;
+        int64_t end = start + _chunkBytes - 1;
         if (end >= _length) end = _length - 1;
         NSUInteger count = (NSUInteger)(end - start + 1);
         NSString *range = [NSString stringWithFormat:@"%lld-%lld", (long long)start, (long long)end];
@@ -179,7 +204,7 @@
             requestAddress = [NSString stringWithFormat:@"%@%@range=%@", address, separator, range];
         }
         NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:requestAddress]
-            cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:12.0];
+            cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:_requestTimeout];
         if (mode == 0) [request setValue:[@"bytes=" stringByAppendingString:range] forHTTPHeaderField:@"Range"];
         [request setValue:@"identity" forHTTPHeaderField:@"Accept-Encoding"];
         if ([_userAgent length]) [request setValue:_userAgent forHTTPHeaderField:@"User-Agent"];
@@ -192,7 +217,7 @@
         transfer->cancelled = &_cancelled;
         transfer->connection = [[NSURLConnection alloc] initWithRequest:request delegate:transfer];
         if (!transfer->connection) [transfer fail:@"Could not start the media request."];
-        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:13.0];
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:_requestTimeout+1.0];
         while (!transfer->done && !_cancelled && [deadline timeIntervalSinceNow] > 0) {
             [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
                                     beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
@@ -201,7 +226,6 @@
         if (!transfer->error && [transfer->data length] == transfer->responseBytes) {
             if (transfer->totalLength > 0 && transfer->totalLength != _length) {
                 _length = transfer->totalLength;
-                [_chunks removeAllObjects]; [_order removeAllObjects];
             }
             result = [[transfer->data copy] autorelease];
             _rangeMode = mode;
@@ -215,7 +239,6 @@
         if (code == 403 || code == 404 || code == 410) break;
         if (code == 416 && actualLength > 0 && actualLength != _length && !retriedLength) {
             _length = actualLength;
-            [_chunks removeAllObjects]; [_order removeAllObjects];
             retriedLength = YES;
             if (start >= _length) {
                 [_errorText release]; _errorText = nil;
@@ -233,13 +256,6 @@
     }
     [_errorText release];
     _errorText = nil;
-    [_chunks setObject:result forKey:key];
-    [_order addObject:key];
-    while ([_order count] > YT_CACHED_CHUNKS) {
-        NSNumber *old = [_order objectAtIndex:0];
-        [_chunks removeObjectForKey:old];
-        [_order removeObjectAtIndex:0];
-    }
     return result;
 }
 - (int)readAtOffset:(int64_t)offset into:(void *)buffer count:(int)count {
@@ -248,7 +264,7 @@
     int copied = 0;
     while (copied < count && offset < _length && !_cancelled) {
         NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-        int64_t start = (offset / YT_CHUNK_BYTES) * YT_CHUNK_BYTES;
+        int64_t start = (offset / _chunkBytes) * _chunkBytes;
         NSData *chunk = [self chunkAt:start];
         if (!chunk) {
             [pool release];
@@ -271,7 +287,7 @@
     return _cancelled ? -1 : copied;
 }
 - (void)dealloc {
-    [_url release]; [_userAgent release]; [_chunks release]; [_order release]; [_cacheLock release]; [_errorText release];
+    [_url release]; [_userAgent release]; [_chunks release]; [_order release]; [_cacheLock release]; [_inflight release]; [_errorText release];
     [super dealloc];
 }
 @end

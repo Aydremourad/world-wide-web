@@ -22,7 +22,8 @@ static int64_t YTProbeSeek(void *opaque,int64_t offset,int whence) {
 }
 NSDictionary *YTNativeStreamInfo(NSDictionary *streams) {
     if(![[streams objectForKey:@"combined"] boolValue]) return nil;
-    YTMediaSource *source=[[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"videoURL"] length:[[streams objectForKey:@"videoLength"] longLongValue] userAgent:[streams objectForKey:@"userAgent"]] autorelease];
+    YTMediaSource *source=[streams objectForKey:@"videoSource"];
+    if(!source) source=[[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"videoURL"] length:[[streams objectForKey:@"videoLength"] longLongValue] userAgent:[streams objectForKey:@"userAgent"]] autorelease];
     YTProbeReader reader={source,0}; av_register_all();
     AVFormatContext *format=avformat_alloc_context();
     uint8_t *bytes=av_malloc(32768);
@@ -49,7 +50,8 @@ NSDictionary *YTNativeStreamInfo(NSDictionary *streams) {
                 (format->bit_rate<=0 || format->bit_rate<=1700000);
             result=[NSDictionary dictionaryWithObjectsAndKeys:
                 [NSNumber numberWithBool:eligible],@"eligible",[NSNumber numberWithInt:profile],@"profile",
-                [NSNumber numberWithInt:level],@"level",[NSNumber numberWithLongLong:[source length]],@"length",nil];
+                [NSNumber numberWithInt:level],@"level",
+                [NSNumber numberWithInt:codec->width],@"width",[NSNumber numberWithInt:codec->height],@"height",[NSNumber numberWithLongLong:[source length]],@"length",nil];
         }
     }
     if(format) avformat_close_input(&format);

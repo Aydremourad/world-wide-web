@@ -225,9 +225,10 @@ static NSString *YTPlayerResponse(NSString *videoID, NSDictionary *client, NSStr
         @"\"videoId\":\"%@\",\"contentCheckOk\":true,\"racyCheckOk\":true}",
         [client objectForKey:@"name"], [client objectForKey:@"version"],
         [client objectForKey:@"ua"], [client objectForKey:@"extra"], videoID];
+    NSNumber *timeout=[client objectForKey:@"timeout"];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:
         [NSURL URLWithString:@"https://www.youtube.com/youtubei/v1/player?prettyPrint=false"]
-        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:8.0];
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:timeout ? [timeout doubleValue] : 8.0];
     [request setHTTPMethod:@"POST"];
     [request setHTTPBody:[body dataUsingEncoding:NSUTF8StringEncoding]];
     [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
@@ -499,8 +500,12 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
     }
     NSString *video = YTChooseFormat(formats, YES), *audio = YTChooseFormat(formats, NO);
     BOOL combined = NO;
-    if (!video || !audio) {
-        NSString *mp4 = YTChooseCombinedMP4(formats);
+    NSString *mp4 = YTChooseCombinedMP4(formats);
+    NSString *combinedMime=YTJSONStringForKey(mp4,@"mimeType",0);
+    // A native-capable progressive video avoids CPU decoding, even when a
+    // separate Main-profile 144p video is also exposed by this client.
+    BOOL nativeCandidate=mp4 && [combinedMime length] && [combinedMime rangeOfString:@"avc1.42" options:NSCaseInsensitiveSearch].location!=NSNotFound;
+    if (nativeCandidate || !video || !audio) {
         if (mp4) { video = audio = mp4; combined = YES; }
     }
     if (!video || !audio) {
@@ -514,6 +519,7 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
         [NSNumber numberWithLongLong:YTFormatLength(video)], @"videoLength",
         [NSNumber numberWithLongLong:YTFormatLength(audio)], @"audioLength",
         [NSNumber numberWithBool:combined], @"combined",
+        [NSNumber numberWithInteger:YTJSONIntForKey(video,@"height")], @"height",
         userAgent, @"userAgent", nil];
 }
 
@@ -562,6 +568,28 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
     }
     if (errorText) *errorText = [errors componentsJoinedByString:@"\n\n"];
     return nil;
+}
+
+// Try one additional client only when the current combined stream needs
+// expensive software decoding. Keep the already working stream on failure.
++ (NSDictionary *)lowResolutionStreamsForID:(NSString *)videoID {
+    NSDictionary *client=[NSDictionary dictionaryWithObjectsAndKeys:
+        @"ANDROID_VR",@"name",@"1.65.10",@"version",@"28",@"number",
+        @"com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",@"ua",
+        @",\"deviceMake\":\"Oculus\",\"deviceModel\":\"Quest 3\",\"androidSdkVersion\":32,\"osName\":\"Android\",\"osVersion\":\"12L\"",@"extra",
+        [NSNumber numberWithDouble:4.0],@"timeout",nil];
+    NSString *player=YTPlayerResponse(videoID,client,NULL);
+    NSMutableDictionary *streams=player ? [[[self streamsFromPlayerResponse:player userAgent:[client objectForKey:@"ua"] error:NULL] mutableCopy] autorelease] : nil;
+    if(!streams || [[streams objectForKey:@"combined"] boolValue]) return nil;
+    long long videoLength=[[streams objectForKey:@"videoLength"] longLongValue],audioLength=[[streams objectForKey:@"audioLength"] longLongValue];
+    if(videoLength<=0 || audioLength<=0) return nil; // No extra HEAD delays on this optional route.
+    YTMediaSource *video=[[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"videoURL"] length:videoLength userAgent:[client objectForKey:@"ua"]] autorelease];
+    YTMediaSource *audio=[[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"audioURL"] length:audioLength userAgent:[client objectForKey:@"ua"]] autorelease];
+    [video setRequestTimeout:3]; [audio setRequestTimeout:3];
+    unsigned char bytes[12];
+    if([video readAtOffset:0 into:bytes count:12]!=12 || [audio readAtOffset:0 into:bytes count:12]!=12) return nil;
+    [streams setObject:video forKey:@"videoSource"]; [streams setObject:audio forKey:@"audioSource"];
+    return streams;
 }
 
 + (NSString *)videoIDFromText:(NSString *)text {

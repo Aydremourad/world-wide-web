@@ -14,6 +14,7 @@
     NSTimer *_controlsTimer;
     YTMediaSource *_videoSource, *_audioSource;
     AudioQueueRef _outputQueue;
+    void *_audioPump;
     double _duration, _sampleRate, _lastClock, _clockOffset;
     NSTimeInterval _lastControlTouch;
     BOOL _controlsHidden, _oldStatusHidden, _finished;

@@ -4,10 +4,14 @@
 #undef main
 #import "YTAudioPump.h"
 
+static volatile int LongDelay, LongDelayStarted, LongDelayFinished;
 @interface YTSlowMovieProtocol : YTMovieProtocol
 @end
 @implementation YTSlowMovieProtocol
 - (void)startLoading {
+    if(__sync_bool_compare_and_swap(&LongDelay,1,0)) {
+        LongDelayStarted=1; [NSThread sleepForTimeInterval:5.0]; LongDelayFinished=1;
+    }
     if (Requests > 2) [NSThread sleepForTimeInterval:0.15];
     [super startLoading];
 }
@@ -22,6 +26,8 @@ typedef struct {
     BOOL running;
     BOOL draining;
     BOOL stuck;
+    BOOL drifting;
+    double artificialClock;
     unsigned pauses;
 } FakeQueue;
 static OSStatus YTFakeEnqueue(void *opaque, AudioQueueBufferRef buffer, UInt32 packets,
@@ -53,7 +59,8 @@ static OSStatus YTFakePause(void *opaque) {
 }
 static double YTFakeClock(void *opaque) {
     FakeQueue *queue=opaque;
-    pthread_mutex_lock(&queue->mutex); double clock=queue->consumed-queue->baseConsumed; pthread_mutex_unlock(&queue->mutex);
+    pthread_mutex_lock(&queue->mutex); double clock=queue->consumed-queue->baseConsumed;
+    if(queue->drifting) { queue->artificialClock+=44100; clock+=queue->artificialClock; } pthread_mutex_unlock(&queue->mutex);
     return clock;
 }
 static void YTFakeDrain(void *opaque) {
@@ -72,8 +79,9 @@ static void YTFakeSetUp(YTAudio *audio, FakeQueue *queue, volatile BOOL *stop, v
         AudioQueueBuffer initial={.mAudioDataBytesCapacity=YT_AUDIO_BUFFER_BYTES,.mAudioData=malloc(YT_AUDIO_BUFFER_BYTES)};
         audio->buffers[i]=malloc(sizeof(initial)); memcpy(audio->buffers[i],&initial,sizeof(initial));
     }
-    assert(YTAudioBegin(audio) == noErr && !audio->eof);
+    assert(YTAudioBegin(audio) == noErr && audio->pending>0);
     audio->started=YES; YTFakeStart(queue);
+    if(audio->eof) YTFakeDrain(queue);
 }
 static BOOL YTFakeConsume(YTAudio *audio, FakeQueue *queue, double *slowest) {
     pthread_mutex_lock(&queue->mutex);
@@ -103,7 +111,7 @@ static void YTFakeCleanUp(YTAudio *audio, FakeQueue *queue) {
     [audio->source release]; pthread_mutex_destroy(&queue->mutex);
 }
 int main(int argc,char **argv) {
-    assert(argc == 2);
+    assert(argc == 3);
     NSAutoreleasePool *pool=[[NSAutoreleasePool alloc] init];
     Movie=[[NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[1]]] retain];
     assert([Movie length] > 1024*1024);
@@ -136,7 +144,41 @@ int main(int argc,char **argv) {
         [NSThread sleepForTimeInterval:0.005];
     }
     assert(finished && !audio.failed && queue.consumed == audio.decodedFrames && queue.consumed>1500000 && audio.packet==(SInt64)expected && queue.pauses > 0 && queue.starts > 1);
+    assert(audio.playedFrames==audio.decodedFrames);
     NSLog(@"Running-but-stuck queue recovery passed: decoded audio retained.");
+    YTFakeCleanUp(&audio,&queue);
+    // A device clock can advance while no PCM is heard. Video must stay at
+    // the current audible buffer, rather than skip to future keyframes.
+    // Freeze output while the producer is inside a five-second network wait.
+    // Recovery must occur before that wait finishes, not after another enqueue.
+    Requests=0; YTFakeSetUp(&audio,&queue,&stop,&paused);
+    LongDelay=1; LongDelayStarted=LongDelayFinished=0;
+    for(unsigned i=0;i<5;i++) YTFakeConsume(&audio,&queue,&slowest);
+    deadline=[NSDate timeIntervalSinceReferenceDate]+2;
+    while(!LongDelayStarted && [NSDate timeIntervalSinceReferenceDate]<deadline) [NSThread sleepForTimeInterval:0.01];
+    assert(LongDelayStarted && !LongDelayFinished);
+    pthread_mutex_lock(&queue.mutex); queue.stuck=YES; queue.drifting=YES; pthread_mutex_unlock(&queue.mutex);
+    for(int i=0;i<10;i++) {
+        double media=YTAudioMediaTime(&audio);
+        assert(media <= audio.playedFrames/audio.format.mSampleRate + YT_AUDIO_BUFFER_BYTES/(audio.format.mBytesPerFrame*audio.format.mSampleRate) + 0.01);
+    }
+    deadline=[NSDate timeIntervalSinceReferenceDate]+3.5;
+    BOOL recovered=NO;
+    while([NSDate timeIntervalSinceReferenceDate]<deadline && !audio.failed) {
+        pthread_mutex_lock(&queue.mutex); recovered=queue.pauses>0; pthread_mutex_unlock(&queue.mutex);
+        if(recovered) break;
+        [NSThread sleepForTimeInterval:0.02];
+    }
+    assert(recovered && !LongDelayFinished && !audio.failed);
+    pthread_mutex_lock(&queue.mutex); queue.drifting=NO; pthread_mutex_unlock(&queue.mutex);
+    deadline=[NSDate timeIntervalSinceReferenceDate]+18; finished=NO;
+    while([NSDate timeIntervalSinceReferenceDate]<deadline && !audio.failed) {
+        BOOL empty=YTFakeConsume(&audio,&queue,&slowest);
+        if(audio.eof && empty) { finished=YES; break; }
+        [NSThread sleepForTimeInterval:0.005];
+    }
+    assert(finished && !audio.failed && queue.consumed==audio.decodedFrames);
+    NSLog(@"Audible media clock and independent watchdog passed: stalled output recovered while the audio producer was blocked on HTTPS.");
     YTFakeCleanUp(&audio,&queue);
     // Cancel while the producer is fetching, then join before releasing its file.
     Requests=0; YTFakeSetUp(&audio,&queue,&stop,&paused);
@@ -146,6 +188,19 @@ int main(int argc,char **argv) {
     YTFakeCleanUp(&audio,&queue);
     assert([NSDate timeIntervalSinceReferenceDate]-before < 1.0);
     NSLog(@"Audio producer cancellation and cleanup passed.");
+    // A song shorter than the initial PCM prefill must still drain cleanly.
+    [Movie release]; Movie=[[NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[2]]] retain];
+    Requests=0; YTFakeSetUp(&audio,&queue,&stop,&paused); assert(audio.eof && !audio.workerCreated && audio.monitorCreated);
+    deadline=[NSDate timeIntervalSinceReferenceDate]+3; finished=NO;
+    while([NSDate timeIntervalSinceReferenceDate]<deadline && !audio.failed) {
+        BOOL empty=YTFakeConsume(&audio,&queue,&slowest);
+        if(audio.eof && empty) { finished=YES; break; }
+        [NSThread sleepForTimeInterval:0.005];
+    }
+    assert(finished && !audio.failed && audio.playedFrames==audio.decodedFrames && queue.consumed==audio.decodedFrames);
+    assert(YTAudioIsDrained(&audio));
+    NSLog(@"Short-track PCM prefill and final drain passed.");
+    YTFakeCleanUp(&audio,&queue);
     [NSURLProtocol unregisterClass:[YTSlowMovieProtocol class]];
     [Movie release]; [pool release]; return 0;
 }

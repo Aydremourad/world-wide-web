@@ -31,6 +31,7 @@ static BOOL YTSendText(int fd,NSString *text) {
     if((self=[super init])) {
         _upstream=[url retain]; _length=length; _userAgent=[userAgent copy];
         _sharedSource=[[YTMediaSource alloc] initWithURL:url length:length userAgent:userAgent];
+        [_sharedSource enableStreamingReadAhead];
         _lock=[[NSLock alloc] init]; _clients=[[NSMutableDictionary alloc] init]; _listener=-1;
     }
     return self;

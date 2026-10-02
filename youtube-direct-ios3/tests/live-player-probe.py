@@ -30,9 +30,10 @@ for number, client in clients:
         player = json.loads(data)
         status = player.get("playabilityStatus", {})
         record.update(status=status.get("status"), reason=status.get("reason"))
-        formats = player.get("streamingData", {}).get("adaptiveFormats", [])
-        selected = [f for f in formats if f.get("itag") in (597, 160, 140)]
-        record["formats"] = [{"itag": f["itag"], "direct": bool(f.get("url")),
+        formats = player.get("streamingData", {}).get("formats", []) + player.get("streamingData", {}).get("adaptiveFormats", [])
+        selected = [f for f in formats if f.get("itag") in (18, 597, 160, 140)]
+        record["formats"] = [{"itag": f["itag"], "direct": bool(f.get("url")), "mime": f.get("mimeType"),
+                              "width": f.get("width"), "height": f.get("height"),
                               "contentLength": f.get("contentLength"),
                               "urlLength": parse_qs(urlsplit(f.get("url", "")).query).get("clen", [None])[0]}
                              for f in selected]
@@ -43,7 +44,7 @@ for number, client in clients:
                 continue
             url = media["url"] + "&range=0-15"
             try:
-                with urlopen(Request(url, headers={"User-Agent": client["userAgent"], "Range": "bytes=0-15"}), timeout=7) as response:
+                with urlopen(Request(url, headers={"User-Agent": client["userAgent"]}), timeout=7) as response:
                     checks.append({"itag": media["itag"], "http": response.status,
                                    "bytes": len(response.read(16))})
             except HTTPError as error:

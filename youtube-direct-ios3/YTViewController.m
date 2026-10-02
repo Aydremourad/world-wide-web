@@ -133,6 +133,8 @@
     [NSThread detachNewThreadSelector:@selector(resolveThread:) toTarget:self withObject:videoID];
 }
 
+- (void)showLowResolutionStatus { _statusLabel.text=@"Getting a smaller video..."; }
+
 - (void)resolveThread:(NSString *)videoID {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     NSString *error = nil;
@@ -140,6 +142,18 @@
     if (streams) {
         NSDictionary *info=YTNativeStreamInfo(streams);
         if(info) [streams setObject:info forKey:@"nativeInfo"];
+        if(info && ![[info objectForKey:@"eligible"] boolValue] &&
+           [[info objectForKey:@"width"] intValue]*[[info objectForKey:@"height"] intValue]>38400) {
+            [self performSelectorOnMainThread:@selector(showLowResolutionStatus) withObject:nil waitUntilDone:NO];
+            NSDictionary *lower=[YTYouTube lowResolutionStreamsForID:videoID];
+            if(lower) streams=[[lower mutableCopy] autorelease];
+        }
+    }
+    if(streams) {
+        NSDictionary *info=[streams objectForKey:@"nativeInfo"];
+        NSString *route=[[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue] ? @"Apple player" : @"Software player";
+        NSString *diagnostic=[NSString stringWithFormat:@"YouTube 0.9.1\nPlayer: %@\nHeight: %@\nNative probe: %@\n",route,[streams objectForKey:@"height"],info ? info : @"separate tracks"];
+        [diagnostic writeToFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"YouTube-playback.txt"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
     }
     NSDictionary *payload = [NSDictionary dictionaryWithObjectsAndKeys:
         (streams ? (id)streams : (id)[NSNull null]), @"streams",

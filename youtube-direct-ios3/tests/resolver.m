@@ -39,7 +39,7 @@ static int AndroidRequests, VisionRequests, HeadRequests;
         NSString *clientName = [request valueForHTTPHeaderField:@"X-YouTube-Client-Name"];
         BOOL android = [clientName isEqualToString:@"3"];
         if (android) AndroidRequests++; else if ([clientName isEqualToString:@"101"]) VisionRequests++;
-        NSString *json = android && BlockAndroid ?
+        NSString *json = [clientName isEqualToString:@"28"] ? Player([NSString stringWithFormat:@"%@,%@",Video,Audio]) : android && BlockAndroid ?
             @"{\"playabilityStatus\":{\"status\":\"LOGIN_REQUIRED\",\"reason\":\"Fixture blocked Android\"}}" :
             CombinedOnly ? Player([NSString stringWithFormat:@"%@,%@,%@", Combined,
                 @"{\"itag\":160,\"mimeType\":\"video/mp4; codecs=\\\"avc1.4d400c\\\"\"}",
@@ -88,6 +88,9 @@ int main(void) {
     assert([[result objectForKey:@"videoURL"] isEqual:[result objectForKey:@"audioURL"]]);
     result = Resolve([NSString stringWithFormat:@"%@,%@,%@", Combined, Video, Audio]);
     assert(![[result objectForKey:@"combined"] boolValue]);
+    NSString *baseline=[Combined stringByReplacingOccurrencesOfString:@"avc1.4d401e" withString:@"avc1.42001e"];
+    result=Resolve([NSString stringWithFormat:@"%@,%@,%@",baseline,Video,Audio]);
+    assert([[result objectForKey:@"combined"] boolValue]); // Prefer native playback over software 144p.
     result = Resolve([NSString stringWithFormat:@"%@,%@",
         @"{\"itag\":160,\"url\":\"https://media.example/v\",\"contentLength\":4294967301}", Audio]);
     assert([[result objectForKey:@"videoLength"] longLongValue] == 4294967301LL);
@@ -130,6 +133,8 @@ int main(void) {
     assert([[result objectForKey:@"combined"] boolValue]);
     assert([[result objectForKey:@"videoLength"] longLongValue] == [[result objectForKey:@"audioLength"] longLongValue]);
     assert([result objectForKey:@"videoSource"] != [result objectForKey:@"audioSource"]);
+    result=[YTYouTube lowResolutionStreamsForID:@"jNQXAC9IVRw"];
+    assert(result && ![[result objectForKey:@"combined"] boolValue] && [[result objectForKey:@"videoLength"] longLongValue]==70000);
     [NSURLProtocol unregisterClass:[YTFixtureProtocol class]];
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"YTWorkingClient"];
     NSLog(@"Resolver checks passed, including format 18 with unavailable adaptive formats, one shared length probe, independent readers and no unnecessary fallback clients.");

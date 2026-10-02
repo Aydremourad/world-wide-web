@@ -93,19 +93,7 @@ static BOOL YTWaitForPause(YTPlayback *playback) {
     return !*playback->stop && !playback->audio->failed;
 }
 static double YTPlaybackClock(YTPlayback *playback) {
-    if (playback->audio->eof) {
-        UInt32 running = 1, size = sizeof(running);
-        if (AudioQueueGetProperty(playback->audio->queue, kAudioQueueProperty_IsRunning,
-                                  &running, &size) == noErr && !running)
-            return [NSDate timeIntervalSinceReferenceDate] - playback->wallStart - playback->pauseTotal;
-    }
-    AudioTimeStamp time;
-    memset(&time, 0, sizeof(time));
-    Boolean changed = false;
-    if (AudioQueueGetCurrentTime(playback->audio->queue, NULL, &time, &changed) == noErr &&
-        (time.mFlags & kAudioTimeStampSampleTimeValid))
-        return YTContinuousAudioTime(&playback->timeline, time.mSampleTime / playback->audio->format.mSampleRate);
-    return [NSDate timeIntervalSinceReferenceDate] - playback->wallStart - playback->pauseTotal;
+    return YTAudioMediaTime(playback->audio);
 }
 static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRational timeBase) {
     if (!YTWaitForPause(playback)) return NO;
@@ -135,7 +123,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
         [NSThread sleepForTimeInterval:wait < 0.02 ? wait : 0.02];
         wait = pts - YTPlaybackClock(playback);
         // A truncated audio track must not hold the video thread forever.
-        if (playback->audio->eof && wait > 1.0) break;
+        if (YTAudioIsDrained(playback->audio)) break;
     }
     if (*playback->stop || playback->audio->failed) return NO;
     double now = [NSDate timeIntervalSinceReferenceDate];
@@ -182,9 +170,16 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     UIBarButtonItem *done = [[[UIBarButtonItem alloc] initWithTitle:@"Done" style:UIBarButtonItemStyleDone target:self action:@selector(close)] autorelease];
     UIBarButtonItem *space = [[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil] autorelease];
     _fitItem = [[UIBarButtonItem alloc] initWithTitle:@"Fill" style:UIBarButtonItemStyleBordered target:self action:@selector(toggleFit)];
-    [_topBar setItems:[NSArray arrayWithObjects:done, space, _fitItem, nil]];
+    UILabel *quality=[[[UILabel alloc] initWithFrame:CGRectMake(0,0,110,30)] autorelease];
+    quality.backgroundColor=[UIColor clearColor]; quality.textColor=[UIColor whiteColor];
+    quality.textAlignment=UITextAlignmentCenter; quality.font=[UIFont boldSystemFontOfSize:14];
+    int height=[[_streams objectForKey:@"height"] intValue];
+    if(!height) height=[[[_streams objectForKey:@"nativeInfo"] objectForKey:@"height"] intValue];
+    quality.text=height>0 ? [NSString stringWithFormat:@"%dp",height] : @"YouTube";
+    UIBarButtonItem *qualityItem=[[[UIBarButtonItem alloc] initWithCustomView:quality] autorelease];
+    [_topBar setItems:[NSArray arrayWithObjects:done, space, qualityItem, space, _fitItem, nil]];
     [self.view addSubview:_topBar];
-    _bottomControls = [[UIView alloc] initWithFrame:CGRectMake(0, bounds.size.height-100, bounds.size.width, 100)];
+    _bottomControls = [[UIView alloc] initWithFrame:CGRectMake(0, bounds.size.height-84, bounds.size.width, 84)];
     _bottomControls.backgroundColor = [UIColor colorWithWhite:0 alpha:0.70];
     _bottomControls.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin;
     [self.view addSubview:_bottomControls];
@@ -201,13 +196,13 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     _progress.frame=CGRectMake(60, 12, bounds.size.width-120, 9);
     _progress.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     [_bottomControls addSubview:_progress];
-    _transportBar = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 26, bounds.size.width, 40)];
+    _transportBar = [[UIToolbar alloc] initWithFrame:CGRectMake(0, 22, bounds.size.width, 34)];
     _transportBar.barStyle = UIBarStyleBlackTranslucent;
     _transportBar.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     _playItem = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemPause target:self action:@selector(togglePause)];
     [_transportBar setItems:[NSArray arrayWithObjects:space, _playItem, space, nil]];
     [_bottomControls addSubview:_transportBar];
-    _volume = [[UISlider alloc] initWithFrame:CGRectMake(35, 66, bounds.size.width-70, 30)];
+    _volume = [[UISlider alloc] initWithFrame:CGRectMake(35, 54, bounds.size.width-70, 30)];
     _volume.minimumValue=0; _volume.maximumValue=1; _volume.value=1;
     _volume.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     [_volume addTarget:self action:@selector(volumeChanged) forControlEvents:UIControlEventValueChanged];
@@ -246,10 +241,8 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
 - (void)togglePause {
     if (_finished) return;
     _paused=!_paused; _lastControlTouch=[NSDate timeIntervalSinceReferenceDate];
-    if (_outputQueue) {
-        if (_paused) AudioQueuePause(_outputQueue);
-        else AudioQueueStart(_outputQueue,NULL);
-    }
+    // The playback worker owns pause/resume; issuing the same commands here
+    // races with the worker and can restart an old queue twice.
     [_playItem release];
     _playItem=[[UIBarButtonItem alloc] initWithBarButtonSystemItem:_paused ? UIBarButtonSystemItemPlay : UIBarButtonSystemItemPause target:self action:@selector(togglePause)];
     UIBarButtonItem *space=[[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil] autorelease];
@@ -261,29 +254,24 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
 }
 - (void)attachAudioQueue:(NSDictionary *)info {
     _outputQueue=[[info objectForKey:@"queue"] pointerValue];
+    _audioPump=[[info objectForKey:@"audio"] pointerValue];
     _sampleRate=[[info objectForKey:@"rate"] doubleValue];
     _duration=[[info objectForKey:@"duration"] doubleValue];
     _durationLabel.text=[self timeString:_duration]; [self volumeChanged];
 }
-- (void)detachAudioQueue { _outputQueue=NULL; }
+- (void)detachAudioQueue { _outputQueue=NULL; _audioPump=NULL; }
 - (void)controlsTick:(NSTimer *)timer {
     if (_stop) return;
-    if (_outputQueue && _sampleRate > 0) {
-        AudioTimeStamp time; memset(&time,0,sizeof(time)); Boolean changed=false;
-        if (AudioQueueGetCurrentTime(_outputQueue,NULL,&time,&changed)==noErr && (time.mFlags & kAudioTimeStampSampleTimeValid)) {
-            double raw=time.mSampleTime/_sampleRate;
-            if (raw+_clockOffset < _lastClock-0.25) _clockOffset=_lastClock-raw;
-            double seconds=raw+_clockOffset;
-            if (seconds < _lastClock) seconds=_lastClock; _lastClock=seconds;
-            _elapsedLabel.text=[self timeString:seconds];
-            _progress.progress=_duration > 0 ? fmin(1,seconds/_duration) : 0;
-        }
+    if (_audioPump) {
+        double seconds=YTAudioMediaTime((YTAudio *)_audioPump);
+        _elapsedLabel.text=[self timeString:seconds];
+        _progress.progress=_duration > 0 ? fmin(1,seconds/_duration) : 0;
     }
     if (!_paused && !_finished && _message.hidden && [NSDate timeIntervalSinceReferenceDate]-_lastControlTouch > 5)
         [self setControlsHidden:YES];
 }
 - (void)close {
-    _stop=YES; _outputQueue=NULL;
+    _stop=YES; _outputQueue=NULL; _audioPump=NULL;
     [_controlsTimer invalidate];
     [_videoSource cancel]; [_audioSource cancel];
     [[UIApplication sharedApplication] setStatusBarHidden:_oldStatusHidden animated:YES];
@@ -332,7 +320,10 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
         length:[[_streams objectForKey:@"videoLength"] longLongValue] userAgent:[_streams objectForKey:@"userAgent"]];
     if (!_audioSource) _audioSource = [[YTMediaSource alloc] initWithURL:[_streams objectForKey:@"audioURL"]
         length:[[_streams objectForKey:@"audioLength"] longLongValue] userAgent:[_streams objectForKey:@"userAgent"]];
+    [_videoSource enableStreamingReadAhead]; [_audioSource enableStreamingReadAhead];
+    if([[_streams objectForKey:@"combined"] boolValue]) [_audioSource shareCacheWithSource:_videoSource];
     io.source = _videoSource; audio.source = _audioSource;
+    [NSThread setThreadPriority:0.25];
     if (_stop) goto finished;
     av_register_all();
     format = avformat_alloc_context();
@@ -370,6 +361,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     }
     NSDictionary *queueInfo=[NSDictionary dictionaryWithObjectsAndKeys:
         [NSValue valueWithPointer:audio.queue], @"queue",
+        [NSValue valueWithPointer:&audio], @"audio",
         [NSNumber numberWithDouble:audio.format.mSampleRate], @"rate",
         [NSNumber numberWithDouble:format->duration > 0 ? (double)format->duration / AV_TIME_BASE : 0], @"duration", nil];
     [self performSelectorOnMainThread:@selector(attachAudioQueue:) withObject:queueInfo waitUntilDone:YES];

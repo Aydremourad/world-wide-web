@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
+#include <time.h>
 
 static BOOL YTAudioStopped(YTAudio *audio) {
     return audio->localStop || (audio->stop && *audio->stop);
@@ -18,6 +19,7 @@ void YTAudioBufferReturned(void *opaque, AudioQueueRef queue, AudioQueueBufferRe
             audio->available[i] = YES;
             if (audio->pending) audio->pending--;
             audio->returnedBuffers++;
+            audio->playedFrames+=buffer->mAudioDataByteSize/audio->format.mBytesPerFrame;
             if (!audio->pending && audio->started && !audio->eof) audio->starved = YES;
             pthread_cond_signal(&audio->ready);
             break;
@@ -25,12 +27,46 @@ void YTAudioBufferReturned(void *opaque, AudioQueueRef queue, AudioQueueBufferRe
     }
     pthread_mutex_unlock(&audio->mutex);
 }
+double YTAudioMediaTime(YTAudio *audio) {
+    if(!audio || !audio->syncReady || audio->format.mSampleRate<=0) return 0;
+    double raw=audio->sink.clock ? audio->sink.clock(audio->sink.context) : -1;
+    pthread_mutex_lock(&audio->mutex);
+    double rate=audio->format.mSampleRate;
+    double played=audio->playedFrames/rate, decoded=audio->decodedFrames/rate;
+    double media=audio->mediaTime;
+    if(!audio->pending) {
+        // Some old queues keep their device clock moving through silence.
+        // Media time must stop at the audio actually consumed, not that clock.
+        media=played; audio->mediaClockReady=NO;
+    } else if(!(audio->paused && *audio->paused) && raw>=0) {
+        if(!audio->mediaClockReady || raw<audio->rawPrevious-1) {
+            audio->rawBase=raw; audio->mediaBase=media>played ? media : played;
+            audio->mediaClockReady=YES;
+        }
+        media=audio->mediaBase+(raw-audio->rawBase)/rate;
+        // A clock running without callbacks cannot run video past unheard audio.
+        double limit=played+YT_AUDIO_BUFFER_BYTES/(audio->format.mBytesPerFrame*rate);
+        if(limit>decoded) limit=decoded;
+        if(media>limit) media=limit;
+        if(media<played) media=played;
+        audio->rawPrevious=raw;
+    } else if(!(audio->paused && *audio->paused)) media=played;
+    if(media<audio->mediaTime) media=audio->mediaTime;
+    audio->mediaTime=media;
+    pthread_mutex_unlock(&audio->mutex);
+    return media;
+}
+BOOL YTAudioIsDrained(YTAudio *audio) {
+    pthread_mutex_lock(&audio->mutex); BOOL drained=audio->eof && !audio->pending; pthread_mutex_unlock(&audio->mutex);
+    return drained;
+}
 static double YTAudioWallTime(void) {
     struct timeval now; gettimeofday(&now, NULL);
     return now.tv_sec + now.tv_usec / 1000000.0;
 }
 static void YTAudioRecover(YTAudio *audio) {
     if (!audio->started || YTAudioStopped(audio)) return;
+    YTAudioMediaTime(audio);
     double now = YTAudioWallTime();
     if (audio->paused && *audio->paused) { audio->lastAdvance = audio->lastBufferAdvance = now; return; }
     double clock = audio->sink.clock ? audio->sink.clock(audio->sink.context) : -1;
@@ -55,6 +91,7 @@ static void YTAudioRecover(YTAudio *audio) {
         // Pause preserves queued packets; Reset would discard them.
         OSStatus status = running && audio->sink.pause ? audio->sink.pause(audio->sink.context) : noErr;
         if (status == noErr) status = audio->sink.start(audio->sink.context);
+        pthread_mutex_lock(&audio->mutex); audio->mediaClockReady=NO; pthread_mutex_unlock(&audio->mutex);
         if (status != noErr || (stuck && ++audio->stalledRestarts > 3)) {
             audio->error = status != noErr ? status : kAudioFileUnspecifiedError;
             audio->failed = YES;
@@ -89,14 +126,12 @@ static OSStatus YTProduceAudio(YTAudio *audio, unsigned slot) {
     if(status!=noErr && status!=(OSStatus)-39) return status;
     if(!frames) {
         audio->eof=YES;
-        if(audio->started) { YTAudioRecover(audio); audio->sink.drain(audio->sink.context); }
+        if(audio->started) audio->sink.drain(audio->sink.context);
         return noErr;
     }
     buffer->mAudioDataByteSize=data.mBuffers[0].mDataByteSize;
-    audio->decodedFrames+=frames;
-    pthread_mutex_lock(&audio->mutex); audio->pending++; pthread_mutex_unlock(&audio->mutex);
+    pthread_mutex_lock(&audio->mutex); audio->decodedFrames+=frames; audio->pending++; pthread_mutex_unlock(&audio->mutex);
     status=audio->sink.enqueue(audio->sink.context,buffer,frames,NULL);
-    if(status==noErr) YTAudioRecover(audio);
     return status;
 }
 static void *YTAudioProducer(void *opaque) {
@@ -116,13 +151,22 @@ static void *YTAudioProducer(void *opaque) {
             pthread_cond_timedwait(&audio->ready, &audio->mutex, &deadline);
         }
         pthread_mutex_unlock(&audio->mutex);
-        if (slot < 0) { YTAudioRecover(audio); continue; }
+        if (slot < 0) continue;
         NSAutoreleasePool *chunkPool = [[NSAutoreleasePool alloc] init];
         OSStatus status = YTProduceAudio(audio, (unsigned)slot);
         if (status != noErr && !YTAudioStopped(audio)) { audio->error = status; audio->failed = YES; }
         [chunkPool release];
     }
     [pool release];
+    return NULL;
+}
+static void *YTAudioMonitor(void *opaque) {
+    YTAudio *audio=opaque;
+    // Recovery must remain active even while the producer is awaiting HTTPS.
+    while(!YTAudioStopped(audio) && !audio->failed) {
+        YTAudioRecover(audio);
+        struct timespec delay={0,100000000}; nanosleep(&delay,NULL);
+    }
     return NULL;
 }
 OSStatus YTAudioOpen(YTAudio *audio) {
@@ -176,6 +220,10 @@ OSStatus YTAudioBegin(YTAudio *audio) {
         if (pthread_create(&audio->worker, NULL, YTAudioProducer, audio)) return kAudioFileUnspecifiedError;
         audio->workerCreated = YES;
     }
+    if(!YTAudioStopped(audio)) {
+        if(pthread_create(&audio->monitor,NULL,YTAudioMonitor,audio)) return kAudioFileUnspecifiedError;
+        audio->monitorCreated=YES;
+    }
     return noErr;
 }
 static OSStatus YTEnqueue(void *context, AudioQueueBufferRef buffer, UInt32 packets, AudioStreamPacketDescription *descriptions) {
@@ -218,6 +266,7 @@ void YTShutdownAudio(YTAudio *audio) {
         pthread_mutex_lock(&audio->mutex); pthread_cond_signal(&audio->ready); pthread_mutex_unlock(&audio->mutex);
         pthread_join(audio->worker, NULL); audio->workerCreated = NO;
     }
+    if(audio->monitorCreated) { pthread_join(audio->monitor,NULL); audio->monitorCreated=NO; }
     if (audio->queue) { AudioQueueStop(audio->queue, true); AudioQueueDispose(audio->queue, true); audio->queue = NULL; }
     if (audio->converter) { AudioConverterDispose(audio->converter); audio->converter=NULL; }
     free(audio->compressed); audio->compressed=NULL;

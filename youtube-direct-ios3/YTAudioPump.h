@@ -23,7 +23,9 @@ typedef struct {
     AudioConverterRef converter;
     AudioStreamBasicDescription inputFormat;
     void *compressed;
-    UInt64 decodedFrames;
+    UInt64 decodedFrames, playedFrames;
+    double mediaBase, rawBase, rawPrevious, mediaTime;
+    BOOL mediaClockReady;
     AudioQueueRef queue;
     AudioStreamBasicDescription format;
     AudioStreamPacketDescription *descriptions;
@@ -41,9 +43,9 @@ typedef struct {
     OSStatus error;
     pthread_mutex_t mutex;
     pthread_cond_t ready;
-    pthread_t worker;
+    pthread_t worker, monitor;
     BOOL syncReady;
-    BOOL workerCreated;
+    BOOL workerCreated, monitorCreated;
     unsigned pending;
     unsigned returnedBuffers, lastReturned;
     double lastBufferAdvance;
@@ -57,5 +59,7 @@ OSStatus YTAudioOpen(YTAudio *audio);
 OSStatus YTAudioBegin(YTAudio *audio);
 OSStatus YTPrepareAudio(YTAudio *audio);
 void YTAudioBufferReturned(void *opaque, AudioQueueRef queue, AudioQueueBufferRef buffer);
+double YTAudioMediaTime(YTAudio *audio);
+BOOL YTAudioIsDrained(YTAudio *audio);
 void YTShutdownAudio(YTAudio *audio);
 #endif

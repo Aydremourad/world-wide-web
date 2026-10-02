@@ -10,7 +10,10 @@
     NSInteger _rangeMode;
     NSMutableDictionary *_chunks;
     NSMutableArray *_order;
-    NSRecursiveLock *_cacheLock;
+    NSCondition *_cacheLock;
+    NSMutableSet *_inflight;
+    NSUInteger _chunkBytes;
+    NSTimeInterval _requestTimeout;
     NSString *_errorText;
     volatile BOOL _cancelled;
 }
@@ -20,4 +23,6 @@
 - (NSString *)errorText;
 - (void)cancel;
 - (void)shareCacheWithSource:(YTMediaSource *)source;
+- (void)enableStreamingReadAhead;
+- (void)setRequestTimeout:(NSTimeInterval)seconds;
 @end

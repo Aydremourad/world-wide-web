@@ -20,8 +20,8 @@ static int Requests;
     NSScanner *scan = [NSScanner scannerWithString:[[self request] valueForHTTPHeaderField:@"Range"]];
     assert([scan scanString:@"bytes=" intoString:NULL] && [scan scanLongLong:&start] &&
            [scan scanString:@"-" intoString:NULL] && [scan scanLongLong:&end]);
-    assert(start >= 0 && end >= start && end < (long long)[Movie length] && end - start + 1 <= 65536);
-    Requests++;
+    assert(start >= 0 && end >= start && end < (long long)[Movie length] && end - start + 1 <= 262144);
+    __sync_add_and_fetch(&Requests,1);
     NSData *bytes = [Movie subdataWithRange:NSMakeRange((NSUInteger)start, (NSUInteger)(end-start+1))];
     NSDictionary *headers = [NSDictionary dictionaryWithObjectsAndKeys:@"video/mp4", @"Content-Type",
         [NSString stringWithFormat:@"%lld", end-start+1], @"Content-Length",

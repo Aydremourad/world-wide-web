@@ -51,7 +51,7 @@ int main(int argc,char **argv) {
     pthread_join(a,NULL); pthread_join(b,NULL);
     NSData *wanted=[Movie subdataWithRange:NSMakeRange(300000,200001)];
     assert([first.bytes isEqualToData:wanted] && [second.bytes isEqualToData:wanted]);
-    assert(Requests-beforeRequests==4); // Concurrent ranges do not duplicate upstream requests.
+    assert(Requests-beforeRequests==1); // Concurrent ranges do not duplicate upstream requests.
     [first.bytes release]; [second.bytes release];
     assert([Fetch(url,@"GET",nil,200) isEqualToData:Movie]);
     NSString *eof=[NSString stringWithFormat:@"bytes=%lu-",(unsigned long)[Movie length]];
