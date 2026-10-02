@@ -98,7 +98,8 @@ static void YTFillAudio(void *opaque, AudioQueueRef queue, AudioQueueBufferRef b
     UInt32 packets = audio->packetsPerBuffer;
     OSStatus result = AudioFileReadPackets(audio->file, false, &bytes,
         audio->descriptions, audio->packet, &packets, buffer->mAudioData);
-    if (result != noErr && result != kAudioFileEndOfFileError) {
+    // iPhone OS 3 does not name eofErr in AudioFile.h; its OSStatus is -39.
+    if (result != noErr && result != (OSStatus)-39) {
         audio->failed = YES;
         audio->error = result;
     } else if (packets) {

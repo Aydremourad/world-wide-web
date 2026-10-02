@@ -1,0 +1,6 @@
+youtube-direct-ios3/.deps/
+youtube-direct-ios3/.theos/
+youtube-direct-ios3/.ci-package/
+youtube-direct-ios3/.ci-*.txt
+youtube-direct-ios3/packages/
+__pycache__/

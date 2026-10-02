@@ -1,83 +1,75 @@
-# YouTube Direct for iPhone OS 3
+# YouTube Direct: streaming player for iPhone OS 3
 
-A native, serverless YouTube client experiment for the original iPhone / iPhone 2G.
+This experimental branch replaces full download and conversion with a native
+player for the original iPhone / iPhone 2G on iPhone OS 3.1.3. Once installed,
+playback uses only the phone's Wi-Fi connection.
 
-This project does **not** use TubeRepair, Render, DuckDNS, a Mac proxy, or the stock
-YouTube framework. After installation the phone talks directly to YouTube.
+## Playback
 
-## Current flow
+The phone requests YouTube's Android player response using the previous app's
+client identity. It selects tiny H.264 format 597 (preferred) or 160, plus AAC
+audio format 140. Both tracks are read in bounded 64 KiB HTTP ranges; each track
+caches at most eight chunks. MP4 metadata can be read from either end of a file.
 
-1. Search is sent directly from the phone to YouTube's InnerTube `search` endpoint.
-2. Selecting a video sends a direct InnerTube `player` request.
-3. The client tries current WEB and MWEB client identities.
-4. It looks specifically for **itag 18**, the legacy progressive MP4 containing
-   H.264 video and AAC audio in one file.
-5. The returned `googlevideo.com` HTTPS URL is handed directly to
-   `MPMoviePlayerController`.
+FFmpeg's static ARMv6 decoder decodes H.264 directly. OpenGL ES 1 displays
+RGB565 frames; AudioQueue plays AAC audio. Audio is the playback clock. Late
+video displays are dropped while H.264 reference frames are preserved.
 
-There is no server-side video conversion and no computer needs to remain on.
+The app has Done, Pause/Resume and rotation. It does not encode videos or wait
+for a complete download. Performance and sync still require a physical iPhone
+2G test. A successful build does not establish smooth playback on that CPU.
+The stock YouTube player's hardware decoder cannot provide this software path.
 
-## Why format 18
+## Installation
 
-As of September 2026, current yt-dlp reports show WEB/MWEB can still expose format
-18 even when YouTube requires PO tokens or SABR for most other formats. It is a
-single progressive MP4 rather than separate audio/video streams, which is much
-better suited to iPhone OS 3.
-
-YouTube can change this behavior at any time, so this is intentionally isolated
-from the existing TubeRepair branch.
-
-## Requirements
-
-- Jailbroken original iPhone / iPhone 2G
-- iPhone OS 3.1.3
-- TLSFix / modern root certificates, so native HTTPS requests can reach current
-  YouTube and Googlevideo hosts
-- Theos capable of producing armv6 binaries
-- An iPhone OS 3.x SDK in `$THEOS/sdks`
-
-The source intentionally avoids ARC, blocks, `NSJSONSerialization`, modern
-Objective-C collection literals, and newer media APIs.
-
-## Build
-
-The Makefile currently targets armv6 and iPhone OS 3.1.
+The [Actions build](https://github.com/Aydremourad/world-wide-web/actions/workflows/ios3-native-player.yml)
+produces `com.aydre.youtubedirect_0.7.0_iphoneos-arm.deb` in the
+`YouTubeDirect-iOS3-armv6` artifact. Install with iFile, or from a phone terminal:
 
 ```sh
-cd youtube-direct-ios3
-make package
-```
-
-The generated `.deb` can be copied to the jailbroken phone and installed with:
-
-```sh
-dpkg -i com.aydre.youtubedirect_*.deb
+dpkg -i com.aydre.youtubedirect_0.7.0_iphoneos-arm.deb
 killall SpringBoard
 ```
 
-## First test
+This updates the existing YT Direct app (`com.aydre.youtubedirect`). It requires a
+jailbreak and the same working HTTPS/certificate setup as the previous direct
+downloader. No additional decoder dylibs are needed.
 
-Before worrying about search, paste this known video URL into the search field:
+## First device test
 
-`https://www.youtube.com/watch?v=jNQXAC9IVRw`
+Paste `jNQXAC9IVRw` or `https://www.youtube.com/watch?v=jNQXAC9IVRw` in YT Direct.
+Check time to first picture, audio/video sync, Pause/Resume and Done during a
+media request. Then try a longer video; startup should require initial chunks
+rather than a conversion of the entire video.
 
-The app recognizes the video ID, requests the player response directly from
-YouTube, extracts itag 18, and opens the returned media URL.
+## One-time local build
 
-If this first direct playback works, the architecture is proven: no TubeRepair
-or external backend is required. Search/result polish can then be improved
-without changing the playback design.
+Use a Mac with Theos, an iPhone OS 3.x SDK, an ARMv6-capable cctools-port linker
+and `ldid`:
 
-## Current limitations
+```sh
+cd youtube-direct-ios3
+sh ./build.sh
+```
 
-- Anonymous playback only.
-- Itag 18 must be available for the video.
-- Live streams are not supported.
-- Age-restricted, members-only, paid, or other restricted videos may fail.
-- Search parsing is deliberately small and iOS-3-compatible rather than a full
-  modern JSON framework.
-- YouTube may change InnerTube client versions or access requirements.
+`build.sh` compiles static decoder libraries and packages through Theos.
+`ci-build.sh` compiles and packages without Theos makefiles. The checks require
+ARMv6, classic `LC_UNIXTHREAD` startup, no PIE and no modern `LC_BUILD_VERSION`.
+`package-deb.py` uses Debian 2.0, gzip and ustar for old dpkg compatibility.
 
-## Branch
+Both builds use upstream LGPL FFmpeg 2.8.22. Its exact build configuration and
+source download are in `build-decoder.sh`. The application avoids ARC, blocks,
+modern collection literals and `NSJSONSerialization`.
 
-`youtube-direct-ios3`
+## Limits
+
+- Only tiny H.264 streams are accepted. Higher resolutions and modern codecs
+  are not supported.
+- No seek control, offline downloads, sign-in or live streams yet.
+- Restricted videos can fail, and YouTube can change client access.
+- Googlevideo must honor byte ranges. Whole-file and non-media responses are
+  rejected before they can fill the phone's memory.
+- Network delays can interrupt audio. Smooth performance is unverified.
+
+Branch: `youtube-native-player-ios3`. The converter version remains on
+`youtube-direct-ios3`.
