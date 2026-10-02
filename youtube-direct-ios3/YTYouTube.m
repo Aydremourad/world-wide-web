@@ -387,6 +387,15 @@ static NSString *YTTVPlayerResponse(NSString *videoID, NSString **errorText) {
         NO, errorText);
 }
 
+static NSString *YTTVPlayerResponseDowngraded(NSString *videoID, NSString **errorText) {
+    return YTPlayerPOST(videoID,
+        @"TVHTML5",
+        @"5.20260707",
+        @"7",
+        @"Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version",
+        NO, errorText);
+}
+
 static NSURL *YTItag18FromPlayerResponse(NSString *player, NSString **detail);
 
 static BOOL YTProbeVideoURL(NSURL *url, NSString **errorText) {
@@ -395,7 +404,8 @@ static BOOL YTProbeVideoURL(NSURL *url, NSString **errorText) {
                                                    timeoutInterval:18.0];
     [req setHTTPMethod:@"GET"];
     [req setValue:@"bytes=0-1" forHTTPHeaderField:@"Range"];
-    [req setValue:@"Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_3 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7E18 Safari/528.16"
+    [req setValue:(userAgent ? userAgent :
+        @"Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_3 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7E18 Safari/528.16")
 forHTTPHeaderField:@"User-Agent"];
 
     NSURLResponse *response = nil;
@@ -525,6 +535,65 @@ static NSString *YTPlayerResponseFromHTML(NSString *html) {
     return nil;
 }
 
+
+static NSURL *YTURLForItag(NSString *player, NSInteger wantedItag, NSString **detail) {
+    NSArray *arrayNames = [NSArray arrayWithObjects:@"formats", @"adaptiveFormats", nil];
+    NSUInteger a;
+    for (a = 0; a < [arrayNames count]; a++) {
+        NSArray *formats = YTJSONObjectStringsInArray(player, [arrayNames objectAtIndex:a]);
+        NSUInteger i;
+        for (i = 0; i < [formats count]; i++) {
+            NSString *obj = [formats objectAtIndex:i];
+            if (YTJSONIntForKey(obj, @"itag") != wantedItag) continue;
+
+            NSString *url = YTJSONStringForKey(obj, @"url", 0);
+            if (url && [url hasPrefix:@"https://"])
+                return [NSURL URLWithString:url];
+
+            NSString *cipher = YTJSONStringForKey(obj, @"signatureCipher", 0);
+            if (!cipher) cipher = YTJSONStringForKey(obj, @"cipher", 0);
+            if (detail) {
+                if (cipher)
+                    *detail = [NSString stringWithFormat:@"itag %d was ciphered", (int)wantedItag];
+                else
+                    *detail = [NSString stringWithFormat:@"itag %d had no usable URL", (int)wantedItag];
+            }
+            return nil;
+        }
+    }
+
+    if (detail)
+        *detail = [NSString stringWithFormat:@"itag %d was not present", (int)wantedItag];
+    return nil;
+}
+
+static BOOL YTProbeAnyMediaURL(NSURL *url, NSString *userAgent, NSString **errorText) {
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url
+                                                       cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                                                   timeoutInterval:15.0];
+    [req setHTTPMethod:@"GET"];
+    [req setValue:@"bytes=0-1" forHTTPHeaderField:@"Range"];
+    if (userAgent) [req setValue:userAgent forHTTPHeaderField:@"User-Agent"];
+
+    NSURLResponse *response = nil;
+    NSError *err = nil;
+    NSData *data = [NSURLConnection sendSynchronousRequest:req
+                                         returningResponse:&response
+                                                     error:&err];
+    NSInteger status = 0;
+    if ([response isKindOfClass:[NSHTTPURLResponse class]])
+        status = [(NSHTTPURLResponse *)response statusCode];
+
+    if (data && (status == 200 || status == 206))
+        return YES;
+
+    if (errorText) {
+        if (err) *errorText = [err localizedDescription];
+        else *errorText = [NSString stringWithFormat:@"media HTTP %d", (int)status];
+    }
+    return NO;
+}
+
 static NSURL *YTItag18FromPlayerResponse(NSString *player, NSString **detail) {
     NSArray *formats = YTJSONObjectStringsInArray(player, @"formats");
     NSUInteger i;
@@ -562,7 +631,10 @@ static NSURL *YTItag18FromPlayerResponse(NSString *player, NSString **detail) {
     NSInteger _status;
     long long _received;
 }
-- (BOOL)downloadURL:(NSURL *)url toPath:(NSString *)path error:(NSString **)errorText;
+- (BOOL)downloadURL:(NSURL *)url
+              toPath:(NSString *)path
+           userAgent:(NSString *)userAgent
+               error:(NSString **)errorText;
 @end
 
 @implementation YTFileDownloader
@@ -607,7 +679,10 @@ static NSURL *YTItag18FromPlayerResponse(NSString *player, NSString **detail) {
     _done = YES;
 }
 
-- (BOOL)downloadURL:(NSURL *)url toPath:(NSString *)path error:(NSString **)errorText {
+- (BOOL)downloadURL:(NSURL *)url
+              toPath:(NSString *)path
+           userAgent:(NSString *)userAgent
+               error:(NSString **)errorText {
     [[NSFileManager defaultManager] removeItemAtPath:path error:nil];
     if (![[NSFileManager defaultManager] createFileAtPath:path contents:nil attributes:nil]) {
         if (errorText) *errorText = @"Could not create temporary movie file.";
@@ -690,7 +765,10 @@ static NSURL *YTDownloadVideoLocally(NSURL *remoteURL, NSString *videoID, NSStri
         stringByAppendingPathComponent:[NSString stringWithFormat:@"ytdirect-%@.mp4", safeID]];
 
     YTFileDownloader *downloader = [[YTFileDownloader alloc] init];
-    BOOL ok = [downloader downloadURL:remoteURL toPath:path error:errorText];
+    BOOL ok = [downloader downloadURL:remoteURL
+                              toPath:path
+                           userAgent:nil
+                               error:errorText];
     [downloader release];
     if (!ok) return nil;
 
@@ -774,6 +852,183 @@ static NSURL *YTDownloadAndConvertForOriginalIPhone(NSURL *remoteURL,
     return YTConvertForOriginalIPhone(downloaded, videoID, errorText);
 }
 
+
+static BOOL YTDownloadURLToPath(NSURL *url,
+                                NSString *path,
+                                NSString *userAgent,
+                                NSString **errorText) {
+    YTFileDownloader *downloader = [[YTFileDownloader alloc] init];
+    BOOL ok = [downloader downloadURL:url
+                                toPath:path
+                             userAgent:userAgent
+                                 error:errorText];
+    [downloader release];
+    return ok;
+}
+
+static NSURL *YTConvertTinyVideoAndAudio(NSURL *videoURL,
+                                         NSURL *audioURL,
+                                         NSString *videoID,
+                                         NSString *userAgent,
+                                         NSString **errorText) {
+    NSString *ffmpeg = YTFFmpegPath();
+    if (!ffmpeg) {
+        if (errorText) *errorText = @"The bundled ARMv6 converter is missing.";
+        return nil;
+    }
+
+    NSString *safeID = videoID ? videoID : @"video";
+    NSString *videoPath = [NSTemporaryDirectory()
+        stringByAppendingPathComponent:[NSString stringWithFormat:@"ytdirect-%@-144p.mp4", safeID]];
+    NSString *audioPath = [NSTemporaryDirectory()
+        stringByAppendingPathComponent:[NSString stringWithFormat:@"ytdirect-%@-audio.m4a", safeID]];
+    NSString *outputPath = [NSTemporaryDirectory()
+        stringByAppendingPathComponent:[NSString stringWithFormat:@"ytdirect-%@-legacy.mp4", safeID]];
+    NSString *logPath = [NSTemporaryDirectory()
+        stringByAppendingPathComponent:@"ytdirect-ffmpeg.log"];
+
+    [[NSFileManager defaultManager] removeItemAtPath:videoPath error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:audioPath error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:outputPath error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:logPath error:nil];
+
+    NSString *downloadError = nil;
+    if (!YTDownloadURLToPath(videoURL, videoPath, userAgent, &downloadError)) {
+        if (errorText) *errorText = [NSString stringWithFormat:@"144p video download failed: %@",
+                                      downloadError ? downloadError : @"unknown error"];
+        return nil;
+    }
+
+    downloadError = nil;
+    if (!YTDownloadURLToPath(audioURL, audioPath, userAgent, &downloadError)) {
+        [[NSFileManager defaultManager] removeItemAtPath:videoPath error:nil];
+        if (errorText) *errorText = [NSString stringWithFormat:@"AAC audio download failed: %@",
+                                      downloadError ? downloadError : @"unknown error"];
+        return nil;
+    }
+
+    // Source is already only 256x144. Avoid scaling entirely; decode the tiny
+    // H.264 stream and encode MPEG-4 Part 2 Simple Profile, while stream-copying AAC.
+    NSString *command = [NSString stringWithFormat:
+        @"'%@' -y -threads 1 -flags2 +fast -skip_loop_filter all "
+         "-i '%@' -i '%@' -map 0:v:0 -map 1:a:0 "
+         "-vcodec mpeg4 -profile:v 0 -b:v 180k -r 15 -bf 0 "
+         "-acodec copy -movflags +faststart '%@' >'%@' 2>&1",
+        ffmpeg, videoPath, audioPath, outputPath, logPath];
+
+    int status = system([command UTF8String]);
+    NSDictionary *attrs = [[NSFileManager defaultManager]
+        attributesOfItemAtPath:outputPath error:nil];
+    unsigned long long size = attrs ? [[attrs objectForKey:NSFileSize] unsignedLongLongValue] : 0;
+
+    [[NSFileManager defaultManager] removeItemAtPath:videoPath error:nil];
+    [[NSFileManager defaultManager] removeItemAtPath:audioPath error:nil];
+
+    if (status != 0 || size < 1024) {
+        NSString *log = [NSString stringWithContentsOfFile:logPath
+                                                   encoding:NSUTF8StringEncoding
+                                                      error:nil];
+        if ([log length] > 900)
+            log = [log substringFromIndex:[log length] - 900];
+        if (errorText) {
+            *errorText = [NSString stringWithFormat:
+                @"144p conversion failed (status %d). %@",
+                status, [log length] ? log : @"No FFmpeg log was produced."];
+        }
+        [[NSFileManager defaultManager] removeItemAtPath:outputPath error:nil];
+        return nil;
+    }
+
+    return [NSURL fileURLWithPath:outputPath];
+}
+
+static NSURL *YTDownloadLegacy3GP(NSURL *remoteURL,
+                                  NSString *videoID,
+                                  NSString *userAgent,
+                                  NSString **errorText) {
+    NSString *safeID = videoID ? videoID : @"video";
+    NSString *path = [NSTemporaryDirectory()
+        stringByAppendingPathComponent:[NSString stringWithFormat:@"ytdirect-%@.3gp", safeID]];
+    if (!YTDownloadURLToPath(remoteURL, path, userAgent, errorText))
+        return nil;
+    return [NSURL fileURLWithPath:path];
+}
+
+static NSURL *YTCompatibilityFromPlayer(NSString *player,
+                                        NSString *videoID,
+                                        NSString *clientLabel,
+                                        NSString *userAgent,
+                                        NSString **errorText) {
+    NSString *detail = nil;
+    NSString *probeError = nil;
+    NSURL *url = nil;
+
+    // Best case: legacy progressive 3GP is already MPEG-4 Part 2 + AAC.
+    NSInteger legacyItags[] = {17, 36};
+    NSUInteger li;
+    for (li = 0; li < 2; li++) {
+        detail = nil;
+        url = YTURLForItag(player, legacyItags[li], &detail);
+        if (!url) continue;
+        probeError = nil;
+        if (!YTProbeAnyMediaURL(url, userAgent, &probeError)) continue;
+
+        NSString *downloadError = nil;
+        NSURL *local = YTDownloadLegacy3GP(url, videoID, userAgent, &downloadError);
+        if (local) return local;
+        if (errorText) *errorText = [NSString stringWithFormat:@"%@ itag %d download failed: %@",
+                                      clientLabel, (int)legacyItags[li],
+                                      downloadError ? downloadError : @"unknown error"];
+    }
+
+    // Next: tiny 144p H.264 video. Prefer ultralow 597 (~12-15 fps), then 160.
+    NSInteger videoItags[] = {597, 160};
+    NSURL *videoURL = nil;
+    NSInteger chosenVideoItag = 0;
+    NSUInteger vi;
+    for (vi = 0; vi < 2; vi++) {
+        detail = nil;
+        NSURL *candidate = YTURLForItag(player, videoItags[vi], &detail);
+        if (!candidate) continue;
+        probeError = nil;
+        if (YTProbeAnyMediaURL(candidate, userAgent, &probeError)) {
+            videoURL = candidate;
+            chosenVideoItag = videoItags[vi];
+            break;
+        }
+    }
+
+    if (!videoURL) {
+        if (errorText) *errorText = [NSString stringWithFormat:@"%@ had no usable 144p H.264 URL", clientLabel];
+        return nil;
+    }
+
+    // AAC-LC 140 is safest for the original iPhone. Avoid HE-AAC 139/599.
+    detail = nil;
+    NSURL *audioURL = YTURLForItag(player, 140, &detail);
+    if (!audioURL) {
+        if (errorText) *errorText = [NSString stringWithFormat:@"%@ had 144p video but no AAC-LC 140", clientLabel];
+        return nil;
+    }
+    probeError = nil;
+    if (!YTProbeAnyMediaURL(audioURL, userAgent, &probeError)) {
+        if (errorText) *errorText = [NSString stringWithFormat:@"%@ AAC 140 rejected: %@",
+                                      clientLabel, probeError ? probeError : @"unknown error"];
+        return nil;
+    }
+
+    NSString *convertError = nil;
+    NSURL *local = YTConvertTinyVideoAndAudio(videoURL, audioURL, videoID, userAgent, &convertError);
+    if (local) return local;
+
+    if (errorText) {
+        *errorText = [NSString stringWithFormat:@"%@ itag %d+140 failed: %@",
+                      clientLabel, (int)chosenVideoItag,
+                      convertError ? convertError : @"unknown conversion error"];
+    }
+    return nil;
+}
+
 @implementation YTYouTube
 
 + (NSArray *)search:(NSString *)query error:(NSString **)errorText {
@@ -844,27 +1099,53 @@ static NSURL *YTDownloadAndConvertForOriginalIPhone(NSURL *remoteURL,
 }
 
 + (NSURL *)directVideoURLForID:(NSString *)videoID error:(NSString **)errorText {
+    NSMutableArray *errors = [NSMutableArray array];
     NSString *err = nil;
+    NSURL *local = nil;
 
-    // iPhone OS 3-native path: ask YouTube's Safari web client for a
-    // pre-merged HLS manifest. No transcoding is attempted on the 2G.
-    NSString *safari = YTWebSafariPlayerResponse(videoID, &err);
-    if (safari) {
-        NSURL *hls = YTHLSManifestURL(safari, &err);
-        if (hls) {
-            NSString *variantError = nil;
-            NSURL *variant = YTLowestHLSVariantURL(hls, &variantError);
-            if (variant)
-                return variant;
-            err = [NSString stringWithFormat:@"HLS manifest rejected: %@",
-                   variantError ? variantError : @"unknown HLS error"];
-        }
+    // Android has historically exposed legacy 3GP and ultralow DASH formats.
+    NSString *androidUA = @"com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip";
+    NSString *android = YTAndroidPlayerResponse(videoID, &err);
+    if (android) {
+        local = YTCompatibilityFromPlayer(android, videoID, @"Android", androidUA, &err);
+        if (local) return local;
     }
+    if (err) [errors addObject:[NSString stringWithFormat:@"Android: %@", err]];
+
+    // Current TV client does not normally require a GVS PO token. Try it next.
+    err = nil;
+    NSString *tvUA = @"Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold (unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)";
+    NSString *tv = YTTVPlayerResponse(videoID, &err);
+    if (tv) {
+        local = YTCompatibilityFromPlayer(tv, videoID, @"TV", tvUA, &err);
+        if (local) return local;
+    }
+    if (err) [errors addObject:[NSString stringWithFormat:@"TV: %@", err]];
+
+    // Some sessions behave better with the downgraded TV client.
+    err = nil;
+    NSString *tvOldUA = @"Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version";
+    NSString *tvOld = YTTVPlayerResponseDowngraded(videoID, &err);
+    if (tvOld) {
+        local = YTCompatibilityFromPlayer(tvOld, videoID, @"TV downgraded", tvOldUA, &err);
+        if (local) return local;
+    }
+    if (err) [errors addObject:[NSString stringWithFormat:@"TV-old: %@", err]];
+
+    // Embedded is limited to videos whose owners allow embedding, but is token-light.
+    err = nil;
+    NSString *embedUA = @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)";
+    NSString *embedded = YTEmbeddedPlayerResponse(videoID, &err);
+    if (embedded) {
+        local = YTCompatibilityFromPlayer(embedded, videoID, @"Embedded", embedUA, &err);
+        if (local) return local;
+    }
+    if (err) [errors addObject:[NSString stringWithFormat:@"Embedded: %@", err]];
 
     if (errorText) {
         *errorText = [NSString stringWithFormat:
-            @"YouTube did not provide a usable iPhone-friendly HLS stream. %@",
-            err ? err : @"No HLS manifest was returned for this video/session."];
+            @"No original-iPhone-compatible YouTube path worked. %@",
+            [errors componentsJoinedByString:@" | "]];
     }
     return nil;
 }
