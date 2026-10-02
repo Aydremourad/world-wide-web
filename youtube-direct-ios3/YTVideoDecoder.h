@@ -4,13 +4,10 @@
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
 
-#define YT_VIDEO_IMAGE_BUFFERS 5
 typedef struct {
     struct SwsContext *scaler;
     uint8_t *pixels;
-    uint8_t *buffers[YT_VIDEO_IMAGE_BUFFERS];
     int pixelBytes;
-    unsigned bufferIndex;
     int width;
     int height;
 } YTVideoImage;

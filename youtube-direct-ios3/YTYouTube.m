@@ -426,6 +426,8 @@ static NSString *YTPlayerDiagnostic(NSString *player, NSArray *formats) {
     long long length;
     BOOL done;
     NSURLConnection *connection;
+    NSString *compatStatus;
+    BOOL compatNative;
 }
 @end
 @implementation YTLengthRequest
@@ -443,6 +445,14 @@ static NSString *YTPlayerDiagnostic(NSString *player, NSArray *formats) {
                 }
             }
             if (length <= 0 && [http statusCode] == 200) length = [response expectedContentLength];
+            for (NSString *key in [http allHeaderFields]) {
+                NSString *value=[[http allHeaderFields] objectForKey:key];
+                if ([key caseInsensitiveCompare:@"X-YouTube2G-Status"] == NSOrderedSame) {
+                    [compatStatus release]; compatStatus=[value copy];
+                } else if ([key caseInsensitiveCompare:@"X-YouTube2G-Native"] == NSOrderedSame) {
+                    compatNative=[value intValue]==1;
+                }
+            }
         }
     }
     done = YES;
@@ -450,7 +460,7 @@ static NSString *YTPlayerDiagnostic(NSString *player, NSArray *formats) {
 }
 - (void)connection:(NSURLConnection *)sender didFailWithError:(NSError *)error { done = YES; }
 - (void)connectionDidFinishLoading:(NSURLConnection *)sender { done = YES; }
-- (void)dealloc { [connection cancel]; [connection release]; [super dealloc]; }
+- (void)dealloc { [connection cancel]; [connection release]; [compatStatus release]; [super dealloc]; }
 @end
 static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url
@@ -467,6 +477,36 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
     [probe->connection cancel];
     [probe release];
     return length;
+}
+static long long YTCompatibilityLength(NSURL *url, NSString *userAgent, NSString **status, BOOL *native) {
+    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:135.0];
+    [request setHTTPMethod:@"HEAD"];
+    [request setValue:userAgent forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"identity" forHTTPHeaderField:@"Accept-Encoding"];
+    YTLengthRequest *probe=[[YTLengthRequest alloc] init];
+    probe->connection=[[NSURLConnection alloc] initWithRequest:request delegate:probe];
+    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:136.0];
+    while(probe->connection && !probe->done && [deadline timeIntervalSinceNow]>0)
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:
+            [NSDate dateWithTimeIntervalSinceNow:0.05]];
+    long long length=probe->length;
+    if(status) *status=[[probe->compatStatus copy] autorelease];
+    if(native) *native=probe->compatNative;
+    [probe->connection cancel]; [probe release];
+    return length;
+}
+static BOOL YTCompatibilityStatusReady(NSString *videoID) {
+    NSString *address=[NSString stringWithFormat:@"https://aydreyoutube2g.duckdns.org/status/%@",videoID];
+    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:address]
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:6.0];
+    [request setValue:@"YouTubeDirect/1.1.4" forHTTPHeaderField:@"User-Agent"];
+    NSURLResponse *response=nil; NSError *error=nil;
+    NSData *data=[NSURLConnection sendSynchronousRequest:request returningResponse:&response error:&error];
+    if(!data || ![response isKindOfClass:[NSHTTPURLResponse class]] ||
+       [(NSHTTPURLResponse *)response statusCode] != 200) return NO;
+    NSString *text=[[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease];
+    return [text rangeOfString:@"\"status\":\"ready\""].location!=NSNotFound;
 }
 
 @implementation YTYouTube
@@ -631,6 +671,36 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
     }
     if (errorText) *errorText = [errors componentsJoinedByString:@"\n\n"];
     return nil;
+}
+
++ (NSDictionary *)compatibilityStreamsForID:(NSString *)videoID {
+    if(!videoID || [videoID length]!=11) return nil;
+    NSString *userAgent=@"YouTubeDirect/1.1.4";
+    NSURL *url=[NSURL URLWithString:[NSString stringWithFormat:
+        @"https://aydreyoutube2g.duckdns.org/getvideo/%@",videoID]];
+    NSString *status=nil; BOOL native=NO;
+    long long length=YTCompatibilityLength(url,userAgent,&status,&native);
+    if(length<=0) return nil;
+    BOOL ready=native || [status isEqualToString:@"ready"];
+    if(!ready) ready=YTCompatibilityStatusReady(videoID);
+    if(!ready) return nil;
+    NSDictionary *nativeInfo=[NSDictionary dictionaryWithObjectsAndKeys:
+        [NSNumber numberWithBool:YES],@"eligible",
+        [NSNumber numberWithLongLong:length],@"length",
+        [NSNumber numberWithInt:320],@"width",
+        [NSNumber numberWithInt:240],@"height",
+        [NSNumber numberWithInt:24],@"fps",nil];
+    return [NSDictionary dictionaryWithObjectsAndKeys:
+        url,@"videoURL",url,@"audioURL",
+        [NSNumber numberWithLongLong:length],@"videoLength",
+        [NSNumber numberWithLongLong:length],@"audioLength",
+        [NSNumber numberWithBool:YES],@"combined",
+        [NSNumber numberWithBool:YES],@"nativeCandidate",
+        [NSNumber numberWithInt:240],@"height",
+        [NSNumber numberWithInt:24],@"fps",
+        [NSNumber numberWithInt:-1],@"videoItag",
+        userAgent,@"userAgent",nativeInfo,@"nativeInfo",
+        [NSNumber numberWithBool:YES],@"compatibilityServer",nil];
 }
 
 // Try one additional client only when the current combined stream needs

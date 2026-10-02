@@ -22,13 +22,15 @@ static NSString *Combined = @"{\"itag\":18,\"mimeType\":\"video/mp4; codecs=\\\"
 static BOOL BlockAndroid;
 static BOOL CombinedOnly;
 static BOOL LighterAvailable, LighterBroken;
+static BOOL CompatReady;
 static int AndroidRequests, VisionRequests, HeadRequests, VRRequests, AudioReads;
 @interface YTFixtureProtocol : NSURLProtocol
 @end
 @implementation YTFixtureProtocol
 + (BOOL)canInitWithRequest:(NSURLRequest *)request {
     NSString *host = [[request URL] host];
-    return [host isEqualToString:@"www.youtube.com"] || [host isEqualToString:@"media.example"];
+    return [host isEqualToString:@"www.youtube.com"] || [host isEqualToString:@"media.example"] ||
+           [host isEqualToString:@"aydreyoutube2g.duckdns.org"];
 }
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
 - (void)startLoading {
@@ -53,6 +55,19 @@ static int AndroidRequests, VisionRequests, HeadRequests, VRRequests, AudioReads
         data = [json dataUsingEncoding:NSUTF8StringEncoding];
         [headers setObject:@"application/json" forKey:@"Content-Type"];
         [headers setObject:[NSString stringWithFormat:@"%lu", (unsigned long)[data length]] forKey:@"Content-Length"];
+    } else if ([[url host] isEqualToString:@"aydreyoutube2g.duckdns.org"]) {
+        if ([[url path] hasPrefix:@"/status/"]) {
+            NSString *json=CompatReady ? @"{\"status\":\"ready\"}" : @"{\"status\":\"failed\"}";
+            data=[json dataUsingEncoding:NSUTF8StringEncoding];
+            [headers setObject:@"application/json" forKey:@"Content-Type"];
+            [headers setObject:[NSString stringWithFormat:@"%lu",(unsigned long)[data length]] forKey:@"Content-Length"];
+        } else {
+            [headers setObject:@"video/mp4" forKey:@"Content-Type"];
+            [headers setObject:@"120000" forKey:@"Content-Length"];
+            [headers setObject:(CompatReady ? @"ready" : @"failed") forKey:@"X-YouTube2G-Status"];
+            [headers setObject:(CompatReady ? @"1" : @"0") forKey:@"X-YouTube2G-Native"];
+            data=[NSData data];
+        }
     } else {
         long long length = [[url path] isEqualToString:@"/video"] ? 70000 : [[url path] isEqualToString:@"/half"] ? 35000 : 80000;
         [headers setObject:@"video/mp4" forKey:@"Content-Type"];
@@ -163,6 +178,14 @@ int main(void) {
     assert([result objectForKey:@"videoSource"] != [result objectForKey:@"audioSource"]);
     result=[YTYouTube lowResolutionStreamsForID:@"jNQXAC9IVRw"];
     assert(result && ![[result objectForKey:@"combined"] boolValue] && [[result objectForKey:@"videoLength"] longLongValue]==70000);
+    CompatReady=YES;
+    result=[YTYouTube compatibilityStreamsForID:@"jNQXAC9IVRw"];
+    assert(result && [[result objectForKey:@"compatibilityServer"] boolValue]);
+    assert([[result objectForKey:@"combined"] boolValue] && [[result objectForKey:@"height"] intValue]==240);
+    assert([[[result objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue]);
+    assert([[result objectForKey:@"videoLength"] longLongValue]==120000);
+    CompatReady=NO;
+    assert(![YTYouTube compatibilityStreamsForID:@"jNQXAC9IVRw"]);
     [NSURLProtocol unregisterClass:[YTFixtureProtocol class]];
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"YTWorkingClient"];
     NSLog(@"Resolver checks passed, including lighter video across clients, unchanged working audio, unavailable lighter fallback, and native/progressive routing.");

@@ -188,6 +188,10 @@
             [self performSelectorOnMainThread:@selector(showLowResolutionStatus) withObject:nil waitUntilDone:NO];
             NSDictionary *lower=[YTYouTube lowResolutionStreamsForID:videoID];
             if(lower) streams=[[lower mutableCopy] autorelease];
+            else {
+                NSDictionary *compatible=[YTYouTube compatibilityStreamsForID:videoID];
+                if(compatible) streams=[[compatible mutableCopy] autorelease];
+            }
         }
     }
     if(streams) {

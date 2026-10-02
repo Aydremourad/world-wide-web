@@ -81,28 +81,6 @@ static uint16_t YTPackRGB565(int yTerm,int rAdd,int gAdd,int bAdd) {
     int b=YTScaledClip8(yTerm+bAdd+128);
     return (uint16_t)(((r&0xf8)<<8)|((g&0xfc)<<3)|(b>>3));
 }
-static int YTSelectVideoBuffer(YTVideoImage *image,int needed) {
-    if(needed<=0) return AVERROR(EINVAL);
-    if(image->pixelBytes!=needed || !image->buffers[0]) {
-        for(unsigned i=0;i<YT_VIDEO_IMAGE_BUFFERS;i++) {
-            free(image->buffers[i]); image->buffers[i]=NULL;
-        }
-        image->pixelBytes=0; image->pixels=NULL; image->bufferIndex=0;
-        for(unsigned i=0;i<YT_VIDEO_IMAGE_BUFFERS;i++) {
-            image->buffers[i]=malloc((size_t)needed);
-            if(!image->buffers[i]) {
-                for(unsigned j=0;j<YT_VIDEO_IMAGE_BUFFERS;j++) {
-                    free(image->buffers[j]); image->buffers[j]=NULL;
-                }
-                return AVERROR(ENOMEM);
-            }
-        }
-        image->pixelBytes=needed;
-    }
-    image->pixels=image->buffers[image->bufferIndex];
-    image->bufferIndex=(image->bufferIndex+1)%YT_VIDEO_IMAGE_BUFFERS;
-    return 0;
-}
 static int YTConvert420ToRGB565(YTVideoImage *image,const AVFrame *frame) {
     static int ready=0,yTable[256],rTable[256],guTable[256],gvTable[256],bTable[256];
     if(!ready) {
@@ -113,7 +91,10 @@ static int YTConvert420ToRGB565(YTVideoImage *image,const AVFrame *frame) {
         ready=1;
     }
     int width=frame->width,height=frame->height,needed=width*height*2;
-    if(YTSelectVideoBuffer(image,needed)<0) return AVERROR(ENOMEM);
+    if(needed!=image->pixelBytes) {
+        free(image->pixels); image->pixels=malloc(needed); image->pixelBytes=needed;
+    }
+    if(!image->pixels) return AVERROR(ENOMEM);
     uint16_t *out=(uint16_t *)image->pixels;
     for(int row=0;row<height;row+=2) {
         const uint8_t *y0=frame->data[0]+row*frame->linesize[0];
@@ -146,7 +127,12 @@ int YTConvertVideoFrame(YTVideoImage *image, const AVFrame *frame) {
     int width = (int)(frame->width * scale), height = (int)(frame->height * scale);
     if (width < 1 || height < 1) return AVERROR(EINVAL);
     int needed = width * height * 2;
-    if (YTSelectVideoBuffer(image,needed) < 0) return AVERROR(ENOMEM);
+    if (needed != image->pixelBytes) {
+        free(image->pixels);
+        image->pixels = malloc(needed);
+        image->pixelBytes = needed;
+    }
+    if (!image->pixels) return AVERROR(ENOMEM);
     image->scaler = sws_getCachedContext(image->scaler, frame->width, frame->height,
         (enum AVPixelFormat)frame->format, width, height, AV_PIX_FMT_RGB565LE,
         SWS_FAST_BILINEAR, NULL, NULL, NULL);
@@ -161,6 +147,6 @@ int YTConvertVideoFrame(YTVideoImage *image, const AVFrame *frame) {
 }
 void YTFreeVideoImage(YTVideoImage *image) {
     if (image->scaler) sws_freeContext(image->scaler);
-    for(unsigned i=0;i<YT_VIDEO_IMAGE_BUFFERS;i++) free(image->buffers[i]);
+    free(image->pixels);
     memset(image, 0, sizeof(*image));
 }

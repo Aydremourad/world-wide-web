@@ -133,12 +133,11 @@ static BOOL YTWaitForPause(YTPlayback *playback) {
 static double YTPlaybackClock(YTPlayback *playback) {
     return YTAudioMediaTime(playback->audio);
 }
-static NSData *YTWrapVideoPixels(YTVideoImage *image) {
+static NSData *YTDetachVideoPixels(YTVideoImage *image) {
     if(!image->pixels || image->pixelBytes<=0) return nil;
-    // Borrow one slot from the reusable RGB565 ring. Five slots cover the
-    // three-frame queue, the frame being drawn, and the decoder's next frame.
-    return [[NSData alloc] initWithBytesNoCopy:image->pixels
-        length:(NSUInteger)image->pixelBytes freeWhenDone:NO];
+    void *pixels=image->pixels; NSUInteger length=(NSUInteger)image->pixelBytes;
+    image->pixels=NULL; image->pixelBytes=0;
+    return [[NSData alloc] initWithBytesNoCopy:pixels length:length freeWhenDone:YES];
 }
 static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRational timeBase) {
     int64_t timestamp = av_frame_get_best_effort_timestamp(frame);
@@ -151,7 +150,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
         double conversionStart=YTPlayerWallTime();
         if(YTConvertVideoFrame(&playback->image,frame)<0) return NO;
         [playback->controller recordConversion:YTPlayerWallTime()-conversionStart];
-        NSData *previewPixels=YTWrapVideoPixels(&playback->image);
+        NSData *previewPixels=YTDetachVideoPixels(&playback->image);
         YTFramePacket *preview=[[YTFramePacket alloc] initWithPixels:previewPixels
             width:playback->image.width height:playback->image.height serial:playback->serial];
         preview->time=pts; preview->preview=YES;
@@ -187,7 +186,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     double conversionStart=YTPlayerWallTime();
     if (YTConvertVideoFrame(&playback->image, frame) < 0) return NO;
     [playback->controller recordConversion:YTPlayerWallTime()-conversionStart];
-    NSData *framePixels=YTWrapVideoPixels(&playback->image);
+    NSData *framePixels=YTDetachVideoPixels(&playback->image);
     YTFramePacket *payload=[[YTFramePacket alloc] initWithPixels:framePixels
         width:playback->image.width height:playback->image.height serial:playback->serial];
     payload->time=pts;
@@ -571,7 +570,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     if(_sessionStop) { [_videoSource cancel]; [_audioSource cancel]; }
     [_seekCondition unlock];
     io.source = _videoSource; audio.source = _audioSource;
-    [NSThread setThreadPriority:0.85];
+    [NSThread setThreadPriority:0.78];
     if (_sessionStop) goto finished;
     av_register_all();
     format = avformat_alloc_context();
@@ -709,9 +708,6 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     if (!_sessionStop && !sawFrame && !failure) failure = @"The decoder did not produce a video frame.";
 finished:
     [self performSelectorOnMainThread:@selector(detachAudioQueue) withObject:nil waitUntilDone:YES];
-    // Frame packets borrow the conversion ring, so release queued packets
-    // before freeing it. The main-thread round trip above lets an active draw finish.
-    [_seekCondition lock]; [self clearFrameQueue]; [_seekCondition broadcast]; [_seekCondition unlock];
     YTShutdownAudio(&audio);
     YTFreeVideoImage(&playback.image);
     av_frame_free(&frame);
