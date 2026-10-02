@@ -338,7 +338,7 @@ static NSString *YTChooseFormat(NSArray *formats, BOOL video) {
     NSInteger bestRank = 999;
     for (NSString *format in formats) {
         NSInteger rank = YTFormatRank(format, video);
-        if (rank >= 0 && YTFormatLength(format) <= 0) rank += 10;
+        if (rank >= 0 && YTFormatLength(format) <= 0) rank += 20;
         if (rank >= 0 && rank < bestRank && YTFormatURL(format)) { best = format; bestRank = rank; }
     }
     return best;
