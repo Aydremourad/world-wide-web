@@ -776,12 +776,10 @@ static NSURL *YTDownloadAndConvertForOriginalIPhone(NSURL *remoteURL,
 }
 
 + (NSURL *)directVideoURLForID:(NSString *)videoID error:(NSString **)errorText {
-    NSMutableArray *errors = [NSMutableArray array];
     NSString *err = nil;
-    NSURL *stream = nil;
 
-    // Best path for iPhone OS 3: pre-merged HLS from YouTube's Safari web client.
-    // This avoids any on-device transcoding when YouTube exposes hlsManifestUrl.
+    // iPhone OS 3-native path: ask YouTube's Safari web client for a
+    // pre-merged HLS manifest. No transcoding is attempted on the 2G.
     NSString *safari = YTWebSafariPlayerResponse(videoID, &err);
     if (safari) {
         NSURL *hls = YTHLSManifestURL(safari, &err);
@@ -793,88 +791,11 @@ static NSURL *YTDownloadAndConvertForOriginalIPhone(NSURL *remoteURL,
                    probeError ? probeError : @"unknown HLS error"];
         }
     }
-    if (err) [errors addObject:[NSString stringWithFormat:@"Safari HLS: %@", err]];
-
-    // First choice: WEB_EMBEDDED_PLAYER. Current yt-dlp policy does not require
-    // a GVS PO token for this client. It only works when the video is embeddable.
-    NSString *embedded = YTEmbeddedPlayerResponse(videoID, &err);
-    if (embedded) {
-        stream = YTUsableItag18(embedded, &err);
-        if (stream) {
-        NSString *downloadError = nil;
-        NSURL *local = YTDownloadAndConvertForOriginalIPhone(stream, videoID, &downloadError);
-        if (local) return local;
-        err = [NSString stringWithFormat:@"resolved MP4 but download/conversion failed: %@",
-               downloadError ? downloadError : @"unknown download error"];
-    }
-    }
-    if (err) [errors addObject:[NSString stringWithFormat:@"Embedded: %@", err]];
-
-    // Second no-PO-token family: TVHTML5. It may not expose progressive format
-    // 18 for every video, but when it does we verify the CDN URL before playback.
-    err = nil;
-    NSString *tv = YTTVPlayerResponse(videoID, &err);
-    if (tv) {
-        stream = YTUsableItag18(tv, &err);
-        if (stream) {
-        NSString *downloadError = nil;
-        NSURL *local = YTDownloadAndConvertForOriginalIPhone(stream, videoID, &downloadError);
-        if (local) return local;
-        err = [NSString stringWithFormat:@"resolved MP4 but download/conversion failed: %@",
-               downloadError ? downloadError : @"unknown download error"];
-    }
-    }
-    if (err) [errors addObject:[NSString stringWithFormat:@"TV: %@", err]];
-
-    // Android can still expose format 18, but GVS enforcement may make the URL
-    // return 403. Keep it only as a verified fallback.
-    err = nil;
-    NSString *android = YTAndroidPlayerResponse(videoID, &err);
-    if (android) {
-        stream = YTUsableItag18(android, &err);
-        if (stream) {
-        NSString *downloadError = nil;
-        NSURL *local = YTDownloadAndConvertForOriginalIPhone(stream, videoID, &downloadError);
-        if (local) return local;
-        err = [NSString stringWithFormat:@"resolved MP4 but download/conversion failed: %@",
-               downloadError ? downloadError : @"unknown download error"];
-    }
-    }
-    if (err) [errors addObject:[NSString stringWithFormat:@"Android: %@", err]];
-
-    // Last attempt: the player response embedded directly in YouTube's own page.
-    err = nil;
-    NSArray *pages = [NSArray arrayWithObjects:
-        [NSString stringWithFormat:
-            @"https://www.youtube.com/embed/%@?hl=en&gl=US", videoID],
-        [NSString stringWithFormat:
-            @"https://www.youtube.com/watch?v=%@&bpctr=9999999999&has_verified=1&hl=en&gl=US",
-            videoID],
-        nil];
-
-    NSUInteger i;
-    for (i = 0; i < [pages count]; i++) {
-        NSString *html = YTHTML([pages objectAtIndex:i], &err);
-        if (!html) continue;
-        NSString *player = YTPlayerResponseFromHTML(html);
-        if (!player) {
-            err = @"page contained no embedded player response";
-            continue;
-        }
-        stream = YTUsableItag18(player, &err);
-        if (stream) {
-        NSString *downloadError = nil;
-        NSURL *local = YTDownloadAndConvertForOriginalIPhone(stream, videoID, &downloadError);
-        if (local) return local;
-        err = [NSString stringWithFormat:@"resolved MP4 but download/conversion failed: %@",
-               downloadError ? downloadError : @"unknown download error"];
-    }
-    }
-    if (err) [errors addObject:[NSString stringWithFormat:@"HTML: %@", err]];
 
     if (errorText) {
-        *errorText = [NSString stringWithFormat:@"No playable format 18. %@",
-                      [errors componentsJoinedByString:@" | "]];
+        *errorText = [NSString stringWithFormat:
+            @"YouTube did not provide a usable iPhone-friendly HLS stream. %@",
+            err ? err : @"No HLS manifest was returned for this video/session."];
     }
     return nil;
 }
