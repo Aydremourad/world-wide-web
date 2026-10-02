@@ -127,7 +127,7 @@
 }
 
 - (void)beginResolve:(NSString *)videoID {
-    [self setBusy:YES text:@"Trying iPhone-friendly YouTube stream..."];
+    [self setBusy:YES text:@"Trying legacy 3GP / ultralow 144p..."];
     [NSThread detachNewThreadSelector:@selector(resolveThread:) toTarget:self withObject:videoID];
 }
 
