@@ -27,10 +27,15 @@ static double YTClampSeekTime(double seconds,double duration) {
     return seconds;
 }
 static int YTShouldDropNonRef(int currentlyDropping,double secondsBehind) {
-    if (currentlyDropping) return secondsBehind > 0.30;
-    return secondsBehind > 1.00;
+    if (currentlyDropping) return secondsBehind > 0.15;
+    return secondsBehind > 0.45;
+}
+static int YTPreferReferenceFrames(int width,int height,double fps) {
+    // Discard only pictures that cannot be referenced by a later picture.
+    // Start immediately for 30 fps, rather than first accumulating a backlog.
+    return width*height>38400 || fps>18.0;
 }
 static int YTNeedsVideoResync(double videoTime,double audioTime,double now,double lastSeek) {
-    return audioTime-videoTime>2.5 && (lastSeek<=0 || now-lastSeek>=4);
+    return audioTime-videoTime>3.0 && (lastSeek<=0 || now-lastSeek>=6);
 }
 #endif

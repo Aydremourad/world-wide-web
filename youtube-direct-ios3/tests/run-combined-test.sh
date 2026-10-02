@@ -25,6 +25,15 @@ xcrun clang -O3 -I. -I"$TESTDIR/decoder" YTVideoDecoder.c tests/pixels.c \
     "$TESTDIR/decoder/libswscale/libswscale.a" "$TESTDIR/decoder/libavutil/libavutil.a" \
     -lm -o "$TESTDIR/pixels-test"
 "$TESTDIR/pixels-test"
+xcrun clang -O3 -std=c99 -I. -I"$TESTDIR/decoder" tests/motion-arm11.c \
+    "$TESTDIR/decoder/libavcodec/libavcodec.a" "$TESTDIR/decoder/libavutil/libavutil.a" \
+    -lm -o "$TESTDIR/motion-test"
+"$TESTDIR/motion-test"
+xcrun clang -O3 -std=c99 -I. -I"$TESTDIR/decoder" YTVideoDecoder.c tests/decoder-arm11.c \
+    "$TESTDIR/decoder/libavformat/libavformat.a" "$TESTDIR/decoder/libavcodec/libavcodec.a" \
+    "$TESTDIR/decoder/libswscale/libswscale.a" "$TESTDIR/decoder/libavutil/libavutil.a" \
+    -lm -o "$TESTDIR/decoder-test"
+"$TESTDIR/decoder-test" tests/fixtures/video-motion-30.mp4
 xcrun clang -fno-objc-arc -Wno-deprecated-declarations -I. -I"$TESTDIR/decoder" \
     -framework Foundation -framework AudioToolbox YTMediaSource.m YTAudioFile.m YTNativeProbe.m YTLoopbackServer.m YTVideoDecoder.c tests/native-route.m \
     "$TESTDIR/decoder/libavformat/libavformat.a" "$TESTDIR/decoder/libavcodec/libavcodec.a" \

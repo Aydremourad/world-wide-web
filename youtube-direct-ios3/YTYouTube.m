@@ -343,6 +343,37 @@ static NSString *YTChooseFormat(NSArray *formats, BOOL video) {
     }
     return best;
 }
+static NSDictionary *YTLowResolutionClient(void) {
+    return [NSDictionary dictionaryWithObjectsAndKeys:
+        @"ANDROID_VR",@"name",@"1.65.10",@"version",@"28",@"number",
+        @"com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",@"ua",
+        @",\"deviceMake\":\"Oculus\",\"deviceModel\":\"Quest 3\",\"androidSdkVersion\":32,\"osName\":\"Android\",\"osVersion\":\"12L\"",@"extra",
+        [NSNumber numberWithDouble:4.0],@"timeout",nil];
+}
+static NSDictionary *YTLighterVideoForID(NSString *videoID) {
+    // A successful first client can expose only 30 fps. Check the existing
+    // lightweight client once; do not resolve or replace the working audio.
+    NSDictionary *client=YTLowResolutionClient();
+    NSString *player=YTPlayerResponse(videoID,client,NULL);
+    NSString *streaming=YTObjectForKey(player,@"streamingData");
+    if(!streaming) return nil;
+    NSString *format=YTChooseFormat(YTJSONObjectStringsInArray(streaming,@"adaptiveFormats"),YES);
+    if(!format) return nil;
+    NSInteger fps=YTJSONIntForKey(format,@"fps"),itag=YTJSONIntForKey(format,@"itag");
+    if(fps<=0 && itag==597) fps=15;
+    long long length=YTFormatLength(format);
+    if(fps<=0 || fps>18 || length<=0) return nil;
+    NSURL *url=YTFormatURL(format);
+    YTMediaSource *video=[[[YTMediaSource alloc] initWithURL:url length:length userAgent:[client objectForKey:@"ua"]] autorelease];
+    [video setRequestTimeout:3];
+    unsigned char bytes[12];
+    if([video readAtOffset:0 into:bytes count:12]!=12) return nil;
+    [video setRequestTimeout:12];
+    return [NSDictionary dictionaryWithObjectsAndKeys:url,@"videoURL",video,@"videoSource",
+        [NSNumber numberWithLongLong:length],@"videoLength",[NSNumber numberWithInteger:fps],@"fps",
+        [NSNumber numberWithInteger:itag],@"videoItag",
+        [NSNumber numberWithInteger:YTJSONIntForKey(format,@"height")],@"height",nil];
+}
 static BOOL YTMimeNativeCandidate(NSString *mime) {
     return [mime length] && ([mime rangeOfString:@"avc1.42" options:NSCaseInsensitiveSearch].location!=NSNotFound ||
         [mime rangeOfString:@"mp4v.20.3" options:NSCaseInsensitiveSearch].location!=NSNotFound);
@@ -541,6 +572,7 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
         [NSNumber numberWithLongLong:YTFormatLength(video)], @"videoLength",
         [NSNumber numberWithLongLong:YTFormatLength(audio)], @"audioLength",
         [NSNumber numberWithBool:combined], @"combined",
+        [NSNumber numberWithBool:combined && nativeCandidate], @"nativeCandidate",
         [NSNumber numberWithInteger:YTJSONIntForKey(video,@"height")], @"height",
         [NSNumber numberWithInteger:sourceFPS], @"fps",
         [NSNumber numberWithInteger:videoItag], @"videoItag",
@@ -584,6 +616,13 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
                     [streams setObject:video forKey:@"videoSource"];
                     [streams setObject:audio forKey:@"audioSource"];
                     [[NSUserDefaults standardUserDefaults] setObject:[client objectForKey:@"label"] forKey:@"YTWorkingClient"];
+                    if(![[streams objectForKey:@"nativeCandidate"] boolValue] && [[streams objectForKey:@"fps"] doubleValue]>18) {
+                        NSDictionary *lighter=YTLighterVideoForID(videoID);
+                        if(lighter) {
+                            [streams addEntriesFromDictionary:lighter];
+                            [streams setObject:[NSNumber numberWithBool:NO] forKey:@"combined"];
+                        }
+                    }
                     return streams;
                 }
             }
@@ -597,11 +636,7 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
 // Try one additional client only when the current combined stream needs
 // expensive software decoding. Keep the already working stream on failure.
 + (NSDictionary *)lowResolutionStreamsForID:(NSString *)videoID {
-    NSDictionary *client=[NSDictionary dictionaryWithObjectsAndKeys:
-        @"ANDROID_VR",@"name",@"1.65.10",@"version",@"28",@"number",
-        @"com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",@"ua",
-        @",\"deviceMake\":\"Oculus\",\"deviceModel\":\"Quest 3\",\"androidSdkVersion\":32,\"osName\":\"Android\",\"osVersion\":\"12L\"",@"extra",
-        [NSNumber numberWithDouble:4.0],@"timeout",nil];
+    NSDictionary *client=YTLowResolutionClient();
     NSString *player=YTPlayerResponse(videoID,client,NULL);
     NSMutableDictionary *streams=player ? [[[self streamsFromPlayerResponse:player userAgent:[client objectForKey:@"ua"] error:NULL] mutableCopy] autorelease] : nil;
     if(!streams || [[streams objectForKey:@"combined"] boolValue]) return nil;

@@ -21,7 +21,8 @@ static NSString *Combined = @"{\"itag\":18,\"mimeType\":\"video/mp4; codecs=\\\"
 // with NSURLProtocol. Fixtures never contact YouTube or another external host.
 static BOOL BlockAndroid;
 static BOOL CombinedOnly;
-static int AndroidRequests, VisionRequests, HeadRequests;
+static BOOL LighterAvailable, LighterBroken;
+static int AndroidRequests, VisionRequests, HeadRequests, VRRequests, AudioReads;
 @interface YTFixtureProtocol : NSURLProtocol
 @end
 @implementation YTFixtureProtocol
@@ -40,7 +41,8 @@ static int AndroidRequests, VisionRequests, HeadRequests;
         NSString *clientName = [request valueForHTTPHeaderField:@"X-YouTube-Client-Name"];
         BOOL android = [clientName isEqualToString:@"3"];
         if (android) AndroidRequests++; else if ([clientName isEqualToString:@"101"]) VisionRequests++;
-        NSString *json = [clientName isEqualToString:@"28"] ? Player([NSString stringWithFormat:@"%@,%@",Video,Audio]) : android && BlockAndroid ?
+        if([clientName isEqualToString:@"28"]) VRRequests++;
+        NSString *json = [clientName isEqualToString:@"28"] ? Player(LighterAvailable ? HalfRateVideo : [NSString stringWithFormat:@"%@,%@",Video,Audio]) : android && BlockAndroid ?
             @"{\"playabilityStatus\":{\"status\":\"LOGIN_REQUIRED\",\"reason\":\"Fixture blocked Android\"}}" :
             CombinedOnly ? Player([NSString stringWithFormat:@"%@,%@,%@", Combined,
                 @"{\"itag\":160,\"mimeType\":\"video/mp4; codecs=\\\"avc1.4d400c\\\"\"}",
@@ -52,7 +54,7 @@ static int AndroidRequests, VisionRequests, HeadRequests;
         [headers setObject:@"application/json" forKey:@"Content-Type"];
         [headers setObject:[NSString stringWithFormat:@"%lu", (unsigned long)[data length]] forKey:@"Content-Length"];
     } else {
-        long long length = [[url path] isEqualToString:@"/video"] ? 70000 : 80000;
+        long long length = [[url path] isEqualToString:@"/video"] ? 70000 : [[url path] isEqualToString:@"/half"] ? 35000 : 80000;
         [headers setObject:@"video/mp4" forKey:@"Content-Type"];
         if ([[request HTTPMethod] isEqualToString:@"HEAD"]) {
             HeadRequests++;
@@ -65,6 +67,8 @@ static int AndroidRequests, VisionRequests, HeadRequests;
                    [scan scanString:@"-" intoString:NULL] && [scan scanLongLong:&end]);
             assert(end - start + 1 <= 65536);
             status = 206;
+            if([[url path] isEqualToString:@"/half"] && LighterBroken) status=403;
+            if([[url path] isEqualToString:@"/audio"]) AudioReads++;
             data = [NSMutableData dataWithLength:(NSUInteger)(end - start + 1)];
             [headers setObject:[NSString stringWithFormat:@"%lld", end - start + 1] forKey:@"Content-Length"];
             [headers setObject:[NSString stringWithFormat:@"bytes %lld-%lld/%lld", start, end, length] forKey:@"Content-Range"];
@@ -133,6 +137,19 @@ int main(void) {
     assert(result && HeadRequests == 2 && AndroidRequests == 1);
     assert([[result objectForKey:@"videoLength"] longLongValue] == 70000);
     assert([result objectForKey:@"videoSource"] && [result objectForKey:@"audioSource"]);
+    assert(VRRequests==1 && [[[result objectForKey:@"videoURL"] path] isEqualToString:@"/video"]);
+    LighterAvailable=YES; VRRequests=AudioReads=0;
+    result=[YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
+    assert(result && VRRequests==1 && AudioReads==1);
+    assert([[result objectForKey:@"fps"] intValue]==15 && [[result objectForKey:@"videoItag"] intValue]==597);
+    assert([[[result objectForKey:@"videoURL"] path] isEqualToString:@"/half"]);
+    assert([[[result objectForKey:@"audioURL"] path] isEqualToString:@"/audio"]);
+    assert([[result objectForKey:@"audioLength"] longLongValue]==80000 && [result objectForKey:@"audioSource"]);
+    LighterBroken=YES;
+    result=[YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
+    assert(result && [[result objectForKey:@"fps"] intValue]==30);
+    assert([[[result objectForKey:@"videoURL"] path] isEqualToString:@"/video"]);
+    LighterAvailable=LighterBroken=NO;
     BlockAndroid = YES; AndroidRequests = VisionRequests = 0;
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"YTWorkingClient"];
     result = [YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
@@ -148,7 +165,7 @@ int main(void) {
     assert(result && ![[result objectForKey:@"combined"] boolValue] && [[result objectForKey:@"videoLength"] longLongValue]==70000);
     [NSURLProtocol unregisterClass:[YTFixtureProtocol class]];
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"YTWorkingClient"];
-    NSLog(@"Resolver checks passed, including format 18 with unavailable adaptive formats, one shared length probe, independent readers and no unnecessary fallback clients.");
+    NSLog(@"Resolver checks passed, including lighter video across clients, unchanged working audio, unavailable lighter fallback, and native/progressive routing.");
     [pool release];
     return 0;
 }

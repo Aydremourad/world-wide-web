@@ -25,8 +25,6 @@ int YTOpenH264Decoder(AVCodecContext *codec) {
         return AVERROR(EINVAL);
     codec->thread_count = 1;
     codec->flags2 |= AV_CODEC_FLAG2_FAST;
-    int mainProfile=codec->codec_id==AV_CODEC_ID_H264 && codec->extradata_size>=4 &&
-        codec->extradata[0]==1 && codec->extradata[1]!=66;
     if (codec->codec_id == AV_CODEC_ID_H264) {
         if (codec->width * codec->height > 38400) codec->skip_frame = AVDISCARD_NONREF;
         else codec->skip_frame = AVDISCARD_DEFAULT;
@@ -46,6 +44,21 @@ int YTSeekVideoToTime(AVFormatContext *format,int track,AVCodecContext *codec,do
     AVStream *stream=format->streams[track];
     int64_t stamp=(int64_t)llround((seconds+YTVideoTimeOrigin(stream))/av_q2d(stream->time_base));
     int result=av_seek_frame(format,track,stamp,AVSEEK_FLAG_BACKWARD);
+    if(result>=0) avcodec_flush_buffers(codec);
+    return result;
+}
+int YTAdvanceVideoToTime(AVFormatContext *format,int track,AVCodecContext *codec,double seconds,double origin) {
+    if(!format || !codec || track<0 || track>=(int)format->nb_streams || !isfinite(seconds) || !isfinite(origin) || seconds<0)
+        return AVERROR(EINVAL);
+    AVStream *stream=format->streams[track];
+    // Use the session's original time origin. MOV may initialize start_time
+    // from the first packet after a seek, which is not the movie's origin.
+    int64_t stamp=(int64_t)llround((seconds+origin)/av_q2d(stream->time_base));
+    // MOV index search with flags=0 chooses a keyframe at/after the target.
+    // If there is no future keyframe, continue decoding the current GOP.
+    int entry=av_index_search_timestamp(stream,stamp,0);
+    if(entry<0 || stream->index_entries[entry].timestamp<stamp) return AVERROR(EINVAL);
+    int result=av_seek_frame(format,track,stamp,0);
     if(result>=0) avcodec_flush_buffers(codec);
     return result;
 }

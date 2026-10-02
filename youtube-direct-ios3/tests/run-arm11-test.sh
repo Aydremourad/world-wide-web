@@ -32,3 +32,13 @@ arm-linux-gnueabi-gcc -O3 -mcpu=arm1176jzf-s -marm -static -I. -I"$TESTDIR/decod
     "$TESTDIR/decoder/libavutil/libavutil.a" -lm -lpthread -o "$TESTDIR/pixels-test"
 qemu-arm -cpu arm1176 "$TESTDIR/pixels-test"
 arm-linux-gnueabi-objdump -d "$TESTDIR/pixels-test" | grep -m1 usat
+arm-linux-gnueabi-gcc -O3 -std=c99 -mcpu=arm1176jzf-s -marm -static -I. -I"$TESTDIR/decoder" \
+    tests/motion-arm11.c "$TESTDIR/decoder/libavcodec/libavcodec.a" \
+    "$TESTDIR/decoder/libavutil/libavutil.a" -lm -lpthread -o "$TESTDIR/motion-test"
+YT_MOTION_BENCH=1 qemu-arm -cpu arm1176 "$TESTDIR/motion-test"
+arm-linux-gnueabi-gcc -O3 -std=c99 -mcpu=arm1176jzf-s -marm -static -I. -I"$TESTDIR/decoder" \
+    YTVideoDecoder.c tests/decoder-arm11.c "$TESTDIR/decoder/libavformat/libavformat.a" \
+    "$TESTDIR/decoder/libavcodec/libavcodec.a" "$TESTDIR/decoder/libswscale/libswscale.a" \
+    "$TESTDIR/decoder/libavutil/libavutil.a" -lm -lpthread -o "$TESTDIR/decoder-test"
+qemu-arm -cpu arm1176 "$TESTDIR/decoder-test" tests/fixtures/video-motion-30.mp4
+arm-linux-gnueabi-objdump -d "$TESTDIR/decoder-test" | grep -m1 sadd16

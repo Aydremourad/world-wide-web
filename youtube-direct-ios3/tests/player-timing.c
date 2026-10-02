@@ -31,14 +31,17 @@ int main(void) {
     assert(YTClampSeekTime(10,40)==10);
     assert(YTClampSeekTime(100,40)==39.9);
     assert(YTClampSeekTime(NAN,40)==0);
-    assert(!YTShouldDropNonRef(0,0.8));
-    assert(YTShouldDropNonRef(0,1.1));
+    assert(!YTShouldDropNonRef(0,0.4));
+    assert(YTShouldDropNonRef(0,0.5));
     assert(YTShouldDropNonRef(1,0.5));
-    assert(!YTShouldDropNonRef(1,0.2));
+    assert(!YTShouldDropNonRef(1,0.1));
+    assert(!YTPreferReferenceFrames(256,144,15));
+    assert(YTPreferReferenceFrames(256,144,30));
+    assert(YTPreferReferenceFrames(426,240,15));
     assert(!YTNeedsVideoResync(10,12,100,0));
-    assert(YTNeedsVideoResync(10,13,100,0));
-    assert(!YTNeedsVideoResync(10,13,103,100));
-    assert(YTNeedsVideoResync(10,13,104,100));
-    puts("Player timing passed: full-rate adaptive pacing, decoder hysteresis, bounded seeks and restart clock continuity.");
+    assert(YTNeedsVideoResync(10,13.1,100,0));
+    assert(!YTNeedsVideoResync(10,13.1,105,100));
+    assert(YTNeedsVideoResync(10,13.1,106,100));
+    puts("Player timing passed: adaptive pacing, early reference-frame policy, forward catch-up cooldown and clock continuity.");
     return 0;
 }

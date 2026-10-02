@@ -10,7 +10,7 @@ DEPS="$ROOT/.deps"
 SRC="$DEPS/FFmpeg-2.8.22"
 GASDIR="$DEPS/gas-preprocessor"
 REVFILE="$SRC/.ytdirect-decoder-rev"
-DECODER_REV="5-arm11-cabac"
+DECODER_REV="6-arm11-motion"
 
 test -d "$SDKROOT" || { echo "Missing SDK: $SDKROOT"; exit 1; }
 test -x "$LEGACY_LD" || { echo "Missing ARMv6 linker: $LEGACY_LD"; exit 1; }
@@ -60,5 +60,8 @@ fi
 grep -q '^#define CONFIG_SMALL 0' config.h
 grep -q '^#define HAVE_ARMV6_INLINE 1' config.h
 grep -q 'YT_ARM11_CABAC' libavcodec/arm/cabac.h
+grep -q 'YT_ARM11_MOTION' libavcodec/arm/h264qpel_init_arm.c
+grep -q 'YT_ARM11_MOTION' libavcodec/arm/h264chroma_init_arm.c
+grep -q 'YT_ARM11_MOTION' libavcodec/arm/h264dsp_init_arm.c
 make -j"${JOBS:-3}" libavformat/libavformat.a libavcodec/libavcodec.a libswscale/libswscale.a libavutil/libavutil.a
 echo "$DECODER_REV" > "$REVFILE"

@@ -312,3 +312,31 @@ and output correctness, not real-device speed or UIKit layout. The info button
 shows playback FPS and decode/conversion/read/display costs after closing a video;
 the player controls remain clean. Actual 2G FPS and dismissal geometry still need
 on-device validation.
+
+
+## 1.1.2 video FPS
+
+Decoder revision 6 adds ARM11 packed 16-bit H.264 luma/chroma motion compensation
+and 4x4 inverse transforms. Interpolation, clipping, rounding, transform-block
+clearing and decoded pixels are checked against FFmpeg's original C routines;
+no approximate interpolation is substituted. Existing CABAC and RGB565 ARMv6
+optimizations remain enabled. The ARM1176 emulator checks the actual ARM
+instructions and compares every decoded frame from a 30 fps Main-profile clip.
+
+High-rate H.264 begins with non-reference picture discard instead of first
+building an audio/video backlog. Lower-rate sources keep all pictures until
+adaptive hysteresis detects lateness. Reference pictures continue to be decoded;
+this is not keyframe-only playback. Severe drift recovery seeks forward to a
+future indexed keyframe with a six-second cooldown. It does not seek backward
+and repeatedly decode the GOP behind the audio clock. Manual seeks retain their
+existing exact-target preroll behavior.
+
+A working 30 fps software stream now triggers one bounded check of the existing
+lightweight client for a readable <=18 fps video representation. A successful
+replacement changes only the video source and its metadata, preserving the
+original AAC source and cache. Failure retains the working 30 fps source.
+Native-compatible progressive streams do not incur this check.
+
+Navigation restoration, player layout, controls and the audio pump are unchanged.
+Real-device FPS still needs measurement; emulator CPU timing is diagnostic,
+not an iPhone frame-rate claim.

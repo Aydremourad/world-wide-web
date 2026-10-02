@@ -16,6 +16,7 @@ int YTOpenH264Decoder(AVCodecContext *codec);
 int YTReadVideoMetadata(AVFormatContext *format);
 double YTVideoTimeOrigin(AVStream *stream);
 int YTSeekVideoToTime(AVFormatContext *format,int track,AVCodecContext *codec,double seconds);
+int YTAdvanceVideoToTime(AVFormatContext *format,int track,AVCodecContext *codec,double seconds,double origin);
 int YTConvertVideoFrame(YTVideoImage *image, const AVFrame *frame);
 void YTFreeVideoImage(YTVideoImage *image);
 #endif

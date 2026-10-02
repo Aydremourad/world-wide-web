@@ -50,6 +50,7 @@ typedef struct {
     BOOL queuePaused;
     BOOL bufferingShown;
     BOOL droppingNonRef;
+    BOOL preferReferenceFrames;
     unsigned serial;
     double startTime;
     BOOL previewShown;
@@ -605,6 +606,9 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     AVRational frameRate = format->streams[videoStream]->avg_frame_rate;
     if (frameRate.num > 0 && frameRate.den > 0) playback.frameDuration = av_q2d(av_inv_q(frameRate));
     _sourceFPS=1.0/playback.frameDuration;
+    playback.preferReferenceFrames=YTPreferReferenceFrames(codec->width,codec->height,_sourceFPS);
+    if(codec->codec_id==AV_CODEC_ID_H264 && playback.preferReferenceFrames)
+        codec->skip_frame=AVDISCARD_NONREF;
     playback.firstPTS=YTVideoTimeOrigin(format->streams[videoStream]);
     playback.nextPTS=playback.firstPTS+time;
     if(time>0 && YTSeekVideoToTime(format,videoStream,codec,time)<0) {
@@ -634,25 +638,24 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
             int64_t stamp=packet.pts!=AV_NOPTS_VALUE ? packet.pts : packet.dts;
             double now=[NSDate timeIntervalSinceReferenceDate];
             double audioTime=YTPlaybackClock(&playback);
-            if(playback.audioStarted && !_paused && stamp!=AV_NOPTS_VALUE && codec->codec_id==AV_CODEC_ID_H264 &&
-               codec->width*codec->height<=38400) {
+            if(playback.audioStarted && !_paused && stamp!=AV_NOPTS_VALUE && codec->codec_id==AV_CODEC_ID_H264) {
                 double packetTime=stamp*av_q2d(format->streams[videoStream]->time_base)-playback.firstPTS;
                 double behind=audioTime-packetTime;
-                playback.droppingNonRef=YTShouldDropNonRef(playback.droppingNonRef,behind);
+                playback.droppingNonRef=playback.preferReferenceFrames || YTShouldDropNonRef(playback.droppingNonRef,behind);
                 codec->skip_frame=playback.droppingNonRef ? AVDISCARD_NONREF : AVDISCARD_DEFAULT;
             }
             if(playback.audioStarted && !_paused && stamp!=AV_NOPTS_VALUE &&
                 YTNeedsVideoResync(stamp*av_q2d(format->streams[videoStream]->time_base)-playback.firstPTS,
                     audioTime,now,playback.lastResync)) {
-                // Reposition only after substantial drift, at most once in five
-                // seconds. Never switch normal late playback into keyframes-only.
-                playback.lastResync=now;
-                double target=fmax(time,audioTime-0.5);
-                av_free_packet(&packet);
-                if(YTSeekVideoToTime(format,videoStream,codec,target)>=0) {
+                // Catch up at a future keyframe, never at a keyframe behind
+                // audio that would make us repeatedly decode the same GOP.
+                double target=audioTime+playback.frameDuration;
+                if(YTAdvanceVideoToTime(format,videoStream,codec,target,playback.firstPTS)>=0) {
+                    playback.lastResync=now;
                     playback.startTime=target; playback.nextPTS=target+playback.firstPTS;
+                    [_seekCondition lock]; [self clearFrameQueue]; [_seekCondition broadcast]; [_seekCondition unlock];
+                    av_free_packet(&packet); [packetPool release]; continue;
                 }
-                [packetPool release]; continue;
             }
             AVPacket part = packet;
             while (part.size > 0 && !_sessionStop && !audio.failed) {
