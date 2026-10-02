@@ -60,6 +60,7 @@ typedef struct {
 - (void)detachAudioQueue;
 - (void)controlsTick:(NSTimer *)timer;
 - (void)layoutPlayerChrome;
+- (void)recordDecodedFrame;
 @end
 
 static int YTReadVideo(void *opaque, uint8_t *bytes, int count) {
@@ -104,7 +105,14 @@ static BOOL YTWaitForPause(YTPlayback *playback) {
 static double YTPlaybackClock(YTPlayback *playback) {
     return YTAudioMediaTime(playback->audio);
 }
+static NSData *YTDetachVideoPixels(YTVideoImage *image) {
+    if(!image->pixels || image->pixelBytes<=0) return nil;
+    void *pixels=image->pixels; NSUInteger length=(NSUInteger)image->pixelBytes;
+    image->pixels=NULL; image->pixelBytes=0;
+    return [NSData dataWithBytesNoCopy:pixels length:length freeWhenDone:YES];
+}
 static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRational timeBase) {
+    [playback->controller recordDecodedFrame];
     int64_t timestamp = av_frame_get_best_effort_timestamp(frame);
     double pts = timestamp == AV_NOPTS_VALUE ? playback->nextPTS : timestamp * av_q2d(timeBase);
     if (isnan(playback->firstPTS)) playback->firstPTS = pts;
@@ -113,8 +121,9 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     if(pts < playback->startTime-0.025) return !*playback->stop;
     if(*playback->paused && !playback->audioStarted && !playback->previewShown) {
         if(YTConvertVideoFrame(&playback->image,frame)<0) return NO;
+        NSData *previewPixels=YTDetachVideoPixels(&playback->image);
         NSDictionary *preview=[NSDictionary dictionaryWithObjectsAndKeys:
-            [NSData dataWithBytes:playback->image.pixels length:playback->image.pixelBytes],@"pixels",
+            previewPixels,@"pixels",
             [NSNumber numberWithInt:playback->image.width],@"width",[NSNumber numberWithInt:playback->image.height],@"height",
             [NSNumber numberWithUnsignedInt:playback->serial],@"serial",nil];
         [playback->controller queueFrame:preview]; playback->previewShown=YES;
@@ -150,8 +159,9 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     playback->lastDisplay = now;
     if (YTConvertVideoFrame(&playback->image, frame) < 0) return NO;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+    NSData *framePixels=YTDetachVideoPixels(&playback->image);
     NSDictionary *payload = [NSDictionary dictionaryWithObjectsAndKeys:
-        [NSData dataWithBytes:playback->image.pixels length:playback->image.pixelBytes], @"pixels",
+        framePixels, @"pixels",
         [NSNumber numberWithInt:playback->image.width], @"width",
         [NSNumber numberWithInt:playback->image.height], @"height",
         [NSNumber numberWithUnsignedInt:playback->serial], @"serial", nil];
@@ -296,6 +306,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     _spinner.center=CGPointMake(width/2,height/2-15);
     _message.frame=CGRectMake(20,height/2+10,width-40,55);
 }
+- (void)recordDecodedFrame { _debugDecodedFrames++; }
 - (NSString *)timeString:(double)seconds {
     int time=(int)(seconds > 0 ? seconds : 0);
     return [NSString stringWithFormat:@"%d:%02d",time/60,time%60];
@@ -367,6 +378,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     _outputQueue=[[info objectForKey:@"queue"] pointerValue];
     _audioPump=[[info objectForKey:@"audio"] pointerValue];
     _sampleRate=[[info objectForKey:@"rate"] doubleValue];
+    _debugDirectAAC=[[info objectForKey:@"directAAC"] boolValue];
     _duration=[[info objectForKey:@"duration"] doubleValue];
     _progress.maximumValue=_duration>0 ? _duration : 1; _progress.enabled=_duration>0;
     _backItem.enabled=_forwardItem.enabled=_duration>0;
@@ -378,10 +390,12 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     NSTimeInterval now=[NSDate timeIntervalSinceReferenceDate];
     if(now-_debugFPSAt>=1.0) {
         unsigned frames=_debugFrames-_debugLastFrames;
+        unsigned decoded=_debugDecodedFrames-_debugLastDecodedFrames;
         double interval=now-_debugFPSAt;
         _debugFPS=interval>0 ? frames/interval : 0;
-        _debugLastFrames=_debugFrames; _debugFPSAt=now;
-        if(_qualityHeight>0) _qualityLabel.text=[NSString stringWithFormat:@"%dp • %.1f fps",_qualityHeight,_debugFPS];
+        _debugDecodeFPS=interval>0 ? decoded/interval : 0;
+        _debugLastFrames=_debugFrames; _debugLastDecodedFrames=_debugDecodedFrames; _debugFPSAt=now;
+        if(_qualityHeight>0) _qualityLabel.text=[NSString stringWithFormat:@"%dp D%.1f P%.1f",_qualityHeight,_debugDecodeFPS,_debugFPS];
     }
     if (_audioPump && !_scrubbing) {
         double seconds=YTAudioMediaTime((YTAudio *)_audioPump);
@@ -479,7 +493,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     if(_sessionStop) { [_videoSource cancel]; [_audioSource cancel]; }
     [_seekCondition unlock];
     io.source = _videoSource; audio.source = _audioSource;
-    [NSThread setThreadPriority:0.60];
+    [NSThread setThreadPriority:0.78];
     if (_sessionStop) goto finished;
     av_register_all();
     format = avformat_alloc_context();
@@ -527,6 +541,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
         [NSValue valueWithPointer:audio.queue], @"queue",
         [NSValue valueWithPointer:&audio], @"audio",
         [NSNumber numberWithDouble:audio.format.mSampleRate], @"rate",
+        [NSNumber numberWithBool:audio.directAAC], @"directAAC",
         [NSNumber numberWithDouble:format->duration > 0 ? (double)format->duration / AV_TIME_BASE : 0], @"duration",
         [NSNumber numberWithUnsignedInt:serial],@"serial", nil];
     [self performSelectorOnMainThread:@selector(attachAudioQueue:) withObject:queueInfo waitUntilDone:YES];

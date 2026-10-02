@@ -14,7 +14,7 @@
         layer.opaque = YES;
         layer.drawableProperties = [NSDictionary dictionaryWithObjectsAndKeys:
             [NSNumber numberWithBool:NO], kEAGLDrawablePropertyRetainedBacking,
-            kEAGLColorFormatRGBA8, kEAGLDrawablePropertyColorFormat, nil];
+            kEAGLColorFormatRGB565, kEAGLDrawablePropertyColorFormat, nil];
         _context = [[EAGLContext alloc] initWithAPI:kEAGLRenderingAPIOpenGLES1];
         [EAGLContext setCurrentContext:_context];
         glGenFramebuffersOES(1, &_framebuffer);

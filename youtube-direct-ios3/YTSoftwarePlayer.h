@@ -19,10 +19,12 @@
     unsigned _seekSerial;
     AudioQueueRef _outputQueue;
     void *_audioPump;
-    double _duration, _sampleRate, _lastClock, _clockOffset, _debugFPS;
+    double _duration, _sampleRate, _lastClock, _clockOffset, _debugFPS, _debugDecodeFPS;
     NSTimeInterval _lastControlTouch, _debugFPSAt;
-    unsigned _debugFrames, _debugLastFrames;
+    volatile unsigned _debugDecodedFrames;
+    unsigned _debugFrames, _debugLastFrames, _debugLastDecodedFrames;
     int _qualityHeight;
+    BOOL _debugDirectAAC;
     BOOL _controlsHidden, _oldStatusHidden, _finished, _scrubbing, _wasPaused;
     BOOL _seekPending, _frameScheduled;
     volatile BOOL _stop, _paused, _sessionStop;

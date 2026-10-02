@@ -20,7 +20,10 @@ void YTAudioBufferReturned(void *opaque, AudioQueueRef queue, AudioQueueBufferRe
             audio->available[i] = YES;
             if (audio->pending) audio->pending--;
             audio->returnedBuffers++;
-            audio->playedFrames+=buffer->mAudioDataByteSize/audio->format.mBytesPerFrame;
+            if(audio->directAAC) {
+                audio->playedFrames+=audio->bufferFrames[i];
+                audio->bufferFrames[i]=0;
+            } else audio->playedFrames+=buffer->mAudioDataByteSize/audio->format.mBytesPerFrame;
             if (!audio->pending && audio->started && !audio->eof) audio->starved = YES;
             pthread_cond_signal(&audio->ready);
             break;
@@ -46,7 +49,10 @@ double YTAudioMediaTime(YTAudio *audio) {
         }
         media=audio->mediaBase+(raw-audio->rawBase)/rate;
         // A clock running without callbacks cannot run video past unheard audio.
-        double limit=played+YT_AUDIO_BUFFER_BYTES/(audio->format.mBytesPerFrame*rate);
+        double queuedWindow=audio->directAAC ?
+            (double)(audio->directPacketsPerBuffer*audio->inputFormat.mFramesPerPacket)/rate :
+            (double)YT_AUDIO_BUFFER_BYTES/(audio->format.mBytesPerFrame*rate);
+        double limit=played+queuedWindow;
         if(limit>decoded) limit=decoded;
         if(media>limit) media=limit;
         if(media<played) media=played;
@@ -98,7 +104,9 @@ static void YTAudioRecover(YTAudio *audio) {
         audio->lastReturned=returned; audio->lastBufferAdvance=now;
     }
     if (!pending || (pending < 3 && !audio->eof)) return;
-    double bufferDuration=YT_AUDIO_BUFFER_BYTES / (audio->format.mBytesPerFrame * audio->format.mSampleRate);
+    double bufferDuration=audio->directAAC ?
+        (double)(audio->directPacketsPerBuffer*audio->inputFormat.mFramesPerPacket)/audio->format.mSampleRate :
+        (double)YT_AUDIO_BUFFER_BYTES/(audio->format.mBytesPerFrame*audio->format.mSampleRate);
     double callbackLimit=bufferDuration*2+1; if(callbackLimit<2) callbackLimit=2;
     BOOL stuck = (clock >= 0 && now - audio->lastAdvance > 2.0) || now-audio->lastBufferAdvance>callbackLimit;
     BOOL running=audio->sink.running(audio->sink.context);
@@ -131,7 +139,28 @@ static OSStatus YTConverterInput(AudioConverterRef converter, UInt32 *packets,
     if(descriptions) *descriptions=audio->descriptions;
     return noErr;
 }
+static OSStatus YTProduceDirectAAC(YTAudio *audio,unsigned slot) {
+    AudioQueueBufferRef buffer=audio->buffers[slot];
+    UInt32 bytes=buffer->mAudioDataBytesCapacity;
+    UInt32 packets=audio->directPacketsPerBuffer;
+    OSStatus status=AudioFileReadPackets(audio->file,false,&bytes,audio->descriptions,
+        audio->packet,&packets,buffer->mAudioData);
+    if(YTAudioStopped(audio)) return noErr;
+    if(status!=noErr && status!=(OSStatus)-39) return status;
+    if(!packets) {
+        audio->eof=YES;
+        if(audio->started) audio->sink.drain(audio->sink.context);
+        return noErr;
+    }
+    audio->packet+=packets;
+    buffer->mAudioDataByteSize=bytes;
+    UInt32 frames=packets*audio->inputFormat.mFramesPerPacket;
+    audio->bufferFrames[slot]=frames;
+    pthread_mutex_lock(&audio->mutex); audio->decodedFrames+=frames; audio->pending++; pthread_mutex_unlock(&audio->mutex);
+    return audio->sink.enqueue(audio->sink.context,buffer,packets,audio->descriptions);
+}
 static OSStatus YTProduceAudio(YTAudio *audio, unsigned slot) {
+    if(audio->directAAC) return YTProduceDirectAAC(audio,slot);
     AudioQueueBufferRef buffer=audio->buffers[slot];
     AudioBufferList data; memset(&data,0,sizeof(data)); data.mNumberBuffers=1;
     data.mBuffers[0].mNumberChannels=audio->format.mChannelsPerFrame;
@@ -163,7 +192,7 @@ static OSStatus YTProduceAudio(YTAudio *audio, unsigned slot) {
 static void *YTAudioProducer(void *opaque) {
     YTAudio *audio = opaque;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    [NSThread setThreadPriority:0.75];
+    [NSThread setThreadPriority:audio->directAAC ? 0.45 : 0.55];
     while (!YTAudioStopped(audio) && !audio->failed) {
         pthread_mutex_lock(&audio->mutex);
         if (audio->eof && !audio->pending) { pthread_mutex_unlock(&audio->mutex); break; }
@@ -220,6 +249,7 @@ OSStatus YTAudioOpen(YTAudio *audio) {
     if(result!=noErr || !maximum || maximum>YT_AUDIO_BUFFER_BYTES) return kAudioFileUnspecifiedError;
     audio->packetsPerBuffer=YT_AUDIO_BUFFER_BYTES/maximum;
     if(audio->packetsPerBuffer>64) audio->packetsPerBuffer=64;
+    audio->directPacketsPerBuffer=audio->packetsPerBuffer>16 ? 16 : audio->packetsPerBuffer;
     audio->descriptions=calloc(audio->packetsPerBuffer,sizeof(AudioStreamPacketDescription));
     audio->compressed=malloc(YT_AUDIO_BUFFER_BYTES);
     if(!audio->descriptions || !audio->compressed) return kAudioFileUnspecifiedError;
@@ -259,7 +289,7 @@ OSStatus YTAudioBegin(YTAudio *audio) {
     return noErr;
 }
 static OSStatus YTEnqueue(void *context, AudioQueueBufferRef buffer, UInt32 packets, AudioStreamPacketDescription *descriptions) {
-    return AudioQueueEnqueueBuffer((AudioQueueRef)context, buffer, 0, NULL);
+    return AudioQueueEnqueueBuffer((AudioQueueRef)context,buffer,descriptions ? packets : 0,descriptions);
 }
 static BOOL YTRunning(void *context) {
     UInt32 running = 0, size = sizeof(running);
@@ -276,11 +306,31 @@ static double YTClock(void *context) {
     // Sample units suffice for detecting progress; sample rate is constant.
     return time.mSampleTime;
 }
+static OSStatus YTSetAACQueueCookie(YTAudio *audio) {
+    UInt32 size=0;
+    OSStatus status=AudioFileGetPropertyInfo(audio->file,kAudioFilePropertyMagicCookieData,&size,NULL);
+    if(status!=noErr || !size) return status;
+    void *cookie=malloc(size); if(!cookie) return kAudioFileUnspecifiedError;
+    status=AudioFileGetProperty(audio->file,kAudioFilePropertyMagicCookieData,&size,cookie);
+    if(status==noErr) status=AudioQueueSetProperty(audio->queue,kAudioQueueProperty_MagicCookie,cookie,size);
+    free(cookie); return status;
+}
 OSStatus YTPrepareAudio(YTAudio *audio) {
     OSStatus result = YTAudioOpen(audio);
     if (result != noErr) return result;
-    result = AudioQueueNewOutput(&audio->format, YTAudioBufferReturned, audio, NULL, NULL, 0, &audio->queue);
-    if (result != noErr) return result;
+    // First ask AudioQueue to consume AAC directly. On the original iPhone this
+    // moves codec work out of our H.264/PCM conversion path. Any rejection falls
+    // back to the proven PCM converter below.
+    result=AudioQueueNewOutput(&audio->inputFormat,YTAudioBufferReturned,audio,NULL,NULL,0,&audio->queue);
+    if(result==noErr && YTSetAACQueueCookie(audio)==noErr) {
+        audio->directAAC=YES;
+        audio->discardFrames=0;
+    } else {
+        if(audio->queue) { AudioQueueDispose(audio->queue,true); audio->queue=NULL; }
+        audio->directAAC=NO;
+        result=AudioQueueNewOutput(&audio->format,YTAudioBufferReturned,audio,NULL,NULL,0,&audio->queue);
+        if(result!=noErr) return result;
+    }
     audio->sink.context = audio->queue;
     audio->sink.enqueue = YTEnqueue; audio->sink.running = YTRunning;
     audio->sink.start = YTStart; audio->sink.drain = YTDrain;

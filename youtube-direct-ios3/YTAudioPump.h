@@ -33,8 +33,10 @@ typedef struct {
     AudioStreamPacketDescription *descriptions;
     AudioQueueBufferRef buffers[YT_AUDIO_BUFFERS];
     BOOL available[YT_AUDIO_BUFFERS];
+    UInt32 bufferFrames[YT_AUDIO_BUFFERS];
     SInt64 packet;
-    UInt32 packetsPerBuffer;
+    UInt32 packetsPerBuffer, directPacketsPerBuffer;
+    BOOL directAAC;
     volatile BOOL *stop;
     volatile BOOL *paused;
     volatile BOOL failed;
