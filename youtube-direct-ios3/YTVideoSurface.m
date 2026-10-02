@@ -1,9 +1,13 @@
 #import "YTVideoSurface.h"
 #import <QuartzCore/QuartzCore.h>
 
+@interface YTVideoSurface ()
+- (void)updateGeometry;
+- (void)drawCurrentTexture;
+@end
+
 @implementation YTVideoSurface
 @synthesize aspectFill = _aspectFill;
-- (void)drawCurrentTexture;
 - (void)setAspectFill:(BOOL)value {
     if(_aspectFill==value) return;
     _aspectFill=value; _geometryDirty=YES;
