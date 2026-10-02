@@ -46,7 +46,7 @@ LOCAL_TEST_IDS = {PLAYBACK_TEST_ID, STREAM_TEST_ID}
 PLAYBACK_TEST_ITEM = dict(videoId=PLAYBACK_TEST_ID, title='Playback test',
     author='YouTube 2G', authorId='unknown', description='A local playback test.',
     published=0, lengthSeconds=8, viewCount=0)
-VERSION = '2g-1.7'
+VERSION = '2g-1.8'
 
 
 def media_ready(vid):
@@ -476,6 +476,17 @@ def schedule(vid, hint=None, prefetch=False):
         return 'preparing'
 
 
+def playback_file(path, status='ready', native=True):
+    response = send_file(path, mimetype='video/mp4', conditional=True)
+    response.headers['X-YouTube2G-Status'] = status
+    response.headers['X-YouTube2G-Native'] = '1' if native else '0'
+    if native:
+        response.headers['X-YouTube2G-Width'] = '320'
+        response.headers['X-YouTube2G-Height'] = '240'
+        response.headers['X-YouTube2G-FPS'] = '24'
+    return response
+
+
 @app.route('/getvideo/<vid>', methods=['GET', 'HEAD'])
 @app.route('/video/sd/<vid>', methods=['GET', 'HEAD'])
 @app.route('/video/hd/<vid>', methods=['GET', 'HEAD'])
@@ -485,11 +496,11 @@ def playback(vid):
     # Both sample IDs serve the exact known-compatible MP4, without a redirect.
     # PLAYBACK_MODE=hls from an earlier deployment is intentionally ignored.
     if vid in LOCAL_TEST_IDS:
-        return send_file(ROOT / 'static' / 'test.mp4', mimetype='video/mp4', conditional=True)
+        return playback_file(ROOT / 'static' / 'test.mp4')
     path = MEDIA / (vid + '.mp4')
     if path.exists():
         os.utime(path, None)
-        return send_file(path, mimetype='video/mp4', conditional=True)
+        return playback_file(path)
     status = schedule(vid)
     # The stock player may issue HEAD before GET. Returning the tiny "preparing"
     # movie to either request makes it remember the wrong Content-Length and
@@ -511,9 +522,9 @@ def playback(vid):
             playback_waiters.release()
     if media_ready(vid):
         os.utime(path, None)
-        return send_file(path, mimetype='video/mp4', conditional=True)
+        return playback_file(path)
     clip = {'failed': 'failed', 'too-long': 'too-long', 'busy': 'busy'}.get(status, 'preparing')
-    return send_file(ROOT / 'static' / (clip + '.mp4'), mimetype='video/mp4', conditional=True)
+    return playback_file(ROOT / 'static' / (clip + '.mp4'), status=status, native=False)
 
 
 @app.route('/stream-test/index.m3u8', methods=['GET', 'HEAD'])

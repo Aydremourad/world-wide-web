@@ -106,6 +106,8 @@ def test_short_job_starts_without_preparing_clip(client, monkeypatch):
     monkeypatch.setattr(s, 'schedule', prepare)
     r = client.get('/getvideo/' + VID)
     assert r.data == video
+    assert r.headers['X-YouTube2G-Status'] == 'ready'
+    assert r.headers['X-YouTube2G-Native'] == '1'
 
 def test_only_top_short_result_is_prefetched(client, monkeypatch):
     monkeypatch.setenv('PREFETCH_SECONDS', '60')
@@ -136,6 +138,8 @@ def test_local_playback_sample_never_contacts_youtube(client, monkeypatch):
         r = client.get('/getvideo/' + vid)
         assert r.status_code == 200 and r.mimetype == 'video/mp4'
         assert 'Location' not in r.headers
+        assert r.headers['X-YouTube2G-Status'] == 'ready'
+        assert r.headers['X-YouTube2G-Native'] == '1'
         assert r.data == (s.ROOT / 'static/test.mp4').read_bytes()
         assert client.get('/status/' + vid).json == {'status': 'ready'}
     assert client.get('/thumb/' + s.PLAYBACK_TEST_ID).mimetype == 'image/jpeg'
@@ -209,6 +213,8 @@ def test_range_and_head(client):
     assert r.headers['Cache-Control']=='no-store'
     r=client.head('/getvideo/'+VID)
     assert r.status_code==200 and not r.data and r.headers['Content-Length']=='1024'
+    assert r.headers['X-YouTube2G-Status']=='ready'
+    assert r.headers['X-YouTube2G-Native']=='1'
 
 def test_pending_returns_real_clip_promptly(client, monkeypatch):
     monkeypatch.setattr(s, 'schedule', lambda vid:'preparing')
@@ -217,6 +223,8 @@ def test_pending_returns_real_clip_promptly(client, monkeypatch):
     assert r.status_code==200 and r.mimetype=='video/mp4'
     assert r.data[4:8]==b'ftyp'
     assert r.headers['Cache-Control']=='no-store'
+    assert r.headers['X-YouTube2G-Native']=='0'
+    assert r.headers['X-YouTube2G-Status']=='preparing'
 
 def test_bad_ids_do_not_launch_processes(client, monkeypatch):
     monkeypatch.setattr(s, 'schedule', lambda *a: pytest.fail('process launched'))
