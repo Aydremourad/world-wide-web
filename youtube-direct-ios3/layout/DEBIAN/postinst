@@ -4,6 +4,8 @@ set -e
 if command -v killall >/dev/null 2>&1; then killall YouTubeDirect >/dev/null 2>&1 || true; fi
 # Use the exact stock artwork already installed on this iOS 3 device.
 APP=/Applications/YouTubeDirect.app
+chmod 0755 "$APP" "$APP/YouTubeDirect"
+chmod 0644 "$APP/Info.plist"
 for STOCK_ICON in /Applications/YouTube.app/icon.png /Applications/YouTube.app/Icon.png; do
     if [ -f "$STOCK_ICON" ]; then
         cp "$STOCK_ICON" "$APP/icon.png"
@@ -11,5 +13,12 @@ for STOCK_ICON in /Applications/YouTube.app/icon.png /Applications/YouTube.app/I
         break
     fi
 done
-if command -v uicache >/dev/null 2>&1; then uicache || true; fi
+# Legacy uicache uses NSHomeDirectory() to find mobile.installation.plist.
+# dpkg runs this script as root; invoke uicache with mobile's login context.
+UI_CACHE=$(command -v uicache 2>/dev/null || true)
+if [ -n "$UI_CACHE" ] && command -v su >/dev/null 2>&1; then
+    su - mobile -c "$UI_CACHE" || echo "YouTube installed. Reboot the phone to refresh the Home Screen."
+else
+    echo "YouTube installed. Reboot the phone to refresh the Home Screen."
+fi
 exit 0

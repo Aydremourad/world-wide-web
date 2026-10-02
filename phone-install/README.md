@@ -1,10 +1,17 @@
 # Phone installer
 
-Download [YouTube 0.9.1](https://raw.githubusercontent.com/Aydremourad/world-wide-web/youtube-native-player-ios3/phone-install/com.aydre.youtubedirect_0.9.1_iphoneos-arm.deb)
+Download [YouTube 0.9.1-1](https://raw.githubusercontent.com/Aydremourad/world-wide-web/youtube-native-player-ios3/phone-install/com.aydre.youtubedirect_0.9.1-1_iphoneos-arm.deb)
 on the jailbroken iPhone. Open the package in iFile and choose Install, then
-open YouTube and retry the same video. The installer closes a backgrounded old
-copy so the next launch loads the update. Tap the Info button on the search
-screen to confirm version 0.9.1 and see the last selected player and format.
+fully power the phone off and on once to refresh the Home Screen. Open YouTube
+and retry the same video. The Info button reports app version 0.9.1; the Debian
+installer revision is 0.9.1-1.
+
+This installer fixes the Home Screen registration command. Legacy `uicache`
+locates its installation cache under the current user's home directory, so the
+installer now invokes it with the `mobile` account's login context instead of
+root. It also restores readable app metadata and executable permissions. The
+application payload is byte-for-byte identical to the verified 0.9.1 package;
+playback, the YouTube name and stock icon are preserved.
 
 Playback uses only the phone's Wi-Fi. No computer, external streaming proxy,
 browser, or full-movie conversion is required.
@@ -43,7 +50,14 @@ button supplies build and player diagnostics without signed media URLs.
 
 ## Verified checks
 
-Final build and tests:
+Installer checks passed with a simulated legacy cache command: the original
+root invocation reproduces the cache error, while the corrected invocation uses
+`mobile` and preserves the stock icon and app permissions. Debian version
+ordering accepts 0.9.1-1 as an upgrade from 0.9.1. The new package retains the
+original compressed application payload unchanged. Home Screen registration
+on a physical phone has not been tested here.
+
+Application build and tests (unchanged):
 https://github.com/Aydremourad/world-wide-web/actions/runs/37001674325
 
 - ARMv6, iPhone OS 3.1.3 SDK, legacy startup, static decoder linkage,
@@ -70,7 +84,7 @@ Main-profile decoding, Apple's full-screen UI, or sustained playback on a
 physical iPhone 2G. Device playback remains the release gate for 1.0.
 
 SHA256:
-`ff8f9c9d3a69a871b692390b105d8b5279fad969437de51a0bb21251e32fc2c7`
+`4b0d6a994b5cdaca58082aa98027092392a146664ff0b0a772bdbc54a555ad9c`
 
 Compiled source commit:
 `1a4f1cfde3a712d358c29124102565bb4bdbee1b`
