@@ -17,8 +17,8 @@ static int YTShouldPresentFrame(double lead, double now, double lastDisplay) {
     // once video is behind so the ARMv6 decoder gets time to catch up.
     if (lastDisplay <= 0) return 1;
     double elapsed = now - lastDisplay;
-    if (lead < -0.60) return elapsed >= 1.0/15.0;
-    if (lead < -0.08) return elapsed >= 1.0/20.0;
+    if (lead < -0.60) return elapsed >= 1.0/15.0 - 0.001;
+    if (lead < -0.08) return elapsed >= 1.0/20.0 - 0.001;
     return 1;
 }
 static double YTClampSeekTime(double seconds,double duration) {
