@@ -404,8 +404,7 @@ static BOOL YTProbeVideoURL(NSURL *url, NSString **errorText) {
                                                    timeoutInterval:18.0];
     [req setHTTPMethod:@"GET"];
     [req setValue:@"bytes=0-1" forHTTPHeaderField:@"Range"];
-    [req setValue:(userAgent ? userAgent :
-        @"Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_3 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7E18 Safari/528.16")
+    [req setValue:@"Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_3 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7E18 Safari/528.16"
 forHTTPHeaderField:@"User-Agent"];
 
     NSURLResponse *response = nil;
@@ -699,9 +698,10 @@ static NSURL *YTItag18FromPlayerResponse(NSString *player, NSString **detail) {
                                                        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
                                                    timeoutInterval:60.0];
     [req setHTTPMethod:@"GET"];
-    [req setValue:@"Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_3 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7E18 Safari/528.16"
+    [req setValue:(userAgent ? userAgent :
+        @"Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_3 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7E18 Safari/528.16")
 forHTTPHeaderField:@"User-Agent"];
-    [req setValue:@"video/mp4,*/*;q=0.8" forHTTPHeaderField:@"Accept"];
+    [req setValue:@"video/mp4,video/3gpp,audio/mp4,*/*;q=0.8" forHTTPHeaderField:@"Accept"];
 
     _done = NO;
     _status = 0;
@@ -911,9 +911,9 @@ static NSURL *YTConvertTinyVideoAndAudio(NSURL *videoURL,
     // H.264 stream and encode MPEG-4 Part 2 Simple Profile, while stream-copying AAC.
     NSString *command = [NSString stringWithFormat:
         @"'%@' -y -threads 1 -flags2 +fast -skip_loop_filter all "
-         "-i '%@' -i '%@' -map 0:v:0 -map 1:a:0 "
-         "-vcodec mpeg4 -profile:v 0 -b:v 180k -r 15 -bf 0 "
-         "-acodec copy -movflags +faststart '%@' >'%@' 2>&1",
+         @"-i '%@' -i '%@' -map 0:v:0 -map 1:a:0 "
+         @"-vcodec mpeg4 -profile:v 0 -b:v 180k -r 15 -bf 0 "
+         @"-acodec copy -movflags +faststart '%@' >'%@' 2>&1",
         ffmpeg, videoPath, audioPath, outputPath, logPath];
 
     int status = system([command UTF8String]);
