@@ -50,8 +50,9 @@ export LEGACY_LD
 export TARGET_LD="$LINK_WRAPPER"
 echo "Using armv6 linker: $LEGACY_LD"
 
-# HLS-only build: do not bundle the slow on-device transcoder.
-rm -f layout/usr/libexec/ytdirect-ffmpeg layout/usr/libexec/ytdirect-ffmpeg.rev
+echo
+echo "Preparing bundled ARMv6 converter..."
+SDKVER="$SDKVER" LEGACY_LD="$LEGACY_LD" sh ./build-static-ffmpeg.sh
 
 make clean SDKVERSION="$SDKVER" FINALPACKAGE=1
 make package SDKVERSION="$SDKVER" FINALPACKAGE=1
