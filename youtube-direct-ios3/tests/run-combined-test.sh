@@ -43,4 +43,3 @@ xcrun clang -fno-objc-arc -Wno-deprecated-declarations -I. -I"$TESTDIR/decoder" 
     "$TESTDIR/decoder/libswscale/libswscale.a" "$TESTDIR/decoder/libavutil/libavutil.a" \
     -lm -o "$TESTDIR/video-catchup-test"
 "$TESTDIR/video-catchup-test" tests/fixtures/audio-pump-main-aac.mp4
-

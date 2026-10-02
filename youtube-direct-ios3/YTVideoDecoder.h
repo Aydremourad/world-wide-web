@@ -13,6 +13,7 @@ typedef struct {
 } YTVideoImage;
 
 int YTOpenH264Decoder(AVCodecContext *codec);
+int YTReadVideoMetadata(AVFormatContext *format);
 double YTVideoTimeOrigin(AVStream *stream);
 int YTSeekVideoToTime(AVFormatContext *format,int track,AVCodecContext *codec,double seconds);
 int YTConvertVideoFrame(YTVideoImage *image, const AVFrame *frame);

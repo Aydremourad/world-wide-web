@@ -446,6 +446,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     if (avformat_open_input(&format, NULL, NULL, NULL) < 0) {
         failure = @"Could not open the MP4 video stream."; goto finished;
     }
+    if(YTReadVideoMetadata(format)<0) { failure=@"Could not read the video format."; goto finished; }
     int videoStream = -1;
     for (unsigned int i = 0; i < format->nb_streams; i++) {
         if (format->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO) { videoStream = i; break; }

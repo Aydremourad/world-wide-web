@@ -1,5 +1,6 @@
 #import "YTNativeProbe.h"
 #import "YTMediaSource.h"
+#include "YTVideoDecoder.h"
 #include <libavformat/avformat.h>
 #include <libavutil/mem.h>
 #include <errno.h>
@@ -31,7 +32,7 @@ NSDictionary *YTNativeStreamInfo(NSDictionary *streams) {
     if(!format || !io) { if(format) avformat_free_context(format); if(io) { av_free(io->buffer); av_free(io); } else av_free(bytes); return nil; }
     format->pb=io; format->flags|=AVFMT_FLAG_CUSTOM_IO; format->probesize=65536;
     NSDictionary *result=nil;
-    if(avformat_open_input(&format,NULL,NULL,NULL)==0) {
+    if(avformat_open_input(&format,NULL,NULL,NULL)==0 && YTReadVideoMetadata(format)>=0) {
         AVStream *video=NULL; AVCodecContext *audio=NULL;
         for(unsigned i=0;i<format->nb_streams;i++) {
             if(format->streams[i]->codec->codec_type==AVMEDIA_TYPE_VIDEO) video=format->streams[i];
@@ -62,15 +63,7 @@ NSDictionary *YTNativeStreamInfo(NSDictionary *streams) {
             result=[NSDictionary dictionaryWithObjectsAndKeys:
                 [NSNumber numberWithBool:eligible],@"eligible",[NSNumber numberWithInt:profile],@"profile",
                 [NSNumber numberWithInt:level],@"level",
-                [NSNumber numberWithInt:codec->codec_id],@"codec",
-                [NSNumber numberWithBool:supportedVideo],@"supportedVideo",
                 [NSNumber numberWithDouble:fps],@"fps",
-                [NSNumber numberWithInt:aacObject],@"aacObject",
-                [NSNumber numberWithInt:audio->channels],@"audioChannels",
-                [NSNumber numberWithInt:audio->sample_rate],@"audioRate",
-                [NSNumber numberWithLongLong:audio->bit_rate],@"audioBitrate",
-                [NSNumber numberWithLongLong:format->bit_rate],@"bitrate",
-                [NSData dataWithBytes:codec->extradata length:codec->extradata_size>64 ? 64 : codec->extradata_size],@"videoHeader",
                 [NSNumber numberWithInt:codec->width],@"width",[NSNumber numberWithInt:codec->height],@"height",[NSNumber numberWithLongLong:[source length]],@"length",nil];
         }
     }

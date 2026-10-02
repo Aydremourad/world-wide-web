@@ -7,6 +7,19 @@
 static int YTAllowedVideoSize(int width, int height) {
     return width > 0 && height > 0 && width <= 640 && height <= 640 && width * height <= 307200;
 }
+int YTReadVideoMetadata(AVFormatContext *format) {
+    if(!format) return AVERROR(EINVAL);
+    for(unsigned i=0;i<format->nb_streams;i++) {
+        AVCodecContext *codec=format->streams[i]->codec;
+        if(codec->codec_type==AVMEDIA_TYPE_VIDEO && (codec->width<=0 || codec->height<=0)) {
+            // The old MOV demuxer leaves mp4v dimensions unset until its VOL
+            // header is parsed. Probe bounded samples before choosing a player.
+            format->probesize=65536; format->max_analyze_duration=AV_TIME_BASE;
+            return avformat_find_stream_info(format,NULL);
+        }
+    }
+    return 0;
+}
 int YTOpenH264Decoder(AVCodecContext *codec) {
     if (!codec || (codec->codec_id != AV_CODEC_ID_H264 && codec->codec_id != AV_CODEC_ID_MPEG4) || !YTAllowedVideoSize(codec->width, codec->height))
         return AVERROR(EINVAL);
