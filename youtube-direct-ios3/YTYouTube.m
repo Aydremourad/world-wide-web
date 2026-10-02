@@ -270,12 +270,12 @@ static NSURL *YTHLSManifestURL(NSString *player, NSString **errorText) {
     return nil;
 }
 
-static BOOL YTProbeHLSURL(NSURL *url, NSString **errorText) {
+static NSString *YTHLSFetch(NSURL *url, NSString **errorText) {
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url
                                                        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
                                                    timeoutInterval:18.0];
     [req setHTTPMethod:@"GET"];
-    [req setValue:@"Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_3 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7E18 Safari/528.16"
+    [req setValue:@"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)"
 forHTTPHeaderField:@"User-Agent"];
 
     NSURLResponse *response = nil;
@@ -290,15 +290,83 @@ forHTTPHeaderField:@"User-Agent"];
     if (data && status >= 200 && status < 300) {
         NSString *text = [[[NSString alloc] initWithData:data
                                                  encoding:NSUTF8StringEncoding] autorelease];
-        if ([text rangeOfString:@"#EXTM3U"].location != NSNotFound)
-            return YES;
+        if (text && [text rangeOfString:@"#EXTM3U"].location != NSNotFound)
+            return text;
     }
 
     if (errorText) {
         if (err) *errorText = [err localizedDescription];
         else *errorText = [NSString stringWithFormat:@"HLS HTTP %d", (int)status];
     }
-    return NO;
+    return nil;
+}
+
+static NSURL *YTLowestHLSVariantURL(NSURL *masterURL, NSString **errorText) {
+    NSString *master = YTHLSFetch(masterURL, errorText);
+    if (!master) return nil;
+
+    if ([master rangeOfString:@"#EXT-X-STREAM-INF:"].location == NSNotFound)
+        return masterURL;
+
+    NSArray *lines = [master componentsSeparatedByCharactersInSet:
+                      [NSCharacterSet newlineCharacterSet]];
+    NSURL *bestURL = nil;
+    long bestArea = 0;
+    NSUInteger i;
+
+    for (i = 0; i < [lines count]; i++) {
+        NSString *line = [[lines objectAtIndex:i]
+            stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (![line hasPrefix:@"#EXT-X-STREAM-INF:"]) continue;
+
+        long area = 0;
+        NSRange rr = [line rangeOfString:@"RESOLUTION="];
+        if (rr.location != NSNotFound) {
+            NSString *res = [line substringFromIndex:rr.location + rr.length];
+            NSScanner *scanner = [NSScanner scannerWithString:res];
+            int w = 0;
+            int h = 0;
+            if ([scanner scanInt:&w] &&
+                [scanner scanString:@"x" intoString:NULL] &&
+                [scanner scanInt:&h])
+                area = (long)w * (long)h;
+        }
+
+        NSUInteger j = i + 1;
+        NSString *next = nil;
+        while (j < [lines count]) {
+            next = [[lines objectAtIndex:j]
+                stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            if ([next length] && ![next hasPrefix:@"#"]) break;
+            j++;
+        }
+        if (!next || ![next length] || [next hasPrefix:@"#"]) continue;
+
+        NSURL *candidate = [NSURL URLWithString:next relativeToURL:masterURL];
+        candidate = [candidate absoluteURL];
+        if (!candidate) continue;
+
+        if (!bestURL || (area > 0 && (bestArea == 0 || area < bestArea))) {
+            bestURL = candidate;
+            bestArea = area;
+        }
+    }
+
+    if (!bestURL) {
+        if (errorText) *errorText = @"HLS master contained no playable variant.";
+        return nil;
+    }
+
+    NSString *variantError = nil;
+    NSString *variant = YTHLSFetch(bestURL, &variantError);
+    if (!variant) {
+        if (errorText)
+            *errorText = [NSString stringWithFormat:@"Lowest HLS variant failed: %@",
+                          variantError ? variantError : @"unknown error"];
+        return nil;
+    }
+
+    return bestURL;
 }
 
 static NSString *YTEmbeddedPlayerResponse(NSString *videoID, NSString **errorText) {
@@ -784,11 +852,12 @@ static NSURL *YTDownloadAndConvertForOriginalIPhone(NSURL *remoteURL,
     if (safari) {
         NSURL *hls = YTHLSManifestURL(safari, &err);
         if (hls) {
-            NSString *probeError = nil;
-            if (YTProbeHLSURL(hls, &probeError))
-                return hls;
+            NSString *variantError = nil;
+            NSURL *variant = YTLowestHLSVariantURL(hls, &variantError);
+            if (variant)
+                return variant;
             err = [NSString stringWithFormat:@"HLS manifest rejected: %@",
-                   probeError ? probeError : @"unknown HLS error"];
+                   variantError ? variantError : @"unknown HLS error"];
         }
     }
 
