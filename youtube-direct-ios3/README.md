@@ -198,3 +198,31 @@ The search screen gets a small 1.0 polish pass with slightly roomier result
 rows, tuned title/byline typography and the iPhone OS network activity
 indicator during search and stream resolution. The playback diagnostic no
 longer hard-codes a version string; the About sheet reads the bundle version.
+
+
+## 1.0.0-debug1
+
+This is a device-validation build, not the final 1.0 release. Full-screen ownership
+moves ahead of modal presentation: the status bar is hidden before UIKit sizes the
+player, the controller requests full-screen layout before presentation, and the
+software player is presented without an animation that can preserve the old
+460-point application frame. This targets the launch-in-portrait 20-point offset
+that previously disappeared only after a landscape round trip.
+
+The resolver now prefers itag 160 (normal 144p frame rate) over itag 597 (the
+half-frame-rate poor-connectivity 144p stream). The selected itag and source FPS
+are recorded in the About diagnostics. The debug player's center title also reports
+measured displayed FPS once per second.
+
+For low-resolution Main-profile H.264, the decoder starts with all pictures instead
+of permanently discarding non-reference pictures. It falls back to non-reference
+dropping only after more than one second of measured video lag, and returns to full
+decoding after recovery. Severe drift is corrected sooner. The video loop no longer
+calls sched_yield after every packet, and non-video packets in the video demuxer are
+discarded because AAC is already handled by the independent audio reader.
+
+A dedicated YUV420P-to-RGB565 conversion path avoids the generic swscale pipeline
+for <=256x144 software video. Larger fallback sources retain swscale and conservative
+frame dropping. If Apple's native player rejects a combined stream, the app now
+resolves a 144p stream before entering the software player rather than decoding the
+same large combined file in software.

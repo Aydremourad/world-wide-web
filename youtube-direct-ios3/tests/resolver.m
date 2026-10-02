@@ -12,7 +12,8 @@ static NSDictionary *Resolve(NSString *formats) {
     assert(result);
     return result;
 }
-static NSString *Video = @"{\"itag\":160,\"mimeType\":\"video/mp4; codecs=\\\"avc1.4d400c\\\"\",\"width\":256,\"height\":144,\"url\":\"https://media.example/video?clen=70000\"}";
+static NSString *Video = @"{\"itag\":160,\"mimeType\":\"video/mp4; codecs=\\\"avc1.4d400c\\\"\",\"width\":256,\"height\":144,\"fps\":30,\"url\":\"https://media.example/video?clen=70000\"}";
+static NSString *HalfRateVideo = @"{\"itag\":597,\"mimeType\":\"video/mp4; codecs=\\\"avc1.4d400b\\\"\",\"width\":256,\"height\":144,\"fps\":15,\"url\":\"https://media.example/half?clen=35000\"}";
 static NSString *Audio = @"{\"itag\":140,\"mimeType\":\"audio/mp4; codecs=\\\"mp4a.40.2\\\"\",\"url\":\"https://media.example/audio?clen=80000\"}";
 static NSString *Combined = @"{\"itag\":18,\"mimeType\":\"video/mp4; codecs=\\\"avc1.4d401e, mp4a.40.2\\\"\",\"width\":640,\"height\":360,\"url\":\"https://media.example/combined\"}";
 
@@ -88,6 +89,9 @@ int main(void) {
     assert([[result objectForKey:@"videoURL"] isEqual:[result objectForKey:@"audioURL"]]);
     result = Resolve([NSString stringWithFormat:@"%@,%@,%@", Combined, Video, Audio]);
     assert(![[result objectForKey:@"combined"] boolValue]);
+    result = Resolve([NSString stringWithFormat:@"%@,%@,%@", HalfRateVideo, Video, Audio]);
+    assert([[[result objectForKey:@"videoURL"] path] isEqualToString:@"/video"]);
+    assert([[result objectForKey:@"videoItag"] intValue]==160 && [[result objectForKey:@"fps"] intValue]==30);
     NSString *baseline=[Combined stringByReplacingOccurrencesOfString:@"avc1.4d401e" withString:@"avc1.42001e"];
     result=Resolve([NSString stringWithFormat:@"%@,%@,%@",baseline,Video,Audio]);
     assert([[result objectForKey:@"combined"] boolValue]); // Prefer native playback over software 144p.
