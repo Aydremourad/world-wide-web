@@ -17,6 +17,8 @@ xcrun clang -arch armv6 -isysroot "$SDKROOT" -miphoneos-version-min=3.0 \
     -o "$APP/YouTubeDirect"
 cp Resources/Info.plist "$APP/Info.plist"
 cp control "$STAGE/DEBIAN/control"
+cp layout/DEBIAN/postinst "$STAGE/DEBIAN/postinst"
+chmod 0755 "$STAGE/DEBIAN/postinst"
 ldid -S -Hsha1 "$APP/YouTubeDirect"
 chmod 0755 "$APP/YouTubeDirect"
 file "$APP/YouTubeDirect"
@@ -30,5 +32,5 @@ fi
 if xcrun otool -L "$APP/YouTubeDirect" | grep -qE 'libav(codec|format|util)|libswscale'; then
     echo "The binary depends on unbundled decoder libraries."; exit 1
 fi
-python3 ./package-deb.py "$STAGE" packages/com.aydre.youtubedirect_0.7.4_iphoneos-arm.deb
+python3 ./package-deb.py "$STAGE" packages/com.aydre.youtubedirect_0.8.0_iphoneos-arm.deb
 echo "ARMv6, legacy startup, static decoder and gzip package checks passed."

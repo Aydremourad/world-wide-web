@@ -2,6 +2,11 @@
 #import <QuartzCore/QuartzCore.h>
 
 @implementation YTVideoSurface
+@synthesize aspectFill = _aspectFill;
+- (void)setAspectFill:(BOOL)value {
+    _aspectFill=value;
+    if (_lastPixels) [self displayRGB565:_lastPixels width:_videoWidth height:_videoHeight];
+}
 + (Class)layerClass { return [CAEAGLLayer class]; }
 - (id)initWithFrame:(CGRect)frame {
     if ((self = [super initWithFrame:frame])) {
@@ -37,9 +42,11 @@
     glBindFramebufferOES(GL_FRAMEBUFFER_OES, _framebuffer);
     glFramebufferRenderbufferOES(GL_FRAMEBUFFER_OES, GL_COLOR_ATTACHMENT0_OES,
                                 GL_RENDERBUFFER_OES, _renderbuffer);
+    if (_lastPixels) [self displayRGB565:_lastPixels width:_videoWidth height:_videoHeight];
 }
 - (void)displayRGB565:(NSData *)pixels width:(int)width height:(int)height {
     if (width <= 0 || height <= 0 || [pixels length] != (NSUInteger)(width * height * 2)) return;
+    if (pixels != _lastPixels) { [pixels retain]; [_lastPixels release]; _lastPixels=pixels; }
     if (!_backingWidth || !_backingHeight) [self layoutSubviews];
     [EAGLContext setCurrentContext:_context];
     glBindFramebufferOES(GL_FRAMEBUFFER_OES, _framebuffer);
@@ -62,8 +69,13 @@
     GLfloat x = 1.0f, y = 1.0f;
     GLfloat videoAspect = (GLfloat)width / (GLfloat)height;
     GLfloat viewAspect = (GLfloat)_backingWidth / (GLfloat)_backingHeight;
-    if (videoAspect > viewAspect) y = viewAspect / videoAspect;
-    else x = videoAspect / viewAspect;
+    if (_aspectFill) {
+        if (videoAspect > viewAspect) x = videoAspect / viewAspect;
+        else y = viewAspect / videoAspect;
+    } else {
+        if (videoAspect > viewAspect) y = viewAspect / videoAspect;
+        else x = videoAspect / viewAspect;
+    }
     const GLfloat vertices[] = {-x, -y, x, -y, -x, y, x, y};
     GLfloat u = (GLfloat)width / (GLfloat)_textureWidth;
     GLfloat v = (GLfloat)height / (GLfloat)_textureHeight;
@@ -81,6 +93,7 @@
     if (_framebuffer) glDeleteFramebuffersOES(1, &_framebuffer);
     if (_renderbuffer) glDeleteRenderbuffersOES(1, &_renderbuffer);
     [EAGLContext setCurrentContext:nil];
+    [_lastPixels release];
     [_context release];
     [super dealloc];
 }

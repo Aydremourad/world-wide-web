@@ -1,4 +1,4 @@
-# YouTube Direct: streaming player for iPhone OS 3
+# YouTube for iPhone OS 3
 
 This experimental branch replaces full download and conversion with a native
 player for the original iPhone / iPhone 2G on iPhone OS 3.1.3. Once installed,
@@ -32,11 +32,11 @@ The stock YouTube player's hardware decoder cannot provide this software path.
 ## Installation
 
 The [Actions build](https://github.com/Aydremourad/world-wide-web/actions/workflows/ios3-native-player.yml)
-produces `com.aydre.youtubedirect_0.7.4_iphoneos-arm.deb` in the
+produces `com.aydre.youtubedirect_0.8.0_iphoneos-arm.deb` in the
 `YouTubeDirect-iOS3-armv6` artifact. Install with iFile, or from a phone terminal:
 
 ```sh
-dpkg -i com.aydre.youtubedirect_0.7.4_iphoneos-arm.deb
+dpkg -i com.aydre.youtubedirect_0.8.0_iphoneos-arm.deb
 killall SpringBoard
 ```
 
@@ -109,3 +109,16 @@ checks cancellation while fetching. This uses native macOS Audio File Services
 and a simulated output queue; actual iPhone AudioQueue behavior and sustained
 playback still require device verification. The user confirmed initial playback
 on the physical iPhone with 0.7.3, followed by a freeze.
+
+0.8.0 presents late video frames periodically instead of dropping them forever.
+When large video decoding falls more than a second behind audio, it skips to
+the next keyframe and flushes the stale decoder state. Audio uses eight 64 KiB
+buffers. A producer watchdog pauses and resumes a queue whose clock stalls
+with packets still queued, including when IsRunning remains true. Persistent
+stall recovery failure reports an audio error instead of waiting indefinitely.
+
+The player now has black full-screen controls, native Play/Pause, elapsed time,
+duration, playback progress, volume, Fit/Fill and tap-to-show controls. It is
+named YouTube, without the introductory description. Installation copies the
+stock iOS 3 icon from /Applications/YouTube.app/icon.png, preserving the original
+app. Refresh SpringBoard after installation if its old icon/name is cached.

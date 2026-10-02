@@ -21,11 +21,13 @@ typedef struct {
     unsigned starts;
     BOOL running;
     BOOL draining;
+    BOOL stuck;
+    unsigned pauses;
 } FakeQueue;
 static OSStatus YTFakeEnqueue(void *opaque, AudioQueueBufferRef buffer, UInt32 packets,
                         AudioStreamPacketDescription *descriptions) {
     FakeQueue *queue=opaque;
-    assert(packets && buffer->mAudioDataByteSize && buffer->mAudioDataByteSize <= 32768);
+    assert(packets && buffer->mAudioDataByteSize && buffer->mAudioDataByteSize <= YT_AUDIO_BUFFER_BYTES);
     for (unsigned i=0;i<packets;i++)
         assert(descriptions[i].mStartOffset >= 0 && descriptions[i].mDataByteSize > 0 &&
                descriptions[i].mStartOffset + descriptions[i].mDataByteSize <= buffer->mAudioDataByteSize);
@@ -46,6 +48,16 @@ static OSStatus YTFakeStart(void *opaque) {
     pthread_mutex_lock(&queue->mutex); queue->running=YES; queue->starts++; pthread_mutex_unlock(&queue->mutex);
     return noErr;
 }
+static OSStatus YTFakePause(void *opaque) {
+    FakeQueue *queue=opaque;
+    pthread_mutex_lock(&queue->mutex); queue->running=NO; queue->stuck=NO; queue->pauses++; pthread_mutex_unlock(&queue->mutex);
+    return noErr;
+}
+static double YTFakeClock(void *opaque) {
+    FakeQueue *queue=opaque;
+    pthread_mutex_lock(&queue->mutex); double clock=queue->consumed; pthread_mutex_unlock(&queue->mutex);
+    return clock;
+}
 static void YTFakeDrain(void *opaque) {
     FakeQueue *queue=opaque;
     pthread_mutex_lock(&queue->mutex); queue->draining=YES; pthread_mutex_unlock(&queue->mutex);
@@ -57,9 +69,9 @@ static void YTFakeSetUp(YTAudio *audio, FakeQueue *queue, volatile BOOL *stop, v
     audio->source=[[YTMediaSource alloc] initWithURL:[NSURL URLWithString:@"https://movie.example/combined.mp4"]
         length:[Movie length] userAgent:@"fixture"];
     assert(YTAudioOpen(audio) == noErr);
-    audio->sink=(YTAudioSink){queue,YTFakeEnqueue,YTFakeRunning,YTFakeStart,YTFakeDrain};
+    audio->sink=(YTAudioSink){queue,YTFakeEnqueue,YTFakeRunning,YTFakeStart,YTFakeDrain,YTFakePause,YTFakeClock};
     for (unsigned i=0;i<YT_AUDIO_BUFFERS;i++) {
-        AudioQueueBuffer initial={.mAudioDataBytesCapacity=32768,.mAudioData=malloc(32768)};
+        AudioQueueBuffer initial={.mAudioDataBytesCapacity=YT_AUDIO_BUFFER_BYTES,.mAudioData=malloc(YT_AUDIO_BUFFER_BYTES)};
         audio->buffers[i]=malloc(sizeof(initial)); memcpy(audio->buffers[i],&initial,sizeof(initial));
     }
     assert(YTAudioBegin(audio) == noErr && !audio->eof);
@@ -68,7 +80,7 @@ static void YTFakeSetUp(YTAudio *audio, FakeQueue *queue, volatile BOOL *stop, v
 static BOOL YTFakeConsume(YTAudio *audio, FakeQueue *queue, double *slowest) {
     pthread_mutex_lock(&queue->mutex);
     AudioQueueBufferRef buffer=NULL;
-    if (queue->running && queue->count) {
+    if (queue->running && !queue->stuck && queue->count) {
         buffer=queue->buffers[0]; queue->consumed += queue->packets[0];
         for (unsigned i=1;i<queue->count;i++) {
             queue->buffers[i-1]=queue->buffers[i]; queue->packets[i-1]=queue->packets[i];
@@ -115,6 +127,18 @@ int main(int argc,char **argv) {
     assert(queue.starts > 1 && Requests > 8 && slowest < 0.10);
     NSLog(@"Delayed audio test passed: %llu packets consumed across %d network chunks, %u queue starts, longest callback %.4f seconds.",
         (unsigned long long)queue.consumed,Requests,queue.starts,slowest);
+    YTFakeCleanUp(&audio,&queue);
+    // A queue may report running while neither callbacks nor its clock advance.
+    Requests=0; YTFakeSetUp(&audio,&queue,&stop,&paused);
+    pthread_mutex_lock(&queue.mutex); queue.stuck=YES; pthread_mutex_unlock(&queue.mutex);
+    deadline=[NSDate timeIntervalSinceReferenceDate]+12; finished=NO;
+    while ([NSDate timeIntervalSinceReferenceDate]<deadline && !audio.failed) {
+        BOOL empty=YTFakeConsume(&audio,&queue,&slowest);
+        if (audio.eof && empty) { finished=YES; break; }
+        [NSThread sleepForTimeInterval:0.005];
+    }
+    assert(finished && !audio.failed && queue.consumed == expected && queue.pauses > 0 && queue.starts > 1);
+    NSLog(@"Running-but-stuck queue recovery passed: every AAC packet retained.");
     YTFakeCleanUp(&audio,&queue);
     // Cancel while the producer is fetching, then join before releasing its file.
     Requests=0; YTFakeSetUp(&audio,&queue,&stop,&paused);

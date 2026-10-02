@@ -1,6 +1,9 @@
 #!/bin/sh
 set -eu
 ROOT="$(pwd)"
+xcrun clang -std=c99 -Wall -Wextra tests/player-timing.c -o /tmp/yt-player-timing-$$
+/tmp/yt-player-timing-$$
+rm /tmp/yt-player-timing-$$
 TESTDIR="$(mktemp -d)"
 trap 'rm -rf "$TESTDIR"' EXIT
 # Build the same FFmpeg revision as the phone app, for the runner's CPU.
@@ -26,3 +29,10 @@ xcrun clang -fno-objc-arc -Wno-deprecated-declarations -I. -I"$TESTDIR/decoder" 
     "$TESTDIR/decoder/libswscale/libswscale.a" "$TESTDIR/decoder/libavutil/libavutil.a" \
     -lm -o "$TESTDIR/audio-pump-test"
 "$TESTDIR/audio-pump-test" tests/fixtures/audio-pump-main-aac.mp4
+
+xcrun clang -fno-objc-arc -Wno-deprecated-declarations -I. -I"$TESTDIR/decoder" \
+    -framework Foundation -framework AudioToolbox YTMediaSource.m YTAudioFile.m YTVideoDecoder.c tests/video-catchup.m \
+    "$TESTDIR/decoder/libavformat/libavformat.a" "$TESTDIR/decoder/libavcodec/libavcodec.a" \
+    "$TESTDIR/decoder/libswscale/libswscale.a" "$TESTDIR/decoder/libavutil/libavutil.a" \
+    -lm -o "$TESTDIR/video-catchup-test"
+"$TESTDIR/video-catchup-test" tests/fixtures/audio-pump-main-aac.mp4

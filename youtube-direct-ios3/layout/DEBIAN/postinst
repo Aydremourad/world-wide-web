@@ -1,0 +1,13 @@
+#!/bin/sh
+set -e
+# Use the exact stock artwork already installed on this iOS 3 device.
+APP=/Applications/YouTubeDirect.app
+for STOCK_ICON in /Applications/YouTube.app/icon.png /Applications/YouTube.app/Icon.png; do
+    if [ -f "$STOCK_ICON" ]; then
+        cp "$STOCK_ICON" "$APP/icon.png"
+        chmod 0644 "$APP/icon.png"
+        break
+    fi
+done
+if command -v uicache >/dev/null 2>&1; then uicache || true; fi
+exit 0

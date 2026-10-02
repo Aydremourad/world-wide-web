@@ -6,7 +6,7 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
-    self.title = @"YouTube Direct";
+    self.title = @"YouTube";
     self.view.backgroundColor = [UIColor whiteColor];
 
     CGRect bounds = self.view.bounds;
@@ -30,7 +30,7 @@
     _statusLabel.textAlignment = UITextAlignmentCenter;
     _statusLabel.numberOfLines = 4;
     _statusLabel.font = [UIFont systemFontOfSize:14];
-    _statusLabel.text = @"YouTube for iPhone OS 3.\nPlayback over Wi-Fi.\nSearch above or paste a YouTube link.";
+    _statusLabel.hidden = YES;
     _statusLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [self.view addSubview:_statusLabel];
 
@@ -44,16 +44,16 @@
 - (void)setBusy:(BOOL)busy text:(NSString *)text {
     if (busy) [_spinner startAnimating];
     else [_spinner stopAnimating];
-    _statusLabel.hidden = NO;
+    _statusLabel.hidden = ![text length];
     _statusLabel.text = text;
     _tableView.hidden = busy;
     _searchBar.userInteractionEnabled = !busy;
 }
 
 - (void)showError:(NSString *)message {
-    [self setBusy:NO text:@"Search YouTube or paste a video URL."];
+    [self setBusy:NO text:nil];
     _tableView.hidden = NO;
-    UIAlertView *alert = [[[UIAlertView alloc] initWithTitle:@"YouTube Direct"
+    UIAlertView *alert = [[[UIAlertView alloc] initWithTitle:@"YouTube"
                                                     message:(message ? message : @"Unknown error")
                                                    delegate:nil
                                           cancelButtonTitle:@"OK"

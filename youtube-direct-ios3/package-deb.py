@@ -17,7 +17,7 @@ def archive(directory, paths):
             info.uid = info.gid = 0
             info.uname = info.gname = "root"
             info.mtime = 0
-            info.mode = 0o755 if path.is_dir() or path.name == "YouTubeDirect" else 0o644
+            info.mode = 0o755 if path.is_dir() or path.name in ("YouTubeDirect", "postinst", "postrm", "preinst", "prerm") else 0o644
             if path.is_file():
                 with path.open("rb") as data:
                     tar.addfile(info, data)

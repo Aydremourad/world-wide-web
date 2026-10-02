@@ -2,6 +2,7 @@
 #import "YTAudioFile.h"
 #import "YTMediaSource.h"
 #include <stdlib.h>
+#include <string.h>
 #include <sys/time.h>
 
 static BOOL YTAudioStopped(YTAudio *audio) {
@@ -23,17 +24,35 @@ void YTAudioBufferReturned(void *opaque, AudioQueueRef queue, AudioQueueBufferRe
     }
     pthread_mutex_unlock(&audio->mutex);
 }
+static double YTAudioWallTime(void) {
+    struct timeval now; gettimeofday(&now, NULL);
+    return now.tv_sec + now.tv_usec / 1000000.0;
+}
 static void YTAudioRecover(YTAudio *audio) {
-    if (!audio->started || YTAudioStopped(audio) ||
-        (audio->paused && *audio->paused)) return;
+    if (!audio->started || YTAudioStopped(audio)) return;
+    double now = YTAudioWallTime();
+    if (audio->paused && *audio->paused) { audio->lastAdvance = now; return; }
+    double clock = audio->sink.clock ? audio->sink.clock(audio->sink.context) : -1;
+    if (!audio->lastAdvance || clock > audio->lastClock + 0.005) {
+        audio->lastClock = clock; audio->lastAdvance = now; audio->stalledRestarts = 0;
+    }
     pthread_mutex_lock(&audio->mutex);
     unsigned pending = audio->pending;
     pthread_mutex_unlock(&audio->mutex);
     if (!pending || (pending < 3 && !audio->eof)) return;
-    if (audio->starved || !audio->sink.running(audio->sink.context)) {
-        OSStatus status = audio->sink.start(audio->sink.context);
-        if (status != noErr) { audio->error = status; audio->failed = YES; }
-        else audio->starved = NO;
+    BOOL stuck = clock >= 0 && now - audio->lastAdvance > 2.0;
+    if (audio->starved || !audio->sink.running(audio->sink.context) || stuck) {
+        // Start alone can be a no-op on an old queue that still reports running.
+        // Pause preserves queued packets; Reset would discard them.
+        OSStatus status = audio->sink.pause ? audio->sink.pause(audio->sink.context) : noErr;
+        if (status == noErr) status = audio->sink.start(audio->sink.context);
+        if (status != noErr || (stuck && ++audio->stalledRestarts > 3)) {
+            audio->error = status != noErr ? status : kAudioFileUnspecifiedError;
+            audio->failed = YES;
+        } else {
+            audio->starved = NO; audio->lastAdvance = now; audio->lastClock = clock;
+            if (audio->eof) audio->sink.drain(audio->sink.context);
+        }
     }
 }
 static OSStatus YTProduceAudio(YTAudio *audio, unsigned slot) {
@@ -64,10 +83,12 @@ static OSStatus YTProduceAudio(YTAudio *audio, unsigned slot) {
 static void *YTAudioProducer(void *opaque) {
     YTAudio *audio = opaque;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    while (!YTAudioStopped(audio) && !audio->eof && !audio->failed) {
+    [NSThread setThreadPriority:0.75];
+    while (!YTAudioStopped(audio) && !audio->failed) {
         pthread_mutex_lock(&audio->mutex);
+        if (audio->eof && !audio->pending) { pthread_mutex_unlock(&audio->mutex); break; }
         int slot = -1;
-        for (unsigned i = 0; i < YT_AUDIO_BUFFERS; i++)
+        for (unsigned i = 0; !audio->eof && i < YT_AUDIO_BUFFERS; i++)
             if (audio->available[i]) { slot = (int)i; audio->available[i] = NO; break; }
         if (slot < 0) {
             struct timeval now; gettimeofday(&now, NULL);
@@ -76,7 +97,7 @@ static void *YTAudioProducer(void *opaque) {
             pthread_cond_timedwait(&audio->ready, &audio->mutex, &deadline);
         }
         pthread_mutex_unlock(&audio->mutex);
-        if (slot < 0) continue;
+        if (slot < 0) { YTAudioRecover(audio); continue; }
         NSAutoreleasePool *chunkPool = [[NSAutoreleasePool alloc] init];
         OSStatus status = YTProduceAudio(audio, (unsigned)slot);
         if (status != noErr && !YTAudioStopped(audio)) { audio->error = status; audio->failed = YES; }
@@ -100,9 +121,9 @@ OSStatus YTAudioOpen(YTAudio *audio) {
         return kAudioFileUnsupportedDataFormatError;
     UInt32 maximum = 0; size = sizeof(maximum);
     result = AudioFileGetProperty(audio->file, kAudioFilePropertyPacketSizeUpperBound, &size, &maximum);
-    if (result != noErr || !maximum || maximum > 32768) return kAudioFileUnspecifiedError;
-    audio->packetsPerBuffer = 32768 / maximum;
-    if (audio->packetsPerBuffer > 48) audio->packetsPerBuffer = 48;
+    if (result != noErr || !maximum || maximum > YT_AUDIO_BUFFER_BYTES) return kAudioFileUnspecifiedError;
+    audio->packetsPerBuffer = YT_AUDIO_BUFFER_BYTES / maximum;
+    if (audio->packetsPerBuffer > 64) audio->packetsPerBuffer = 64;
     audio->descriptions = calloc(audio->packetsPerBuffer, sizeof(AudioStreamPacketDescription));
     return audio->descriptions ? noErr : kAudioFileUnspecifiedError;
 }
@@ -127,6 +148,15 @@ static BOOL YTRunning(void *context) {
 }
 static OSStatus YTStart(void *context) { return AudioQueueStart((AudioQueueRef)context, NULL); }
 static void YTDrain(void *context) { AudioQueueStop((AudioQueueRef)context, false); }
+static OSStatus YTPause(void *context) { return AudioQueuePause((AudioQueueRef)context); }
+static double YTClock(void *context) {
+    AudioTimeStamp time; memset(&time, 0, sizeof(time));
+    Boolean changed = false;
+    if (AudioQueueGetCurrentTime((AudioQueueRef)context, NULL, &time, &changed) != noErr ||
+        !(time.mFlags & kAudioTimeStampSampleTimeValid)) return -1;
+    // Sample units suffice for detecting progress; sample rate is constant.
+    return time.mSampleTime;
+}
 OSStatus YTPrepareAudio(YTAudio *audio) {
     OSStatus result = YTAudioOpen(audio);
     if (result != noErr) return result;
@@ -135,6 +165,7 @@ OSStatus YTPrepareAudio(YTAudio *audio) {
     audio->sink.context = audio->queue;
     audio->sink.enqueue = YTEnqueue; audio->sink.running = YTRunning;
     audio->sink.start = YTStart; audio->sink.drain = YTDrain;
+    audio->sink.pause = YTPause; audio->sink.clock = YTClock;
     UInt32 size = 0;
     if (AudioFileGetPropertyInfo(audio->file, kAudioFilePropertyMagicCookieData, &size, NULL) == noErr && size) {
         void *cookie = malloc(size);
@@ -145,7 +176,7 @@ OSStatus YTPrepareAudio(YTAudio *audio) {
         if (result != noErr) return result;
     }
     for (unsigned i = 0; i < YT_AUDIO_BUFFERS; i++) {
-        result = AudioQueueAllocateBuffer(audio->queue, 32768, &audio->buffers[i]);
+        result = AudioQueueAllocateBuffer(audio->queue, YT_AUDIO_BUFFER_BYTES, &audio->buffers[i]);
         if (result != noErr) return result;
     }
     return YTAudioBegin(audio);
