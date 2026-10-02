@@ -4,7 +4,7 @@
 @interface YTSoftwarePlayer : UIViewController {
     NSDictionary *_streams;
     YTVideoSurface *_surface;
-    UILabel *_message, *_elapsedLabel, *_durationLabel;
+    UILabel *_message, *_elapsedLabel, *_durationLabel, *_qualityLabel;
     UIActivityIndicatorView *_spinner;
     UIToolbar *_topBar, *_transportBar;
     UIBarButtonItem *_playItem, *_fitItem, *_backItem, *_forwardItem;
@@ -19,8 +19,10 @@
     unsigned _seekSerial;
     AudioQueueRef _outputQueue;
     void *_audioPump;
-    double _duration, _sampleRate, _lastClock, _clockOffset;
-    NSTimeInterval _lastControlTouch;
+    double _duration, _sampleRate, _lastClock, _clockOffset, _debugFPS;
+    NSTimeInterval _lastControlTouch, _debugFPSAt;
+    unsigned _debugFrames, _debugLastFrames;
+    int _qualityHeight;
     BOOL _controlsHidden, _oldStatusHidden, _finished, _scrubbing, _wasPaused;
     BOOL _seekPending, _frameScheduled;
     volatile BOOL _stop, _paused, _sessionStop;

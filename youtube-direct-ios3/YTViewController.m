@@ -47,7 +47,8 @@
 }
 
 - (void)showBuildInfo {
-    NSString *version=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
+    NSString *version=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"YTBuildLabel"];
+    if(![version length]) version=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
     NSString *details=[NSString stringWithContentsOfFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"YouTube-playback.txt"] encoding:NSUTF8StringEncoding error:NULL];
     NSString *message=[NSString stringWithFormat:@"Version %@\n\n%@",version,details ? details : @"No video opened yet."];
     UIAlertView *alert=[[[UIAlertView alloc] initWithTitle:@"YouTube" message:message delegate:nil cancelButtonTitle:@"OK" otherButtonTitles:nil] autorelease];
@@ -166,9 +167,12 @@
         }
     }
     if(streams) {
+        [streams setObject:videoID forKey:@"videoID"];
         NSDictionary *info=[streams objectForKey:@"nativeInfo"];
         NSString *route=[[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue] ? @"Apple player" : @"Software player";
-        NSString *diagnostic=[NSString stringWithFormat:@"Player: %@\nHeight: %@\nNative probe: %@\n",route,[streams objectForKey:@"height"],info ? info : @"separate tracks"];
+        NSString *diagnostic=[NSString stringWithFormat:@"Build: 1.0.0-debug1\nPlayer: %@\nVideo: itag %@, %@p, source %@ fps\nNative probe: %@\n",
+            route,[streams objectForKey:@"videoItag"],[streams objectForKey:@"height"],[streams objectForKey:@"fps"],
+            info ? info : @"separate tracks"];
         [diagnostic writeToFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"YouTube-playback.txt"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
     }
     NSDictionary *payload = [NSDictionary dictionaryWithObjectsAndKeys:
@@ -198,14 +202,40 @@
 }
 - (void)playSoftwareStreams:(NSDictionary *)streams {
     YTSoftwarePlayer *player = [[YTSoftwarePlayer alloc] initWithStreams:streams];
-    [self presentModalViewController:player animated:YES];
+    [[UIApplication sharedApplication] setStatusBarHidden:YES animated:NO];
+    player.wantsFullScreenLayout=YES;
+    player.modalPresentationStyle=UIModalPresentationFullScreen;
+    [self presentModalViewController:player animated:NO];
     [player release];
+}
+- (void)nativeFallbackThread:(NSDictionary *)payload {
+    NSAutoreleasePool *pool=[[NSAutoreleasePool alloc] init];
+    NSString *videoID=[payload objectForKey:@"videoID"];
+    NSDictionary *lower=[YTYouTube lowResolutionStreamsForID:videoID];
+    NSMutableDictionary *chosen=nil;
+    if(lower) {
+        chosen=[[lower mutableCopy] autorelease];
+        [chosen setObject:videoID forKey:@"videoID"];
+    } else chosen=[payload objectForKey:@"original"];
+    [self performSelectorOnMainThread:@selector(nativeFallbackFinished:) withObject:chosen waitUntilDone:YES];
+    [pool release];
+}
+- (void)nativeFallbackFinished:(NSDictionary *)streams {
+    [self setBusy:NO text:nil];
+    [self playSoftwareStreams:streams];
 }
 
 - (void)nativePlayer:(YTNativePlayer *)player finishedWithError:(BOOL)failed {
     NSDictionary *streams=[[player streams] retain];
     [_nativePlayer release]; _nativePlayer=nil;
-    if(failed) [self performSelector:@selector(playSoftwareStreams:) withObject:streams afterDelay:0.4];
+    if(failed) {
+        NSString *videoID=[streams objectForKey:@"videoID"];
+        if([videoID length]) {
+            [self setBusy:YES text:@"Apple playback failed. Getting the 144p stream..."];
+            NSDictionary *payload=[NSDictionary dictionaryWithObjectsAndKeys:videoID,@"videoID",streams,@"original",nil];
+            [NSThread detachNewThreadSelector:@selector(nativeFallbackThread:) toTarget:self withObject:payload];
+        } else [self playSoftwareStreams:streams];
+    }
     [streams release];
 }
 - (void)dealloc {

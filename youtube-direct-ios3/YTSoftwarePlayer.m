@@ -30,6 +30,7 @@ typedef struct {
     BOOL audioStarted;
     BOOL queuePaused;
     BOOL bufferingShown;
+    BOOL droppingNonRef;
     unsigned serial;
     double startTime;
     BOOL previewShown;
@@ -162,6 +163,9 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
 @implementation YTSoftwarePlayer
 - (id)initWithStreams:(NSDictionary *)streams {
     if ((self = [super init])) {
+        _oldStatusHidden = [UIApplication sharedApplication].statusBarHidden;
+        self.wantsFullScreenLayout = YES;
+        self.modalPresentationStyle = UIModalPresentationFullScreen;
         _streams = [streams retain]; _seekCondition=[[NSCondition alloc] init];
         _videoCache=[[_streams objectForKey:@"videoSource"] retain];
         _audioCache=[[_streams objectForKey:@"audioSource"] retain];
@@ -176,8 +180,8 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
 }
 - (void)viewDidLoad {
     [super viewDidLoad];
-    _oldStatusHidden = [UIApplication sharedApplication].statusBarHidden;
     [[UIApplication sharedApplication] setStatusBarHidden:YES animated:NO];
+    self.wantsFullScreenLayout = YES;
     AudioSessionInitialize(NULL, NULL, NULL, NULL);
     UInt32 category = kAudioSessionCategory_MediaPlayback;
     AudioSessionSetProperty(kAudioSessionProperty_AudioCategory, sizeof(category), &category);
@@ -198,13 +202,16 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     UIBarButtonItem *done = [[[UIBarButtonItem alloc] initWithTitle:@"Done" style:UIBarButtonItemStyleDone target:self action:@selector(close)] autorelease];
     UIBarButtonItem *space = [[[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemFlexibleSpace target:nil action:nil] autorelease];
     _fitItem = [[UIBarButtonItem alloc] initWithTitle:@"Fill" style:UIBarButtonItemStyleBordered target:self action:@selector(toggleFit)];
-    UILabel *quality=[[[UILabel alloc] initWithFrame:CGRectMake(0,0,110,30)] autorelease];
-    quality.backgroundColor=[UIColor clearColor]; quality.textColor=[UIColor whiteColor];
-    quality.textAlignment=UITextAlignmentCenter; quality.font=[UIFont boldSystemFontOfSize:14];
-    int height=[[_streams objectForKey:@"height"] intValue];
-    if(!height) height=[[[_streams objectForKey:@"nativeInfo"] objectForKey:@"height"] intValue];
-    quality.text=height>0 ? [NSString stringWithFormat:@"%dp",height] : @"YouTube";
-    UIBarButtonItem *qualityItem=[[[UIBarButtonItem alloc] initWithCustomView:quality] autorelease];
+    _qualityLabel=[[UILabel alloc] initWithFrame:CGRectMake(0,0,125,30)];
+    _qualityLabel.backgroundColor=[UIColor clearColor]; _qualityLabel.textColor=[UIColor whiteColor];
+    _qualityLabel.textAlignment=UITextAlignmentCenter; _qualityLabel.font=[UIFont boldSystemFontOfSize:13];
+    _qualityHeight=[[_streams objectForKey:@"height"] intValue];
+    if(!_qualityHeight) _qualityHeight=[[[_streams objectForKey:@"nativeInfo"] objectForKey:@"height"] intValue];
+    NSInteger sourceFPS=[[_streams objectForKey:@"fps"] integerValue];
+    _qualityLabel.text=_qualityHeight>0 ?
+        [NSString stringWithFormat:@"%dp%@",_qualityHeight,sourceFPS>0 ? [NSString stringWithFormat:@" • %ld fps source",(long)sourceFPS] : @""] :
+        @"YouTube Debug";
+    UIBarButtonItem *qualityItem=[[[UIBarButtonItem alloc] initWithCustomView:_qualityLabel] autorelease];
     [_topBar setItems:[NSArray arrayWithObjects:done, space, qualityItem, space, _fitItem, nil]];
     [self.view addSubview:_topBar];
     _bottomControls = [[UIView alloc] initWithFrame:CGRectMake(0, bounds.size.height-100, bounds.size.width, 100)];
@@ -251,14 +258,22 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     _message.numberOfLines=3; _message.text=@"Loading..."; [self.view addSubview:_message];
     [self layoutPlayerChrome];
     _lastControlTouch=[NSDate timeIntervalSinceReferenceDate];
+    _debugFPSAt=_lastControlTouch;
     _controlsTimer=[[NSTimer scheduledTimerWithTimeInterval:0.25 target:self selector:@selector(controlsTick:) userInfo:nil repeats:YES] retain];
     [self retain];
     [NSThread detachNewThreadSelector:@selector(playThread:) toTarget:self withObject:nil];
 }
 - (BOOL)shouldAutorotateToInterfaceOrientation:(UIInterfaceOrientation)orientation { return YES; }
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [[UIApplication sharedApplication] setStatusBarHidden:YES animated:NO];
+    self.wantsFullScreenLayout=YES;
+    [self layoutPlayerChrome];
+}
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
     [self layoutPlayerChrome];
+    [self performSelector:@selector(layoutPlayerChrome) withObject:nil afterDelay:0.0];
 }
 - (void)willAnimateRotationToInterfaceOrientation:(UIInterfaceOrientation)orientation duration:(NSTimeInterval)duration {
     [self layoutPlayerChrome];
@@ -361,13 +376,21 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
 - (void)detachAudioQueue { _outputQueue=NULL; _audioPump=NULL; }
 - (void)controlsTick:(NSTimer *)timer {
     if (_stop) return;
+    NSTimeInterval now=[NSDate timeIntervalSinceReferenceDate];
+    if(now-_debugFPSAt>=1.0) {
+        unsigned frames=_debugFrames-_debugLastFrames;
+        double interval=now-_debugFPSAt;
+        _debugFPS=interval>0 ? frames/interval : 0;
+        _debugLastFrames=_debugFrames; _debugFPSAt=now;
+        if(_qualityHeight>0) _qualityLabel.text=[NSString stringWithFormat:@"%dp • %.1f fps",_qualityHeight,_debugFPS];
+    }
     if (_audioPump && !_scrubbing) {
         double seconds=YTAudioMediaTime((YTAudio *)_audioPump);
         _elapsedLabel.text=[self timeString:seconds];
         _progress.value=seconds;
         _durationLabel.text=[@"-" stringByAppendingString:[self timeString:fmax(0,_duration-seconds)]];
     }
-    if (!_paused && !_finished && !_scrubbing && _message.hidden && [NSDate timeIntervalSinceReferenceDate]-_lastControlTouch > 5)
+    if (!_paused && !_finished && !_scrubbing && _message.hidden && now-_lastControlTouch > 5)
         [self setControlsHidden:YES];
 }
 - (void)close {
@@ -376,12 +399,12 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     [_seekCondition lock]; _sessionStop=YES;
     [_videoSource cancel]; [_audioSource cancel]; [_pendingFrame release]; _pendingFrame=nil;
     [_seekCondition signal]; [_seekCondition unlock];
-    [[UIApplication sharedApplication] setStatusBarHidden:_oldStatusHidden animated:YES];
-    [self dismissModalViewControllerAnimated:YES];
+    [self dismissModalViewControllerAnimated:NO];
+    [[UIApplication sharedApplication] setStatusBarHidden:_oldStatusHidden animated:NO];
 }
 - (void)presentFrame:(NSDictionary *)frame {
     if (_stop || _sessionStop || [[frame objectForKey:@"serial"] unsignedIntValue]!=_seekSerial) return;
-    _message.hidden=YES; [_spinner stopAnimating];
+    _message.hidden=YES; [_spinner stopAnimating]; _debugFrames++;
     [_surface displayRGB565:[frame objectForKey:@"pixels"] width:[[frame objectForKey:@"width"] intValue] height:[[frame objectForKey:@"height"] intValue]];
 }
 - (void)queueFrame:(NSDictionary *)frame {
@@ -477,9 +500,11 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     if(YTReadVideoMetadata(format)<0) { failure=@"Could not read the video format."; goto finished; }
     int videoStream = -1;
     for (unsigned int i = 0; i < format->nb_streams; i++) {
-        if (format->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO) { videoStream = i; break; }
+        if (format->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO && videoStream < 0) videoStream = i;
     }
     if (videoStream < 0) { failure = @"The response did not contain a video track."; goto finished; }
+    for (unsigned int i = 0; i < format->nb_streams; i++)
+        if ((int)i != videoStream) format->streams[i]->discard = AVDISCARD_ALL;
     codec = format->streams[videoStream]->codec;
     if (YTOpenH264Decoder(codec) < 0) {
         failure = [NSString stringWithFormat:@"Could not start video (%dx%d).", codec->width, codec->height];
@@ -513,6 +538,13 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
             int64_t stamp=packet.pts!=AV_NOPTS_VALUE ? packet.pts : packet.dts;
             double now=[NSDate timeIntervalSinceReferenceDate];
             double audioTime=YTPlaybackClock(&playback);
+            if(playback.audioStarted && !_paused && stamp!=AV_NOPTS_VALUE && codec->codec_id==AV_CODEC_ID_H264 &&
+               codec->width*codec->height<=38400) {
+                double packetTime=stamp*av_q2d(format->streams[videoStream]->time_base)-playback.firstPTS;
+                double behind=audioTime-packetTime;
+                playback.droppingNonRef=YTShouldDropNonRef(playback.droppingNonRef,behind);
+                codec->skip_frame=playback.droppingNonRef ? AVDISCARD_NONREF : AVDISCARD_DEFAULT;
+            }
             if(playback.audioStarted && !_paused && stamp!=AV_NOPTS_VALUE &&
                 YTNeedsVideoResync(stamp*av_q2d(format->streams[videoStream]->time_base)-playback.firstPTS,
                     audioTime,now,playback.lastResync)) {
@@ -544,7 +576,6 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
 
         }
         av_free_packet(&packet);
-        sched_yield();
         if (failure) break;
     }
     if (!_sessionStop && !failure && !audio.failed && readResult == AVERROR_EOF) {
@@ -590,7 +621,7 @@ finished:
 - (void)dealloc {
     [_controlsTimer invalidate]; [_controlsTimer release];
     [_streams release]; [_surface release]; [_message release]; [_spinner release];
-    [_elapsedLabel release]; [_durationLabel release]; [_topBar release]; [_transportBar release];
+    [_elapsedLabel release]; [_durationLabel release]; [_qualityLabel release]; [_topBar release]; [_transportBar release];
     [_playItem release]; [_fitItem release]; [_backItem release]; [_forwardItem release];
     [_bottomControls release]; [_progress release]; [_volume release];
     [_videoCache release]; [_audioCache release]; [_pendingFrame release]; [_seekCondition release];

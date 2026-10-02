@@ -321,7 +321,10 @@ static NSInteger YTFormatRank(NSString *format, BOOL video) {
         if (width > 0 && height > 0) {
             if (width > 384 || height > 384 || width * height > 38400) return -1;
         } else if (itag != 597 && itag != 160) return -1;
-        return itag == 597 ? 0 : itag == 160 ? 1 : 2;
+        NSInteger fps=YTJSONIntForKey(format, @"fps");
+        NSInteger rank=itag == 160 ? 0 : itag == 597 ? 20 : 5;
+        if(fps>0 && fps<20) rank+=20;
+        return rank;
     }
     if ([mime length] && ([mime rangeOfString:@"audio/mp4"].location == NSNotFound ||
                          [mime rangeOfString:@"mp4a.40.2"].location == NSNotFound)) return -1;
@@ -525,12 +528,16 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
             YTPlayerDiagnostic(player, formats)];
         return nil;
     }
+    NSInteger sourceFPS=YTJSONIntForKey(video,@"fps"); if(sourceFPS<0) sourceFPS=0;
+    NSInteger videoItag=YTJSONIntForKey(video,@"itag"); if(videoItag<0) videoItag=0;
     return [NSDictionary dictionaryWithObjectsAndKeys:
         YTFormatURL(video), @"videoURL", YTFormatURL(audio), @"audioURL",
         [NSNumber numberWithLongLong:YTFormatLength(video)], @"videoLength",
         [NSNumber numberWithLongLong:YTFormatLength(audio)], @"audioLength",
         [NSNumber numberWithBool:combined], @"combined",
         [NSNumber numberWithInteger:YTJSONIntForKey(video,@"height")], @"height",
+        [NSNumber numberWithInteger:sourceFPS], @"fps",
+        [NSNumber numberWithInteger:videoItag], @"videoItag",
         userAgent, @"userAgent", nil];
 }
 
