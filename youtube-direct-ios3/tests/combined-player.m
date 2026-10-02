@@ -60,6 +60,12 @@ int main(int argc, char **argv) {
     [NSURLProtocol registerClass:[YTMovieProtocol class]];
     NSURL *url=[NSURL URLWithString:@"https://movie.example/combined.mp4"];
     YTMediaSource *audio=[[YTMediaSource alloc] initWithURL:url length:[Movie length] userAgent:@"fixture"];
+    YTMediaSource *sibling=[[YTMediaSource alloc] initWithURL:url length:[Movie length] userAgent:@"fixture"];
+    [sibling shareCacheWithSource:audio];
+    unsigned char peek[12];
+    assert([audio readAtOffset:0 into:peek count:12]==12); int before=Requests;
+    assert([sibling readAtOffset:0 into:peek count:12]==12 && Requests==before);
+    [sibling release];
     AudioFileID file=NULL;
     OSStatus status=YTOpenAudioFile(audio, &file);
     if (status) NSLog(@"Native combined MP4 audio open failed: %ld", (long)status);
@@ -79,8 +85,9 @@ int main(int argc, char **argv) {
         assert(byteCount > 0); totalPackets += packets; packet += packets;
     }
     assert(totalPackets > 100);
-    AudioFileClose(file); [audio release];
+    AudioFileClose(file);
     YTMediaSource *video=[[YTMediaSource alloc] initWithURL:url length:[Movie length] userAgent:@"fixture"];
+    [video shareCacheWithSource:audio]; [audio release];
     Reader reader={video,0};
     av_register_all();
     AVFormatContext *container=avformat_alloc_context();
@@ -114,6 +121,7 @@ int main(int argc, char **argv) {
         av_free_packet(&encoded);
     }
     assert(pictures >= 20);
+    assert(Requests == 2); // Audio and video download each 64 KiB chunk once.
     assert(codec->profile == FF_PROFILE_H264_MAIN);
     YTFreeVideoImage(&image); av_frame_free(&frame); avcodec_close(codec);
     avformat_close_input(&container); av_free(io->buffer); av_free(io); [video release];

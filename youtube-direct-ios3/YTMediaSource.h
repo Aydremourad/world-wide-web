@@ -10,6 +10,7 @@
     NSInteger _rangeMode;
     NSMutableDictionary *_chunks;
     NSMutableArray *_order;
+    NSRecursiveLock *_cacheLock;
     NSString *_errorText;
     volatile BOOL _cancelled;
 }
@@ -18,4 +19,5 @@
 - (int64_t)length;
 - (NSString *)errorText;
 - (void)cancel;
+- (void)shareCacheWithSource:(YTMediaSource *)source;
 @end

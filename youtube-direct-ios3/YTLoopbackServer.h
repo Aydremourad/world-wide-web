@@ -6,6 +6,7 @@
     int64_t _length;
     NSLock *_lock;
     NSMutableDictionary *_clients;
+    YTMediaSource *_sharedSource;
     int _listener;
     unsigned short _port;
     volatile BOOL _stopped;

@@ -30,6 +30,7 @@ static BOOL YTSendText(int fd,NSString *text) {
 - (id)initWithURL:(NSURL *)url length:(int64_t)length userAgent:(NSString *)userAgent {
     if((self=[super init])) {
         _upstream=[url retain]; _length=length; _userAgent=[userAgent copy];
+        _sharedSource=[[YTMediaSource alloc] initWithURL:url length:length userAgent:userAgent];
         _lock=[[NSLock alloc] init]; _clients=[[NSMutableDictionary alloc] init]; _listener=-1;
     }
     return self;
@@ -63,6 +64,7 @@ static BOOL YTSendText(int fd,NSString *text) {
 #endif
         NSAutoreleasePool *clientPool=[[NSAutoreleasePool alloc] init];
         YTMediaSource *source=[[[YTMediaSource alloc] initWithURL:_upstream length:_length userAgent:_userAgent] autorelease];
+        [source shareCacheWithSource:_sharedSource];
         NSNumber *key=[NSNumber numberWithInt:fd];
         [_lock lock]; BOOL full=[_clients count]>=4 || _stopped;
         if(!full) [_clients setObject:source forKey:key]; [_lock unlock];
@@ -134,5 +136,5 @@ static BOOL YTSendText(int fd,NSString *text) {
     for(NSNumber *key in _clients) { [[_clients objectForKey:key] cancel]; shutdown([key intValue],SHUT_RDWR); }
     [_lock unlock];
 }
-- (void)dealloc { [self stop]; [_upstream release]; [_userAgent release]; [_errorText release]; [_lock release]; [_clients release]; [super dealloc]; }
+- (void)dealloc { [self stop]; [_upstream release]; [_userAgent release]; [_errorText release]; [_lock release]; [_clients release]; [_sharedSource release]; [super dealloc]; }
 @end

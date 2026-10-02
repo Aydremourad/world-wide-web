@@ -546,6 +546,7 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
                     length:videoLength userAgent:[client objectForKey:@"ua"]] autorelease];
                 YTMediaSource *audio = [[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"audioURL"]
                     length:audioLength userAgent:[client objectForKey:@"ua"]] autorelease];
+                if ([[streams objectForKey:@"combined"] boolValue]) [audio shareCacheWithSource:video];
                 unsigned char header[12];
                 if ([video readAtOffset:0 into:header count:12] != 12) failure = [video errorText];
                 else if ([audio readAtOffset:0 into:header count:12] != 12) failure = [audio errorText];

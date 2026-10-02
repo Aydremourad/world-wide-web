@@ -2,7 +2,7 @@
 #include <string.h>
 
 #define YT_CHUNK_BYTES (64 * 1024)
-#define YT_CACHED_CHUNKS 8
+#define YT_CACHED_CHUNKS 16
 
 @interface YTBoundedRequest : NSObject {
 @public
@@ -102,6 +102,10 @@
 }
 @end
 
+@interface YTMediaSource ()
+- (NSData *)loadChunkAt:(int64_t)start;
+@end
+
 @implementation YTMediaSource
 - (id)initWithURL:(NSURL *)url length:(int64_t)length userAgent:(NSString *)userAgent {
     if ((self = [super init])) {
@@ -110,6 +114,7 @@
         _userAgent = [userAgent copy];
         _chunks = [[NSMutableDictionary alloc] init];
         _order = [[NSMutableArray alloc] init];
+        _cacheLock = [[NSRecursiveLock alloc] init];
     }
     return self;
 }
@@ -117,7 +122,24 @@
 - (NSString *)errorText { return _errorText; }
 - (void)cancel { _cancelled = YES; }
 
+- (void)shareCacheWithSource:(YTMediaSource *)source {
+    // Attach before either reader starts. File positions and errors remain independent.
+    if (!source || source==self || ![_url isEqual:source->_url]) return;
+    [_chunks release]; _chunks=[source->_chunks retain];
+    [_order release]; _order=[source->_order retain];
+    [_cacheLock release]; _cacheLock=[source->_cacheLock retain];
+}
 - (NSData *)chunkAt:(int64_t)start {
+    while (!_cancelled) {
+        if ([_cacheLock lockBeforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]]) {
+            NSData *result=[[self loadChunkAt:start] retain];
+            [_cacheLock unlock];
+            return [result autorelease];
+        }
+    }
+    return nil;
+}
+- (NSData *)loadChunkAt:(int64_t)start {
     NSNumber *key = [NSNumber numberWithLongLong:start];
     NSData *cached = [_chunks objectForKey:key];
     if (cached) {
@@ -249,7 +271,7 @@
     return _cancelled ? -1 : copied;
 }
 - (void)dealloc {
-    [_url release]; [_userAgent release]; [_chunks release]; [_order release]; [_errorText release];
+    [_url release]; [_userAgent release]; [_chunks release]; [_order release]; [_cacheLock release]; [_errorText release];
     [super dealloc];
 }
 @end

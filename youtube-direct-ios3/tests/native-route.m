@@ -7,6 +7,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
+#include <pthread.h>
 static NSDictionary *Streams(void) {
     return [NSDictionary dictionaryWithObjectsAndKeys:[NSURL URLWithString:@"https://movie.example/combined.mp4"],@"videoURL",[NSNumber numberWithLongLong:[Movie length]],@"videoLength",@"fixture",@"userAgent",[NSNumber numberWithBool:YES],@"combined",nil];
 }
@@ -18,6 +19,12 @@ static NSData *Fetch(NSURL *url,NSString *method,NSString *range,int expected) {
     assert(!error && [(NSHTTPURLResponse *)response statusCode]==expected);
     if([method isEqualToString:@"HEAD"]) assert([response expectedContentLength]==(long long)[Movie length]);
     return data;
+}
+typedef struct { NSURL *url; NSData *bytes; } ParallelFetch;
+static void *FetchThread(void *opaque) {
+    ParallelFetch *fetch=opaque; NSAutoreleasePool *pool=[[NSAutoreleasePool alloc] init];
+    fetch->bytes=[Fetch(fetch->url,@"GET",@"bytes=300000-500000",206) retain];
+    [pool release]; return NULL;
 }
 int main(int argc,char **argv) {
     assert(argc==4); NSAutoreleasePool *pool=[[NSAutoreleasePool alloc] init];
@@ -33,8 +40,19 @@ int main(int argc,char **argv) {
     assert([server start]); NSURL *url=[server movieURL];
     assert([Fetch(url,@"HEAD",nil,200) length]==0);
     assert([Fetch(url,@"GET",@"bytes=0-1",206) isEqualToData:[Movie subdataWithRange:NSMakeRange(0,2)]]);
+    int beforeRequests=Requests;
+    assert([Fetch(url,@"GET",@"bytes=0-1",206) isEqualToData:[Movie subdataWithRange:NSMakeRange(0,2)]]);
+    assert(Requests==beforeRequests); // Apple's repeated probes reuse downloaded bytes.
     assert([Fetch(url,@"GET",@"bytes=65530-131100",206) isEqualToData:[Movie subdataWithRange:NSMakeRange(65530,65571)]]);
     assert([Fetch(url,@"GET",@"bytes=-25",206) isEqualToData:[Movie subdataWithRange:NSMakeRange([Movie length]-25,25)]]);
+    ParallelFetch first={url,nil},second={url,nil}; pthread_t a,b;
+    beforeRequests=Requests;
+    assert(pthread_create(&a,NULL,FetchThread,&first)==0 && pthread_create(&b,NULL,FetchThread,&second)==0);
+    pthread_join(a,NULL); pthread_join(b,NULL);
+    NSData *wanted=[Movie subdataWithRange:NSMakeRange(300000,200001)];
+    assert([first.bytes isEqualToData:wanted] && [second.bytes isEqualToData:wanted]);
+    assert(Requests-beforeRequests==4); // Concurrent ranges do not duplicate upstream requests.
+    [first.bytes release]; [second.bytes release];
     assert([Fetch(url,@"GET",nil,200) isEqualToData:Movie]);
     NSString *eof=[NSString stringWithFormat:@"bytes=%lu-",(unsigned long)[Movie length]];
     assert([Fetch(url,@"GET",eof,416) length]==0);
@@ -44,6 +62,6 @@ int main(int argc,char **argv) {
     assert([NSDate timeIntervalSinceReferenceDate]-before<0.5);
     [NSThread sleepForTimeInterval:0.25];
     assert(![[server errorText] length]); [server release];
-    NSLog(@"Native route passed: Baseline accepted, Main rejected, complete 36-second MP4 bridged byte-for-byte, HEAD/ranges/suffix/EOF and stop.");
+    NSLog(@"Native route passed: Baseline accepted, Main rejected, complete 36-second MP4 bridged byte-for-byte, HEAD/ranges/suffix/EOF, concurrent shared cache and stop.");
     [NSURLProtocol unregisterClass:[YTMovieProtocol class]]; [Movie release]; [pool release]; return 0;
 }

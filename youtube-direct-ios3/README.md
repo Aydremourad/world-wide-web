@@ -10,7 +10,7 @@ The phone requests YouTube's Android player response using the previous app's
 client identity. It prefers tiny H.264 format 597 or 160, plus AAC audio format
 140. When those tracks have no usable URL, it selects direct combined MP4
 format 18 instead. Both readers use bounded 64 KiB HTTP ranges; each reader
-caches at most eight chunks. MP4 metadata can be read from either end of a file.
+shares at most sixteen chunks for a combined movie. MP4 metadata can be read from either end of a file.
 
 FFmpeg's static ARMv6 decoder decodes H.264 directly. OpenGL ES 1 displays
 RGB565 frames; AudioQueue plays AAC audio. Audio is the playback clock. Late
@@ -137,3 +137,7 @@ frames, avoiding its compressed AAC queue and packet-boundary handling.
 Twelve bounded buffers provide about 4.5 seconds at stereo 44.1 kHz. The
 AAC magic cookie is applied to the converter. The screen and branding remain
 unchanged; compatible streams use Apple's native player controls.
+
+Combined audio/video readers now share a synchronized 1 MiB chunk cache. The
+loopback bridge shares this cache across native player requests too, avoiding
+duplicate downloads while retaining separate file positions and cancellation.
