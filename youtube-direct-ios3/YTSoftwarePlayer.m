@@ -2,6 +2,7 @@
 #import "YTMediaSource.h"
 #import "YTVideoSurface.h"
 #import "YTAudioFile.h"
+#import "YTAudioPump.h"
 #include "YTVideoDecoder.h"
 #import <AudioToolbox/AudioToolbox.h>
 #include <libavformat/avformat.h>
@@ -20,27 +21,13 @@ typedef struct {
 } YTVideoIO;
 
 typedef struct {
-    YTMediaSource *source;
-    AudioFileID file;
-    AudioQueueRef queue;
-    AudioStreamBasicDescription format;
-    AudioStreamPacketDescription *descriptions;
-    SInt64 packet;
-    UInt32 packetsPerBuffer;
-    volatile BOOL *stop;
-    volatile BOOL failed;
-    volatile BOOL eof;
-    volatile BOOL started;
-    OSStatus error;
-} YTAudio;
-
-typedef struct {
     YTSoftwarePlayer *controller;
     YTAudio *audio;
     volatile BOOL *stop;
     volatile BOOL *paused;
     BOOL audioStarted;
     BOOL queuePaused;
+    BOOL bufferingShown;
     NSTimeInterval wallStart;
     NSTimeInterval pauseStart;
     NSTimeInterval pauseTotal;
@@ -53,6 +40,7 @@ typedef struct {
 @interface YTSoftwarePlayer ()
 - (void)presentFrame:(NSDictionary *)frame;
 - (void)workerFinished:(NSString *)message;
+- (void)setBuffering:(NSNumber *)value;
 @end
 
 static int YTReadVideo(void *opaque, uint8_t *bytes, int count) {
@@ -80,68 +68,6 @@ static int64_t YTSeekVideo(void *opaque, int64_t offset, int whence) {
 }
 static int YTInterruptVideo(void *opaque) { return *(volatile BOOL *)opaque; }
 
-static void YTFillAudio(void *opaque, AudioQueueRef queue, AudioQueueBufferRef buffer) {
-    YTAudio *audio = opaque;
-    if (*audio->stop || audio->eof || audio->failed) return;
-    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
-    UInt32 bytes = buffer->mAudioDataBytesCapacity;
-    UInt32 packets = audio->packetsPerBuffer;
-    OSStatus result = AudioFileReadPackets(audio->file, false, &bytes,
-        audio->descriptions, audio->packet, &packets, buffer->mAudioData);
-    // iPhone OS 3 does not name eofErr in AudioFile.h; its OSStatus is -39.
-    if (result != noErr && result != (OSStatus)-39) {
-        audio->failed = YES;
-        audio->error = result;
-    } else if (packets) {
-        buffer->mAudioDataByteSize = bytes;
-        audio->packet += packets;
-        audio->error = AudioQueueEnqueueBuffer(queue, buffer, packets, audio->descriptions);
-        if (audio->error != noErr) audio->failed = YES;
-    } else {
-        audio->eof = YES;
-        // Drain the queued audio before stopping. Never wait inside this callback.
-        if (audio->started) AudioQueueStop(queue, false);
-    }
-    [pool release];
-}
-static OSStatus YTPrepareAudio(YTAudio *audio) {
-    OSStatus result = YTOpenAudioFile(audio->source, &audio->file);
-    if (result != noErr) return result;
-    UInt32 size = sizeof(audio->format);
-    result = AudioFileGetProperty(audio->file, kAudioFilePropertyDataFormat, &size, &audio->format);
-    if (result != noErr) return result;
-    if (audio->format.mFormatID != kAudioFormatMPEG4AAC || audio->format.mSampleRate <= 0)
-        return kAudioFileUnsupportedDataFormatError;
-    result = AudioQueueNewOutput(&audio->format, YTFillAudio, audio, NULL, NULL, 0, &audio->queue);
-    if (result != noErr) return result;
-    size = 0;
-    if (AudioFileGetPropertyInfo(audio->file, kAudioFilePropertyMagicCookieData, &size, NULL) == noErr && size) {
-        void *cookie = malloc(size);
-        if (!cookie) return kAudioFileUnspecifiedError;
-        result = AudioFileGetProperty(audio->file, kAudioFilePropertyMagicCookieData, &size, cookie);
-        if (result == noErr)
-            result = AudioQueueSetProperty(audio->queue, kAudioQueueProperty_MagicCookie, cookie, size);
-        free(cookie);
-        if (result != noErr) return result;
-    }
-    UInt32 maximum = 0;
-    size = sizeof(maximum);
-    result = AudioFileGetProperty(audio->file, kAudioFilePropertyPacketSizeUpperBound, &size, &maximum);
-    if (result != noErr || !maximum || maximum > 32768) return kAudioFileUnspecifiedError;
-    audio->packetsPerBuffer = 32768 / maximum;
-    if (audio->packetsPerBuffer > 48) audio->packetsPerBuffer = 48;
-    audio->descriptions = calloc(audio->packetsPerBuffer, sizeof(AudioStreamPacketDescription));
-    if (!audio->descriptions) return kAudioFileUnspecifiedError;
-    // About three seconds of AAC, rather than the entire audio track.
-    for (int i = 0; i < 3 && !*audio->stop && !audio->eof; i++) {
-        AudioQueueBufferRef buffer = NULL;
-        result = AudioQueueAllocateBuffer(audio->queue, 32768, &buffer);
-        if (result != noErr) return result;
-        YTFillAudio(audio, audio->queue, buffer);
-        if (audio->failed) return audio->error;
-    }
-    return noErr;
-}
 static BOOL YTWaitForPause(YTPlayback *playback) {
     while (*playback->paused && !*playback->stop && !playback->audio->failed) {
         if (!playback->queuePaused) {
@@ -192,6 +118,12 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     double wait = pts - YTPlaybackClock(playback);
     while (wait > 0.01 && !*playback->stop && !playback->audio->failed) {
         if (!YTWaitForPause(playback)) return NO;
+        BOOL buffering = playback->audio->starved && !playback->audio->eof;
+        if (buffering != playback->bufferingShown) {
+            playback->bufferingShown = buffering;
+            [playback->controller performSelectorOnMainThread:@selector(setBuffering:)
+                withObject:[NSNumber numberWithBool:buffering] waitUntilDone:NO];
+        }
         [NSThread sleepForTimeInterval:wait < 0.02 ? wait : 0.02];
         wait = pts - YTPlaybackClock(playback);
         // A truncated audio track must not hold the video thread forever.
@@ -265,6 +197,11 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
                      width:[[frame objectForKey:@"width"] intValue]
                     height:[[frame objectForKey:@"height"] intValue]];
 }
+- (void)setBuffering:(NSNumber *)value {
+    if (_stop) return;
+    _message.text = @"Buffering...";
+    _message.hidden = ![value boolValue];
+}
 - (void)workerFinished:(NSString *)message {
     if (!_stop) {
         _message.text = message;
@@ -289,7 +226,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     YTPlayback playback;
     memset(&io, 0, sizeof(io)); memset(&audio, 0, sizeof(audio)); memset(&playback, 0, sizeof(playback));
     io.stop = &_stop;
-    audio.stop = &_stop;
+    audio.stop = &_stop; audio.paused = &_paused;
     playback.controller = self; playback.audio = &audio;
     playback.stop = &_stop; playback.paused = &_paused;
     playback.firstPTS = NAN; playback.frameDuration = 1.0 / 15.0;
@@ -378,9 +315,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     } else if (!_stop && !failure && !audio.failed && readResult < 0) failure = @"The video stream stopped unexpectedly.";
     if (!_stop && !sawFrame && !failure) failure = @"The decoder did not produce a video frame.";
 finished:
-    if (audio.queue) { AudioQueueStop(audio.queue, true); AudioQueueDispose(audio.queue, true); }
-    if (audio.file) AudioFileClose(audio.file);
-    free(audio.descriptions);
+    YTShutdownAudio(&audio);
     YTFreeVideoImage(&playback.image);
     av_frame_free(&frame);
     if (codecOpened) avcodec_close(codec);

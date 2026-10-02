@@ -20,6 +20,10 @@ video displays are dropped while H.264 reference frames are preserved. Format
 sources to reduce decoder work. AAC is read from the combined MP4 through
 Audio File Services with automatic container detection.
 
+Audio packet reads and HTTP requests run on a background producer. The audio
+callback only returns used buffers; it never fetches data. Six buffers provide
+a bounded cushion, and the producer restarts a starved queue after refilling.
+
 The app has Done, Pause/Resume and rotation. It does not encode videos or wait
 for a complete download. Performance and sync still require a physical iPhone
 2G test. A successful build does not establish smooth playback on that CPU.
@@ -28,11 +32,11 @@ The stock YouTube player's hardware decoder cannot provide this software path.
 ## Installation
 
 The [Actions build](https://github.com/Aydremourad/world-wide-web/actions/workflows/ios3-native-player.yml)
-produces `com.aydre.youtubedirect_0.7.3_iphoneos-arm.deb` in the
+produces `com.aydre.youtubedirect_0.7.4_iphoneos-arm.deb` in the
 `YouTubeDirect-iOS3-armv6` artifact. Install with iFile, or from a phone terminal:
 
 ```sh
-dpkg -i com.aydre.youtubedirect_0.7.3_iphoneos-arm.deb
+dpkg -i com.aydre.youtubedirect_0.7.4_iphoneos-arm.deb
 killall SpringBoard
 ```
 
@@ -97,3 +101,11 @@ correct the source's byte length. A 416 with `bytes */N` can correct a stale
 length and retry within the real file bounds; reads beyond the real EOF
 return EOF. Any unrecovered 416 includes the requested offset, length and
 range method without exposing signed URLs.
+
+0.7.4 moves refills out of the AudioQueue callback. Its regression test reads
+native AAC from a 36-second combined MP4 through delayed HTTP ranges, forces
+queue underruns, checks that every packet reaches the simulated output, and
+checks cancellation while fetching. This uses native macOS Audio File Services
+and a simulated output queue; actual iPhone AudioQueue behavior and sustained
+playback still require device verification. The user confirmed initial playback
+on the physical iPhone with 0.7.3, followed by a freeze.
