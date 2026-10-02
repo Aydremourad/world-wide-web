@@ -1,6 +1,6 @@
 # Phone installer
 
-Download [YT Direct 0.7.2](https://raw.githubusercontent.com/Aydremourad/world-wide-web/youtube-native-player-ios3/phone-install/com.aydre.youtubedirect_0.7.2_iphoneos-arm.deb)
+Download [YT Direct 0.7.3](https://raw.githubusercontent.com/Aydremourad/world-wide-web/youtube-native-player-ios3/phone-install/com.aydre.youtubedirect_0.7.3_iphoneos-arm.deb)
 on the jailbroken iPhone. Close YT Direct, open the package in iFile, and
 choose Install. Reopen the app. This updates the existing YT Direct package.
 Restart SpringBoard if the app does not appear.
@@ -10,9 +10,17 @@ need to remain on. This release adds no proxy or conversion service.
 
 ## What changed
 
+0.7.3 addresses HTTP 416 during chunk loading. Previous builds sent the byte
+range in both the URL and HTTP header. The reader now uses one selector at
+a time, tries the other method after rejection, and remembers the working
+method. Content-Range totals correct stale file lengths. A 416 containing
+`bytes */N` can trigger a bounded retry or a clean EOF instead of a fatal
+network error. Remaining 416 errors include the requested byte offsets,
+known file length and method, without signed URL or IP information.
+
 The reported Android response contained a direct combined format 18 MP4 URL,
 while the separate 144p video and AAC formats were unavailable to the app.
-0.7.1 rejected that response before playback. 0.7.2 accepts the combined MP4
+0.7.1 rejected that response before playback. This build accepts the combined MP4
 when separate tracks are unavailable. It reads video and AAC audio from that
 file in bounded ranges, without downloading and converting the whole movie.
 
@@ -30,7 +38,7 @@ signatures from formats with no URL.
 ## Verified checks and limits
 
 Build and regression checks:
-https://github.com/Aydremourad/world-wide-web/actions/runs/36960281347
+https://github.com/Aydremourad/world-wide-web/actions/runs/36962041505
 
 - The resolver accepts an OK Android response with a direct format 18 URL
   and unavailable separate tracks, checks bounded media reads, and avoids
@@ -41,8 +49,8 @@ https://github.com/Aydremourad/world-wide-web/actions/runs/36960281347
   131 AAC packets and decoded/scaled 46 Main-profile H.264 frames from a
   synthetic combined MP4 using FFmpeg 2.8.22. The test used four bounded
   range requests.
-- Range boundaries, seeks, short responses, rejection of ignored ranges and
-  cancellation checks passed.
+- Exclusive range selectors, nonzero 416 fallback, corrected lengths, strict
+  EOF limits, seeks, invalid responses and cancellation checks passed.
 
 These checks do not establish playback speed, AudioQueue output or the old
 OS's container behavior on a physical iPhone 2G. Live YouTube API probes from
@@ -56,7 +64,7 @@ media URL was denied. If it mentions `AAC` or `H.264`, playback reached the
 audio reader or video decoder.
 
 SHA256:
-`f832a0c2696194bd2bd5d55814407e1965a7eb3fed31cfe36b6b09b5b0364cc2`
+`5d9499e6e7aa46a2f0cd47bffe90bde70e423900fd11fea4ee61b46ee5139512`
 
 Compiled source commit:
-`dfb2cb6ab20af2f38e4e8c13e826b8e948ebf9f9`
+`7fb6e83452d2b9d9810f0ff6dbd0205d78aae9d4`
