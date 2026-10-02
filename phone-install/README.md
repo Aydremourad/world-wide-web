@@ -1,48 +1,60 @@
 # Phone installer
 
-Download [YT Direct 0.7.4](https://raw.githubusercontent.com/Aydremourad/world-wide-web/youtube-native-player-ios3/phone-install/com.aydre.youtubedirect_0.7.4_iphoneos-arm.deb)
-on the jailbroken iPhone. Close YT Direct, open the package in iFile, and
-choose Install. Reopen the app and play the same song.
+Download [YouTube 0.8.0](https://raw.githubusercontent.com/Aydremourad/world-wide-web/youtube-native-player-ios3/phone-install/com.aydre.youtubedirect_0.8.0_iphoneos-arm.deb)
+on the jailbroken iPhone. Close the previous app, open the package in iFile,
+and choose Install. Respring once to refresh its Home Screen name and icon.
+Open YouTube and try the same video. This upgrades the existing package.
+Playback uses only the phone's Wi-Fi; no computer needs to remain on.
 
-Playback uses only the phone's Wi-Fi. No computer or conversion service
-needs to remain on.
+## Playback changes
 
-## What changed
+Late video frames no longer get discarded indefinitely. If large video
+falls more than a second behind audio, the decoder catches up at the next
+keyframe. Reordered H.264 keyframes are drained before dropping more stale
+packets. This reduces work, with a lower frame rate when decoding cannot
+keep pace. Smooth performance on the original iPhone is still unverified.
 
-0.7.3 produced actual playback on the user's iPhone 2G, but stopped after the
-initial buffered audio. 0.7.4 moves AAC packet reading and network fetching
-out of the AudioQueue callback and onto a background producer. The callback
-only returns consumed buffers. Six bounded buffers provide a cushion; the
-producer refills and restarts a starved queue. Video continues to follow the
-audio clock. Buffering is shown while the queue waits for more audio.
+AAC reads remain on the background producer. Eight 64 KiB buffers provide
+more room for network delays. A watchdog pauses and resumes the output queue
+if its clock stops with packets queued, even if IsRunning is still true.
+Repeated unsuccessful recovery reports an error instead of waiting forever.
+The playback clock handles a sample timeline restarting at zero.
 
-Closing playback cancels the producer's media request and joins it before
-releasing the audio file and output queue.
+## Appearance
 
-The format 18 fallback and the HTTP 416 range fixes remain included.
-No full download or on-phone conversion is required.
+The app name is YouTube. The explanatory text is removed. Installation copies
+the exact stock icon from /Applications/YouTube.app/icon.png (or Icon.png).
+The stock application's files are preserved. The icon copy requires the stock
+app to remain installed.
 
-## Verified checks and limits
+The full-screen player has native Play/Pause, elapsed time, duration, progress,
+volume, Fit/Fill, and controls that hide during playback and return on tap.
+The progress bar displays position; seeking is not implemented.
 
-Build and regression checks:
-https://github.com/Aydremourad/world-wide-web/actions/runs/36963498506
+## Verified checks
 
-- ARMv6 build against iPhone OS 3.1.3, legacy startup, static decoder linkage,
-  and old-dpkg-compatible gzip packaging passed.
-- Bounded range requests, HTTP 416 recovery, resolver fallback, native AAC
-  reading and Main-profile video decoding passed.
-- The delayed-chunk audio test delivered all 1,563 AAC packets across 19
-  network chunks, with nine queue starts after forced underruns. Callback
-  duration stayed below the 0.1-second test limit.
-- Cancellation during fetching and producer cleanup passed.
+Build and tests:
+https://github.com/Aydremourad/world-wide-web/actions/runs/36967336376
 
-The delayed-chunk test uses native macOS Audio File Services and a simulated
-output queue. It does not verify iPhone AudioQueue behavior or decoding speed.
-Initial physical-device playback was confirmed with 0.7.3; sustained playback
-with 0.7.4 still needs a device check. This is an experimental build.
+- ARMv6, iPhone OS 3.1.3 SDK, legacy startup, static decoder linkage and
+  old-dpkg-compatible packaging passed. The stock-icon postinst is executable.
+- Native AAC reading, Main-profile decoding, range requests, 416 recovery,
+  resolver fallback and cancellation passed.
+- Delayed audio delivered all 1,563 packets across 19 network chunks, with
+  six queue starts after underruns and responsive callbacks.
+- A simulated queue that reported running but stopped its clock and callbacks
+  recovered without losing AAC packets.
+- H.264 catch-up produced 35 pictures through 35.2 seconds while discarding
+  826 stale packets from a combined MP4.
+- Clock restart continuity and periodic display under sustained lateness passed.
+
+Audio output is simulated in the macOS tests; native Audio File Services and
+the actual decoder are used. These checks do not establish sustained device
+playback or iPhone decoding speed. The user confirmed initial playback in
+0.7.4, then reported video and audio freezes. 0.8.0 needs a physical-device check.
 
 SHA256:
-`14cf5dc796f945172455bccb183e2d2d737ce5c012ac8c0c6c8ab6377e7427dc`
+`c4ea6c6b2376dd78b5f4e5843c789ad236c4060aa6d9f7c4c99726413e5c018c`
 
 Compiled source commit:
-`601299623d5c49efdc3f0bc77d7331c4c96cd9d0`
+`40c41c4935bc74e3fd860f933985457433d764d1`
