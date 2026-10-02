@@ -22,9 +22,11 @@ fi
 ROOT="$(pwd)"
 DEPS="$ROOT/.deps"
 SRC="$DEPS/FFmpeg-2.8.22"
+GASDIR="$DEPS/gas-preprocessor"
+GASPRE="$GASDIR/gas-preprocessor.pl"
 OUT="$ROOT/layout/usr/libexec/ytdirect-ffmpeg"
 REVFILE="$ROOT/layout/usr/libexec/ytdirect-ffmpeg.rev"
-CONVERTER_REV="2"
+CONVERTER_REV="3"
 mkdir -p "$DEPS" "$ROOT/layout/usr/libexec"
 
 if [ -x "$OUT" ] && [ -f "$REVFILE" ] && [ "$(cat "$REVFILE")" = "$CONVERTER_REV" ]; then
@@ -42,6 +44,13 @@ if [ ! -d "$SRC/.git" ]; then
   rm -rf "$SRC"
   git clone --depth 1 --branch n2.8.22 https://github.com/FFmpeg/FFmpeg.git "$SRC"
 fi
+
+if [ ! -f "$GASPRE" ]; then
+  echo "Fetching gas-preprocessor for Apple ARM assembly..."
+  rm -rf "$GASDIR"
+  git clone --depth 1 https://github.com/libav/gas-preprocessor.git "$GASDIR"
+fi
+chmod +x "$GASPRE"
 
 CC_WRAP="${TMPDIR:-/tmp}/ytdirect-ffmpeg-cc.sh"
 LD_WRAP="${TMPDIR:-/tmp}/ytdirect-ffmpeg-ld.sh"
@@ -66,9 +75,10 @@ echo "Configuring static armv6 FFmpeg..."
   --enable-cross-compile \
   --target-os=darwin \
   --arch=arm \
-  --cpu=armv6 \
+  --cpu=arm1176jzf-s \
   --sysroot="$SDKROOT" \
   --cc="$CC_WRAP" \
+  --as="$GASPRE $CC_WRAP" \
   --ld="$LD_WRAP" \
   --disable-shared \
   --enable-static \
@@ -143,4 +153,4 @@ if ! xcrun otool -l "$OUT" | grep -q LC_UNIXTHREAD; then
 fi
 
 echo "$CONVERTER_REV" > "$REVFILE"
-echo "Bundled optimized static converter ready: $OUT"
+echo "Bundled optimized ARM1176 static converter ready: $OUT"
