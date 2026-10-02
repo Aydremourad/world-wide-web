@@ -46,7 +46,7 @@ LOCAL_TEST_IDS = {PLAYBACK_TEST_ID, STREAM_TEST_ID}
 PLAYBACK_TEST_ITEM = dict(videoId=PLAYBACK_TEST_ID, title='Playback test',
     author='YouTube 2G', authorId='unknown', description='A local playback test.',
     published=0, lengthSeconds=8, viewCount=0)
-VERSION = '2g-1.6'
+VERSION = '2g-1.7'
 
 
 def media_ready(vid):
@@ -90,9 +90,14 @@ def run_ytdlp(args, timeout=90):
                 '--no-playlist', '--socket-timeout', '15', '--retries', '1',
                 '--extractor-retries', '1']
     if os.environ.get('YOUTUBE_POT_ENABLED') == '1':
+        # yt-dlp's current recommendation is mweb + a GVS PO-token provider.
+        # Running this on the user's residential Mac also avoids cloud-host IP
+        # reputation/bot checks that PO tokens do not solve by themselves.
         base_cmd += [
-            '--extractor-args', 'youtube:player_client=default,mweb,web_embedded',
+            '--extractor-args', 'youtube:player_client=mweb',
             '--extractor-args', 'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416',
+            '--js-runtimes', 'node',
+            '--js-runtimes', 'deno',
         ]
 
     configured = os.environ.get('YOUTUBE_COOKIES_FILE')
@@ -247,7 +252,7 @@ def diagnostics():
     # Only readiness flags and versions; no tokens, file contents, or account data.
     return jsonify(version=VERSION, downloader=version('yt-dlp'),
                    token_provider_ready=provider, cookies_loaded=secret.is_file(),
-                   playback_mode='mp4', youtube_clients='default,mweb,web_embedded',
+                   playback_mode='mp4', youtube_clients='mweb',
                    cookie_fallback='anonymous', playback_wait_seconds=120,
                    progressive_fast_path=False)
 
@@ -361,12 +366,16 @@ def thumbnail(vid):
 
 
 def ffmpeg_args(source, destination):
+    # Conservative original-iPhone H.264: Baseline, one reference frame,
+    # no B-frames, no CABAC, no 8x8 transform or weighted prediction.
     return ['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', str(source),
             '-map', '0:v:0', '-map', '0:a:0?', '-vf',
             'scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2,setsar=1',
-            '-r', '24', '-c:v', 'libx264', '-threads', '1', '-preset', 'ultrafast',
+            '-r', '24', '-c:v', 'libx264', '-threads', '0', '-preset', 'veryfast',
             '-profile:v', 'baseline', '-level:v', '3.0', '-pix_fmt', 'yuv420p',
-            '-b:v', '400k', '-maxrate', '600k', '-bufsize', '1200k',
+            '-refs', '1', '-bf', '0', '-coder', '0',
+            '-x264-params', 'cabac=0:ref=1:bframes=0:8x8dct=0:weightp=0',
+            '-b:v', '400k', '-maxrate', '500k', '-bufsize', '1000k',
             '-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '80k', '-ar', '44100', '-ac', '2',
             '-movflags', '+faststart', str(destination)]
 
