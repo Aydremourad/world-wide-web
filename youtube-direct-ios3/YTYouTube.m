@@ -336,6 +336,26 @@ static NSString *YTChooseFormat(NSArray *formats, BOOL video) {
     }
     return best;
 }
+static NSString *YTChooseCombinedMP4(NSArray *formats) {
+    for (NSString *format in formats) {
+        if (YTJSONIntForKey(format, @"itag") != 18 || !YTFormatURL(format)) continue;
+        NSString *mime = YTJSONStringForKey(format, @"mimeType", 0);
+        if ([mime length] && ([mime rangeOfString:@"video/mp4"].location == NSNotFound ||
+                             [mime rangeOfString:@"avc1"].location == NSNotFound ||
+                             [mime rangeOfString:@"mp4a.40.2"].location == NSNotFound)) continue;
+        NSInteger width = YTJSONIntForKey(format, @"width"), height = YTJSONIntForKey(format, @"height");
+        if (width > 640 || height > 640 || (width > 0 && height > 0 && width * height > 307200)) continue;
+        return format;
+    }
+    return nil;
+}
+static NSString *YTFormatAccess(NSString *format) {
+    if (YTFormatURL(format)) return @"URL";
+    NSString *cipher = YTJSONStringForKey(format, @"signatureCipher", 0);
+    if (!cipher) cipher = YTJSONStringForKey(format, @"cipher", 0);
+    if ([YTQueryValue([@"?" stringByAppendingString:(cipher ? cipher : @"")], @"s") length]) return @"ciphered";
+    return @"no-URL";
+}
 static NSString *YTPlayerDiagnostic(NSString *player, NSArray *formats) {
     NSString *playability = YTObjectForKey(player, @"playabilityStatus");
     NSString *status = YTJSONStringForKey(playability, @"status", 0);
@@ -345,7 +365,7 @@ static NSString *YTPlayerDiagnostic(NSString *player, NSArray *formats) {
     NSMutableArray *available = [NSMutableArray array];
     for (NSString *format in formats) {
         NSInteger itag = YTJSONIntForKey(format, @"itag");
-        NSString *access = YTFormatURL(format) ? @"URL" : @"ciphered";
+        NSString *access = YTFormatAccess(format);
         [available addObject:[NSString stringWithFormat:@"%d/%@", (int)itag, access]];
         if ([available count] >= 24) break;
     }
@@ -478,6 +498,11 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
         [formats addObjectsFromArray:YTJSONObjectStringsInArray(streaming, @"adaptiveFormats")];
     }
     NSString *video = YTChooseFormat(formats, YES), *audio = YTChooseFormat(formats, NO);
+    BOOL combined = NO;
+    if (!video || !audio) {
+        NSString *mp4 = YTChooseCombinedMP4(formats);
+        if (mp4) { video = audio = mp4; combined = YES; }
+    }
     if (!video || !audio) {
         if (errorText) *errorText = [NSString stringWithFormat:@"%@ missing; %@",
             !video && !audio ? @"144p H.264 and AAC-LC" : !video ? @"144p H.264" : @"AAC-LC",
@@ -488,6 +513,7 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
         YTFormatURL(video), @"videoURL", YTFormatURL(audio), @"audioURL",
         [NSNumber numberWithLongLong:YTFormatLength(video)], @"videoLength",
         [NSNumber numberWithLongLong:YTFormatLength(audio)], @"audioLength",
+        [NSNumber numberWithBool:combined], @"combined",
         userAgent, @"userAgent", nil];
 }
 
@@ -509,6 +535,7 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
             long long videoLength = [[streams objectForKey:@"videoLength"] longLongValue];
             long long audioLength = [[streams objectForKey:@"audioLength"] longLongValue];
             if (videoLength <= 0) videoLength = YTRemoteLength([streams objectForKey:@"videoURL"], [client objectForKey:@"ua"]);
+            if ([[streams objectForKey:@"combined"] boolValue]) audioLength = videoLength;
             if (audioLength <= 0) audioLength = YTRemoteLength([streams objectForKey:@"audioURL"], [client objectForKey:@"ua"]);
             [streams setObject:[NSNumber numberWithLongLong:videoLength] forKey:@"videoLength"];
             [streams setObject:[NSNumber numberWithLongLong:audioLength] forKey:@"audioLength"];

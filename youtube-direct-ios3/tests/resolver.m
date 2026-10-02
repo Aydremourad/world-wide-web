@@ -14,10 +14,12 @@ static NSDictionary *Resolve(NSString *formats) {
 }
 static NSString *Video = @"{\"itag\":160,\"mimeType\":\"video/mp4; codecs=\\\"avc1.4d400c\\\"\",\"width\":256,\"height\":144,\"url\":\"https://media.example/video?clen=70000\"}";
 static NSString *Audio = @"{\"itag\":140,\"mimeType\":\"audio/mp4; codecs=\\\"mp4a.40.2\\\"\",\"url\":\"https://media.example/audio?clen=80000\"}";
+static NSString *Combined = @"{\"itag\":18,\"mimeType\":\"video/mp4; codecs=\\\"avc1.4d401e, mp4a.40.2\\\"\",\"width\":640,\"height\":360,\"url\":\"https://media.example/combined\"}";
 
 // Exercise production requests, header length recovery, CDN reads and fallback
 // with NSURLProtocol. Fixtures never contact YouTube or another external host.
 static BOOL BlockAndroid;
+static BOOL CombinedOnly;
 static int AndroidRequests, VisionRequests, HeadRequests;
 @interface YTFixtureProtocol : NSURLProtocol
 @end
@@ -39,6 +41,9 @@ static int AndroidRequests, VisionRequests, HeadRequests;
         if (android) AndroidRequests++; else if ([clientName isEqualToString:@"101"]) VisionRequests++;
         NSString *json = android && BlockAndroid ?
             @"{\"playabilityStatus\":{\"status\":\"LOGIN_REQUIRED\",\"reason\":\"Fixture blocked Android\"}}" :
+            CombinedOnly ? Player([NSString stringWithFormat:@"%@,%@,%@", Combined,
+                @"{\"itag\":160,\"mimeType\":\"video/mp4; codecs=\\\"avc1.4d400c\\\"\"}",
+                @"{\"itag\":140,\"mimeType\":\"audio/mp4; codecs=\\\"mp4a.40.2\\\"\"}"]) :
             Player([NSString stringWithFormat:@"%@,%@",
                 @"{\"itag\":160,\"url\":\"https://media.example/video\"}",
                 @"{\"itag\":140,\"url\":\"https://media.example/audio\"}"]);
@@ -78,6 +83,11 @@ int main(void) {
     NSDictionary *result = Resolve([NSString stringWithFormat:@"%@,%@", Video, Audio]);
     assert([[result objectForKey:@"videoLength"] longLongValue] == 70000);
     assert([[result objectForKey:@"audioLength"] longLongValue] == 80000);
+    result = Resolve([NSString stringWithFormat:@"%@,{\"itag\":160},{\"itag\":140}", Combined]);
+    assert([[result objectForKey:@"combined"] boolValue]);
+    assert([[result objectForKey:@"videoURL"] isEqual:[result objectForKey:@"audioURL"]]);
+    result = Resolve([NSString stringWithFormat:@"%@,%@,%@", Combined, Video, Audio]);
+    assert(![[result objectForKey:@"combined"] boolValue]);
     result = Resolve([NSString stringWithFormat:@"%@,%@",
         @"{\"itag\":160,\"url\":\"https://media.example/v\",\"contentLength\":4294967301}", Audio]);
     assert([[result objectForKey:@"videoLength"] longLongValue] == 4294967301LL);
@@ -113,9 +123,16 @@ int main(void) {
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"YTWorkingClient"];
     result = [YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
     assert(result && AndroidRequests == 1 && VisionRequests == 1);
+    BlockAndroid = NO; CombinedOnly = YES; AndroidRequests = VisionRequests = HeadRequests = 0;
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"YTWorkingClient"];
+    result = [YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
+    assert(result && AndroidRequests == 1 && VisionRequests == 0 && HeadRequests == 1);
+    assert([[result objectForKey:@"combined"] boolValue]);
+    assert([[result objectForKey:@"videoLength"] longLongValue] == [[result objectForKey:@"audioLength"] longLongValue]);
+    assert([result objectForKey:@"videoSource"] != [result objectForKey:@"audioSource"]);
     [NSURLProtocol unregisterClass:[YTFixtureProtocol class]];
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"YTWorkingClient"];
-    NSLog(@"Resolver checks passed: missing metadata, URL lengths, 64-bit lengths, cipher selection, HEAD recovery, bounded CDN reads and client fallback.");
+    NSLog(@"Resolver checks passed, including format 18 with unavailable adaptive formats, one shared length probe, independent readers and no unnecessary fallback clients.");
     [pool release];
     return 0;
 }

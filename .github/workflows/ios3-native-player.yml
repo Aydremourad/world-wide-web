@@ -63,6 +63,9 @@ jobs:
       - name: Inspect current player availability
         working-directory: youtube-direct-ios3
         run: python3 tests/live-player-probe.py
+      - name: Check combined Main-profile MP4 and native AAC reader
+        working-directory: youtube-direct-ios3
+        run: sh tests/run-combined-test.sh
       - uses: actions/cache/save@v4
         if: always() && steps.decoder.outputs.cache-hit != 'true'
         with:

@@ -1,6 +1,8 @@
 #import "YTSoftwarePlayer.h"
 #import "YTMediaSource.h"
 #import "YTVideoSurface.h"
+#import "YTAudioFile.h"
+#include "YTVideoDecoder.h"
 #import <AudioToolbox/AudioToolbox.h>
 #include <libavformat/avformat.h>
 #include <libavcodec/avcodec.h>
@@ -45,9 +47,7 @@ typedef struct {
     double firstPTS;
     double nextPTS;
     double frameDuration;
-    struct SwsContext *scaler;
-    uint8_t *pixels;
-    int pixelBytes;
+    YTVideoImage image;
 } YTPlayback;
 
 @interface YTSoftwarePlayer ()
@@ -80,16 +80,6 @@ static int64_t YTSeekVideo(void *opaque, int64_t offset, int whence) {
 }
 static int YTInterruptVideo(void *opaque) { return *(volatile BOOL *)opaque; }
 
-static OSStatus YTReadAudio(void *opaque, SInt64 offset, UInt32 count,
-                            void *bytes, UInt32 *actual) {
-    YTAudio *audio = opaque;
-    int read = [audio->source readAtOffset:offset into:bytes count:(int)count];
-    *actual = read < 0 ? 0 : (UInt32)read;
-    return read < 0 ? kAudioFileUnspecifiedError : noErr;
-}
-static SInt64 YTAudioSize(void *opaque) {
-    return [((YTAudio *)opaque)->source length];
-}
 static void YTFillAudio(void *opaque, AudioQueueRef queue, AudioQueueBufferRef buffer) {
     YTAudio *audio = opaque;
     if (*audio->stop || audio->eof || audio->failed) return;
@@ -115,8 +105,7 @@ static void YTFillAudio(void *opaque, AudioQueueRef queue, AudioQueueBufferRef b
     [pool release];
 }
 static OSStatus YTPrepareAudio(YTAudio *audio) {
-    OSStatus result = AudioFileOpenWithCallbacks(audio, YTReadAudio, NULL,
-        YTAudioSize, NULL, kAudioFileM4AType, &audio->file);
+    OSStatus result = YTOpenAudioFile(audio->source, &audio->file);
     if (result != noErr) return result;
     UInt32 size = sizeof(audio->format);
     result = AudioFileGetProperty(audio->file, kAudioFilePropertyDataFormat, &size, &audio->format);
@@ -186,9 +175,6 @@ static double YTPlaybackClock(YTPlayback *playback) {
 }
 static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRational timeBase) {
     if (!YTWaitForPause(playback)) return NO;
-    int width = frame->width, height = frame->height;
-    if (width <= 0 || height <= 0 || width > 384 || height > 384 || width * height > 38400)
-        return NO;
     int64_t timestamp = av_frame_get_best_effort_timestamp(frame);
     double pts = timestamp == AV_NOPTS_VALUE ? playback->nextPTS : timestamp * av_q2d(timeBase);
     if (isnan(playback->firstPTS)) playback->firstPTS = pts;
@@ -213,25 +199,12 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     }
     if (*playback->stop || playback->audio->failed) return NO;
     if (wait < -0.20) return YES; // Drop only the display, preserving H.264 reference frames.
-    int needed = width * height * 2;
-    if (needed != playback->pixelBytes) {
-        av_free(playback->pixels);
-        playback->pixels = av_malloc(needed);
-        playback->pixelBytes = needed;
-    }
-    if (!playback->pixels) return NO;
-    playback->scaler = sws_getCachedContext(playback->scaler, width, height,
-        (enum AVPixelFormat)frame->format, width, height, AV_PIX_FMT_RGB565LE,
-        SWS_FAST_BILINEAR, NULL, NULL, NULL);
-    if (!playback->scaler) return NO;
-    uint8_t *destination[4] = {playback->pixels, NULL, NULL, NULL};
-    int strides[4] = {width * 2, 0, 0, 0};
-    sws_scale(playback->scaler, (const uint8_t * const *)frame->data, frame->linesize,
-              0, height, destination, strides);
+    if (YTConvertVideoFrame(&playback->image, frame) < 0) return NO;
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     NSDictionary *payload = [NSDictionary dictionaryWithObjectsAndKeys:
-        [NSData dataWithBytes:playback->pixels length:needed], @"pixels",
-        [NSNumber numberWithInt:width], @"width", [NSNumber numberWithInt:height], @"height", nil];
+        [NSData dataWithBytes:playback->image.pixels length:playback->image.pixelBytes], @"pixels",
+        [NSNumber numberWithInt:playback->image.width], @"width",
+        [NSNumber numberWithInt:playback->image.height], @"height", nil];
     [playback->controller performSelectorOnMainThread:@selector(presentFrame:)
                                           withObject:payload waitUntilDone:YES];
     [pool release];
@@ -341,7 +314,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     format->interrupt_callback.callback = YTInterruptVideo;
     format->interrupt_callback.opaque = (void *)&_stop;
     if (avformat_open_input(&format, NULL, NULL, NULL) < 0) {
-        failure = @"Could not open the 144p video stream."; goto finished;
+        failure = @"Could not open the MP4 video stream."; goto finished;
     }
     int videoStream = -1;
     for (unsigned int i = 0; i < format->nb_streams; i++) {
@@ -349,16 +322,9 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     }
     if (videoStream < 0) { failure = @"The response did not contain a video track."; goto finished; }
     codec = format->streams[videoStream]->codec;
-    if (codec->codec_id != AV_CODEC_ID_H264 || codec->width <= 0 || codec->height <= 0 ||
-        codec->width > 384 || codec->height > 384 || codec->width * codec->height > 38400) {
-        failure = @"This player needs a tiny 144p H.264 stream."; goto finished;
-    }
-    codec->thread_count = 1;
-    codec->flags2 |= AV_CODEC_FLAG2_FAST;
-    codec->skip_loop_filter = AVDISCARD_NONREF;
-    AVCodec *decoder = avcodec_find_decoder(codec->codec_id);
-    if (!decoder || avcodec_open2(codec, decoder, NULL) < 0) {
-        failure = @"Could not start the H.264 decoder."; goto finished;
+    if (YTOpenH264Decoder(codec) < 0) {
+        failure = [NSString stringWithFormat:@"Could not start H.264 video (%dx%d).", codec->width, codec->height];
+        goto finished;
     }
     codecOpened = YES;
     frame = av_frame_alloc();
@@ -415,8 +381,7 @@ finished:
     if (audio.queue) { AudioQueueStop(audio.queue, true); AudioQueueDispose(audio.queue, true); }
     if (audio.file) AudioFileClose(audio.file);
     free(audio.descriptions);
-    if (playback.scaler) sws_freeContext(playback.scaler);
-    av_free(playback.pixels);
+    YTFreeVideoImage(&playback.image);
     av_frame_free(&frame);
     if (codecOpened) avcodec_close(codec);
     if (format) avformat_close_input(&format);

@@ -30,7 +30,7 @@
     _statusLabel.textAlignment = UITextAlignmentCenter;
     _statusLabel.numberOfLines = 4;
     _statusLabel.font = [UIFont systemFontOfSize:14];
-    _statusLabel.text = @"YouTube for iPhone OS 3.\n144p playback over Wi-Fi.\nSearch above or paste a YouTube link.";
+    _statusLabel.text = @"YouTube for iPhone OS 3.\nPlayback over Wi-Fi.\nSearch above or paste a YouTube link.";
     _statusLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [self.view addSubview:_statusLabel];
 
@@ -128,7 +128,7 @@
 }
 
 - (void)beginResolve:(NSString *)videoID {
-    [self setBusy:YES text:@"Getting the 144p stream..."];
+    [self setBusy:YES text:@"Getting the video stream..."];
     [NSThread detachNewThreadSelector:@selector(resolveThread:) toTarget:self withObject:videoID];
 }
 
@@ -168,4 +168,3 @@
 }
 
 @end
-
