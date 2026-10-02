@@ -14,7 +14,7 @@ cd "$TESTDIR/decoder"
     --disable-avdevice --disable-avfilter --disable-postproc --disable-swresample \
     --disable-network --disable-securetransport --disable-iconv --disable-bzlib \
     --disable-lzma --disable-zlib --disable-vda --disable-everything \
-    --enable-demuxer=mov --enable-decoder=h264,mpeg4 --enable-parser=h264,mpeg4video --enable-small > "$TESTDIR/config.log" 2>&1
+    --enable-demuxer=mov --enable-decoder=h264,mpeg4 --enable-parser=h264,mpeg4video --disable-small --optflags="-O3" > "$TESTDIR/config.log" 2>&1
 make -j3 libavformat/libavformat.a libavcodec/libavcodec.a libswscale/libswscale.a libavutil/libavutil.a > "$TESTDIR/build.log" 2>&1
 cd "$ROOT"
 xcrun clang -fno-objc-arc -Wno-deprecated-declarations -I. -I"$TESTDIR/decoder" \

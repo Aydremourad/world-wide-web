@@ -159,7 +159,9 @@ cancellation. Main-thread drawing coalesces into one pending frame, so decoding
 no longer waits for every OpenGL presentation. Late pictures can update at up
 to 15 fps instead of the previous hard four-fps limit. Main-profile decoding
 omits non-reference pictures and deblocking, including for small streams.
-Normal late playback no longer skips entire groups to their keyframes. More
+The static decoder is rebuilt with FFmpeg speed optimization (-O3,
+CONFIG_SMALL=0); the previous size build selected -Os. Normal late playback
+no longer skips entire groups to their keyframes. More
 than three seconds of drift permits a video-only reposition, no more than once
 in five seconds; audio remains on its current queue.
 

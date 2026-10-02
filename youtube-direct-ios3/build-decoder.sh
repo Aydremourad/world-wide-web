@@ -13,7 +13,7 @@ REVFILE="$SRC/.ytdirect-decoder-rev"
 
 test -d "$SDKROOT" || { echo "Missing SDK: $SDKROOT"; exit 1; }
 test -x "$LEGACY_LD" || { echo "Missing ARMv6 linker: $LEGACY_LD"; exit 1; }
-if [ -f "$REVFILE" ] && [ "$(cat "$REVFILE")" = "2" ] &&
+if [ -f "$REVFILE" ] && [ "$(cat "$REVFILE")" = "3" ] &&
    [ -f "$SRC/libavformat/libavformat.a" ] && [ -f "$SRC/libavcodec/libavcodec.a" ] &&
    [ -f "$SRC/libavutil/libavutil.a" ] && [ -f "$SRC/libswscale/libswscale.a" ]; then
     echo "Using cached ARMv6 decoder libraries."
@@ -47,7 +47,11 @@ make distclean >/dev/null 2>&1 || true
     --disable-avdevice --disable-avfilter --disable-postproc --disable-swresample \
     --disable-network --disable-securetransport --disable-iconv --disable-bzlib \
     --disable-lzma --disable-zlib --disable-vda --disable-everything \
-    --enable-demuxer=mov --enable-decoder=h264,mpeg4 --enable-parser=h264,mpeg4video --enable-small \
+    --enable-demuxer=mov --enable-decoder=h264,mpeg4 --enable-parser=h264,mpeg4video --disable-small --optflags="-O3" \
     --extra-cflags="-O2 -miphoneos-version-min=3.0" --extra-ldflags="-miphoneos-version-min=3.0"
+# Size optimization selected -Os in prior builds; verify the speed build.
+grep '^OPTFLAGS=' config.mak
+grep -Eq '^OPTFLAGS=.*-O3' config.mak
+grep -q '^#define CONFIG_SMALL 0' config.h
 make -j"${JOBS:-3}" libavformat/libavformat.a libavcodec/libavcodec.a libswscale/libswscale.a libavutil/libavutil.a
-echo "2" > "$REVFILE"
+echo "3" > "$REVFILE"
