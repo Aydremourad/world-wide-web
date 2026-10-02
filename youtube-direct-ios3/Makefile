@@ -10,7 +10,7 @@ include $(THEOS)/makefiles/common.mk
 APPLICATION_NAME = YouTubeDirect
 YouTubeDirect_FILES = main.m YTAppDelegate.m YTViewController.m YTYouTube.m
 YouTubeDirect_FRAMEWORKS = UIKit Foundation MediaPlayer
-YouTubeDirect_CFLAGS = -fno-objc-arc -miphoneos-version-min=3.0
+YouTubeDirect_CFLAGS = -fno-objc-arc -miphoneos-version-min=3.0 -Wno-unused-function
 YouTubeDirect_LDFLAGS = -miphoneos-version-min=3.0
 TARGET_CODESIGN_FLAGS = -S -Hsha1
 
