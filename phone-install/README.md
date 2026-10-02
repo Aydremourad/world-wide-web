@@ -1,38 +1,62 @@
 # Phone installer
 
-Download [YT Direct 0.7.1](https://raw.githubusercontent.com/Aydremourad/world-wide-web/youtube-native-player-ios3/phone-install/com.aydre.youtubedirect_0.7.1_iphoneos-arm.deb)
-on the jailbroken iPhone and open it in iFile, then choose Install. This updates
-the existing YT Direct app. Restart SpringBoard if the app does not appear.
+Download [YT Direct 0.7.2](https://raw.githubusercontent.com/Aydremourad/world-wide-web/youtube-native-player-ios3/phone-install/com.aydre.youtubedirect_0.7.2_iphoneos-arm.deb)
+on the jailbroken iPhone. Close YT Direct, open the package in iFile, and
+choose Install. Reopen the app. This updates the existing YT Direct package.
+Restart SpringBoard if the app does not appear.
 
-Open YT Direct and paste `jNQXAC9IVRw` as the first test. It uses the phone's
-Wi-Fi connection for playback; a computer does not need to stay on.
+The phone uses its own Wi-Fi connection during playback. A computer does not
+need to remain on. This release adds no proxy or conversion service.
 
-This is an experimental software-video player, not a stock YouTube patch.
-It removes whole-video conversion. Smooth playback and AAC audio/container
-compatibility still need confirmation on a physical iPhone 2G.
+## What changed
 
-0.7.1 fixes rejection of streams with omitted `contentLength`, recovers lengths
-from URLs or HTTP headers, skips encrypted candidates when a usable URL is
-available, and tries Android, VisionOS and TV clients. Both media URLs are
-checked before playback opens. Failure messages now preserve the client and
-YouTube response instead of guessing that the video requires sign-in.
+The reported Android response contained a direct combined format 18 MP4 URL,
+while the separate 144p video and AAC formats were unavailable to the app.
+0.7.1 rejected that response before playback. 0.7.2 accepts the combined MP4
+when separate tracks are unavailable. It reads video and AAC audio from that
+file in bounded ranges, without downloading and converting the whole movie.
 
-Build, resolver and streaming checks:
-https://github.com/Aydremourad/world-wide-web/actions/runs/36956860648
+The decoder now accepts H.264 sources up to 640 pixels per side and 307200
+pixels per frame, including format 18's usual 360p/480p sizes. It scales the
+display to at most 256x144 and omits non-reference pictures and loop filtering
+for larger sources to reduce work. Actual speed on the original iPhone has
+not been measured. Scaling does not remove the work of decoding the original
+source resolution.
 
-These checks verify code behavior and the ARMv6 package, not current YouTube
-playback on a phone. The live YouTube probe on the datacenter build machine
-returned `LOGIN_REQUIRED: Sign in to confirm you're not a bot` for Android
-and VisionOS. A separate read-only probe of the public TubeRepair service and
-its Invidious API returned HTTP 403. No public relay has been added to this
-release. The phone's Wi-Fi connection may receive a different response; that
-has not been verified.
+Audio File Services detects the combined MP4 container automatically instead
+of using a fixed M4A file hint. Error messages now distinguish encrypted
+signatures from formats with no URL.
+
+## Verified checks and limits
+
+Build and regression checks:
+https://github.com/Aydremourad/world-wide-web/actions/runs/36960281347
+
+- The resolver accepts an OK Android response with a direct format 18 URL
+  and unavailable separate tracks, checks bounded media reads, and avoids
+  further blocked clients when this route succeeds.
+- The app was built and signed for ARMv6 using the iPhone OS 3.1.3 SDK.
+  Legacy startup, static decoder linkage and gzip package checks passed.
+- On macOS, the production reader, audio-file opener and video decoder read
+  131 AAC packets and decoded/scaled 46 Main-profile H.264 frames from a
+  synthetic combined MP4 using FFmpeg 2.8.22. The test used four bounded
+  range requests.
+- Range boundaries, seeks, short responses, rejection of ignored ranges and
+  cancellation checks passed.
+
+These checks do not establish playback speed, AudioQueue output or the old
+OS's container behavior on a physical iPhone 2G. Live YouTube API probes from
+the datacenter runner still returned a bot-check error. The user's phone did
+return Android format 18, but the new player's actual phone playback remains
+unverified. This is an experimental build.
+
+Try the same video that produced the reported error. If the new error says
+`Video server returned HTTP 403`, the metadata request succeeded but the
+media URL was denied. If it mentions `AAC` or `H.264`, playback reached the
+audio reader or video decoder.
 
 SHA256:
-`6c646ccd9e07cdc6901fd67b56cb3ae628b706523adb2871e943a898fda437c6`
+`f832a0c2696194bd2bd5d55814407e1965a7eb3fed31cfe36b6b09b5b0364cc2`
 
-The package was compiled from commit
-`95d5ca07c8d4b06626830f0a5c11c4412523716f` against the iPhone OS 3.1.3 SDK.
-ARMv6, legacy Mach-O startup, the static decoder, bounded HTTP ranges and
-prompt cancellation checks passed. The source and build scripts are in
-`youtube-direct-ios3` on this branch.
+Compiled source commit:
+`dfb2cb6ab20af2f38e4e8c13e826b8e948ebf9f9`
