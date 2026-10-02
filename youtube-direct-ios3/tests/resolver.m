@@ -1,0 +1,121 @@
+#import <Foundation/Foundation.h>
+#import "YTYouTube.h"
+#include <assert.h>
+
+static NSString *Player(NSString *formats) {
+    return [NSString stringWithFormat:@"{\"playabilityStatus\":{\"status\":\"OK\"},\"streamingData\":{\"adaptiveFormats\":[%@]}}", formats];
+}
+static NSDictionary *Resolve(NSString *formats) {
+    NSString *failure = nil;
+    NSDictionary *result = [YTYouTube streamsFromPlayerResponse:Player(formats) userAgent:@"fixture" error:&failure];
+    if (!result) NSLog(@"Unexpected resolver rejection: %@", failure);
+    assert(result);
+    return result;
+}
+static NSString *Video = @"{\"itag\":160,\"mimeType\":\"video/mp4; codecs=\\\"avc1.4d400c\\\"\",\"width\":256,\"height\":144,\"url\":\"https://media.example/video?clen=70000\"}";
+static NSString *Audio = @"{\"itag\":140,\"mimeType\":\"audio/mp4; codecs=\\\"mp4a.40.2\\\"\",\"url\":\"https://media.example/audio?clen=80000\"}";
+
+// Exercise production requests, header length recovery, CDN reads and fallback
+// with NSURLProtocol. Fixtures never contact YouTube or another external host.
+static BOOL BlockAndroid;
+static int AndroidRequests, VisionRequests, HeadRequests;
+@interface YTFixtureProtocol : NSURLProtocol
+@end
+@implementation YTFixtureProtocol
++ (BOOL)canInitWithRequest:(NSURLRequest *)request {
+    NSString *host = [[request URL] host];
+    return [host isEqualToString:@"www.youtube.com"] || [host isEqualToString:@"media.example"];
+}
++ (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
+- (void)startLoading {
+    NSURLRequest *request = [self request];
+    NSURL *url = [request URL];
+    NSData *data = nil;
+    NSMutableDictionary *headers = [NSMutableDictionary dictionary];
+    NSInteger status = 200;
+    if ([[url host] isEqualToString:@"www.youtube.com"]) {
+        NSString *clientName = [request valueForHTTPHeaderField:@"X-YouTube-Client-Name"];
+        BOOL android = [clientName isEqualToString:@"3"];
+        if (android) AndroidRequests++; else if ([clientName isEqualToString:@"101"]) VisionRequests++;
+        NSString *json = android && BlockAndroid ?
+            @"{\"playabilityStatus\":{\"status\":\"LOGIN_REQUIRED\",\"reason\":\"Fixture blocked Android\"}}" :
+            Player([NSString stringWithFormat:@"%@,%@",
+                @"{\"itag\":160,\"url\":\"https://media.example/video\"}",
+                @"{\"itag\":140,\"url\":\"https://media.example/audio\"}"]);
+        data = [json dataUsingEncoding:NSUTF8StringEncoding];
+        [headers setObject:@"application/json" forKey:@"Content-Type"];
+        [headers setObject:[NSString stringWithFormat:@"%lu", (unsigned long)[data length]] forKey:@"Content-Length"];
+    } else {
+        long long length = [[url path] isEqualToString:@"/video"] ? 70000 : 80000;
+        [headers setObject:@"video/mp4" forKey:@"Content-Type"];
+        if ([[request HTTPMethod] isEqualToString:@"HEAD"]) {
+            HeadRequests++;
+            [headers setObject:[NSString stringWithFormat:@"%lld", length] forKey:@"Content-Length"];
+            data = [NSData data];
+        } else {
+            long long start = 0, end = 0;
+            NSScanner *scan = [NSScanner scannerWithString:[request valueForHTTPHeaderField:@"Range"]];
+            assert([scan scanString:@"bytes=" intoString:NULL] && [scan scanLongLong:&start] &&
+                   [scan scanString:@"-" intoString:NULL] && [scan scanLongLong:&end]);
+            assert(end - start + 1 <= 65536);
+            status = 206;
+            data = [NSMutableData dataWithLength:(NSUInteger)(end - start + 1)];
+            [headers setObject:[NSString stringWithFormat:@"%lld", end - start + 1] forKey:@"Content-Length"];
+            [headers setObject:[NSString stringWithFormat:@"bytes %lld-%lld/%lld", start, end, length] forKey:@"Content-Range"];
+        }
+    }
+    NSHTTPURLResponse *response = [[[NSHTTPURLResponse alloc] initWithURL:url statusCode:status
+        HTTPVersion:@"HTTP/1.1" headerFields:headers] autorelease];
+    [[self client] URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
+    if ([data length]) [[self client] URLProtocol:self didLoadData:data];
+    [[self client] URLProtocolDidFinishLoading:self];
+}
+- (void)stopLoading {}
+@end
+
+int main(void) {
+    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
+    NSDictionary *result = Resolve([NSString stringWithFormat:@"%@,%@", Video, Audio]);
+    assert([[result objectForKey:@"videoLength"] longLongValue] == 70000);
+    assert([[result objectForKey:@"audioLength"] longLongValue] == 80000);
+    result = Resolve([NSString stringWithFormat:@"%@,%@",
+        @"{\"itag\":160,\"url\":\"https://media.example/v\",\"contentLength\":4294967301}", Audio]);
+    assert([[result objectForKey:@"videoLength"] longLongValue] == 4294967301LL);
+    result = Resolve([NSString stringWithFormat:@"%@,%@",
+        @"{\"itag\":160,\"url\":\"https://media.example/v\",\"contentLength\":\"90000\"}", Audio]);
+    assert([[result objectForKey:@"videoLength"] longLongValue] == 90000);
+    result = Resolve([NSString stringWithFormat:@"%@,%@,%@",
+        @"{\"itag\":597,\"signatureCipher\":\"url=https%3A%2F%2Fmedia.example%2Fv&s=encrypted\"}", Video, Audio]);
+    assert([[[result objectForKey:@"videoURL"] path] isEqualToString:@"/video"]);
+    result = Resolve([NSString stringWithFormat:@"%@,%@",
+        @"{\"itag\":160,\"cipher\":\"url=https%3A%2F%2Fmedia.example%2Fv%3Fclen%3D50000&sig=abc&sp=sig\"}", Audio]);
+    assert([[result objectForKey:@"videoLength"] longLongValue] == 50000);
+    assert([[[result objectForKey:@"videoURL"] absoluteString] rangeOfString:@"sig=abc"].location != NSNotFound);
+    result = Resolve([NSString stringWithFormat:@"%@,%@,%@",
+        @"{\"itag\":597,\"url\":\"https://media.example/no-length\"}", Video, Audio]);
+    assert([[result objectForKey:@"videoLength"] longLongValue] == 70000);
+    NSString *error = nil;
+    assert(![YTYouTube streamsFromPlayerResponse:Player([NSString stringWithFormat:@"%@,%@", Video,
+        @"{\"itag\":139,\"mimeType\":\"audio/mp4; codecs=\\\"mp4a.40.5\\\"\",\"url\":\"https://media.example/HE\"}"])
+        userAgent:@"fixture" error:&error]);
+    assert([error rangeOfString:@"AAC-LC missing"].location != NSNotFound);
+    error = nil;
+    assert(![YTYouTube streamsFromPlayerResponse:@"{\"playabilityStatus\":{\"status\":\"LOGIN_REQUIRED\",\"reason\":\"Actual block reason\"}}"
+        userAgent:@"fixture" error:&error]);
+    assert([error rangeOfString:@"Actual block reason"].location != NSNotFound);
+    [NSURLProtocol registerClass:[YTFixtureProtocol class]];
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"YTWorkingClient"];
+    result = [YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
+    assert(result && HeadRequests == 2 && AndroidRequests == 1);
+    assert([[result objectForKey:@"videoLength"] longLongValue] == 70000);
+    assert([result objectForKey:@"videoSource"] && [result objectForKey:@"audioSource"]);
+    BlockAndroid = YES; AndroidRequests = VisionRequests = 0;
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"YTWorkingClient"];
+    result = [YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
+    assert(result && AndroidRequests == 1 && VisionRequests == 1);
+    [NSURLProtocol unregisterClass:[YTFixtureProtocol class]];
+    [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"YTWorkingClient"];
+    NSLog(@"Resolver checks passed: missing metadata, URL lengths, 64-bit lengths, cipher selection, HEAD recovery, bounded CDN reads and client fallback.");
+    [pool release];
+    return 0;
+}

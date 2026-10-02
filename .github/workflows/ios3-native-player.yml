@@ -43,6 +43,9 @@ jobs:
       - name: Check bounded streaming and cancellation
         working-directory: youtube-direct-ios3
         run: sh tests/run-range-test.sh
+      - name: Check stream resolver and fallback
+        working-directory: youtube-direct-ios3
+        run: sh tests/run-resolver-test.sh
       - uses: actions/cache/restore@v4
         id: decoder
         if: always()
@@ -57,6 +60,9 @@ jobs:
           THEOS: ${{ runner.temp }}/ios3
           LEGACY_LD: ${{ runner.temp }}/cctools-armv6/bin/arm-apple-darwin11-ld
         run: sh ./ci-build.sh
+      - name: Inspect current player availability
+        working-directory: youtube-direct-ios3
+        run: python3 tests/live-player-probe.py
       - uses: actions/cache/save@v4
         if: always() && steps.decoder.outputs.cache-hit != 'true'
         with:

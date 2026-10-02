@@ -1,4 +1,5 @@
 #import "YTYouTube.h"
+#import "YTMediaSource.h"
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -199,50 +200,56 @@ forHTTPHeaderField:@"Accept"];
 }
 
 
-static NSString *YTAndroidPlayerResponse(NSString *videoID, NSString **errorText) {
-    NSString *clientVersion = @"21.26.364";
-    NSString *userAgent =
-        @"com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip";
+static NSArray *YTPlayerClients(void) {
+    return [NSArray arrayWithObjects:
+        [NSDictionary dictionaryWithObjectsAndKeys:
+            @"Android", @"label", @"ANDROID", @"name", @"21.26.364", @"version", @"3", @"number",
+            @"com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip", @"ua",
+            @",\"androidSdkVersion\":30,\"osName\":\"Android\",\"osVersion\":\"11\"", @"extra", nil],
+        [NSDictionary dictionaryWithObjectsAndKeys:
+            @"VisionOS", @"label", @"VISIONOS", @"name", @"1.02", @"version", @"101", @"number",
+            @"Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15", @"ua",
+            @",\"deviceMake\":\"Apple\",\"deviceModel\":\"RealityDevice17,1\",\"osName\":\"visionOS\",\"osVersion\":\"26.5.23O471\"", @"extra", nil],
+        [NSDictionary dictionaryWithObjectsAndKeys:
+            @"TV", @"label", @"TVHTML5", @"name", @"7.20260707.07.00", @"version", @"7", @"number",
+            @"Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold (unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)", @"ua", @"", @"extra", nil],
+        [NSDictionary dictionaryWithObjectsAndKeys:
+            @"TV old", @"label", @"TVHTML5", @"name", @"5.20260707", @"version", @"7", @"number",
+            @"Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version", @"ua", @"", @"extra", nil], nil];
+}
 
+static NSString *YTPlayerResponse(NSString *videoID, NSDictionary *client, NSString **errorText) {
     NSString *body = [NSString stringWithFormat:
-        @"{\"context\":{\"client\":{\"clientName\":\"ANDROID\","
-        @"\"clientVersion\":\"%@\",\"androidSdkVersion\":30,"
-        @"\"userAgent\":\"%@\",\"osName\":\"Android\",\"osVersion\":\"11\","
-        @"\"hl\":\"en\",\"gl\":\"US\"}},"
+        @"{\"context\":{\"client\":{\"clientName\":\"%@\",\"clientVersion\":\"%@\","
+        @"\"userAgent\":\"%@\",\"hl\":\"en\",\"gl\":\"US\"%@}},"
         @"\"videoId\":\"%@\",\"contentCheckOk\":true,\"racyCheckOk\":true}",
-        clientVersion, userAgent, videoID];
-
-    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:
+        [client objectForKey:@"name"], [client objectForKey:@"version"],
+        [client objectForKey:@"ua"], [client objectForKey:@"extra"], videoID];
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:
         [NSURL URLWithString:@"https://www.youtube.com/youtubei/v1/player?prettyPrint=false"]
-        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:25.0];
-    [req setHTTPMethod:@"POST"];
-    [req setHTTPBody:[body dataUsingEncoding:NSUTF8StringEncoding]];
-    [req setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-    [req setValue:@"3" forHTTPHeaderField:@"X-YouTube-Client-Name"];
-    [req setValue:clientVersion forHTTPHeaderField:@"X-YouTube-Client-Version"];
-    [req setValue:userAgent forHTTPHeaderField:@"User-Agent"];
-    [req setValue:@"en-US,en;q=0.9" forHTTPHeaderField:@"Accept-Language"];
-
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:8.0];
+    [request setHTTPMethod:@"POST"];
+    [request setHTTPBody:[body dataUsingEncoding:NSUTF8StringEncoding]];
+    [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+    [request setValue:[client objectForKey:@"number"] forHTTPHeaderField:@"X-YouTube-Client-Name"];
+    [request setValue:[client objectForKey:@"version"] forHTTPHeaderField:@"X-YouTube-Client-Version"];
+    [request setValue:[client objectForKey:@"ua"] forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"en-US,en;q=0.9" forHTTPHeaderField:@"Accept-Language"];
     NSURLResponse *response = nil;
-    NSError *err = nil;
-    NSData *data = [NSURLConnection sendSynchronousRequest:req
-                                         returningResponse:&response
-                                                     error:&err];
-    NSInteger status = 0;
-    if ([response isKindOfClass:[NSHTTPURLResponse class]])
-        status = [(NSHTTPURLResponse *)response statusCode];
-
+    NSError *failure = nil;
+    NSData *data = [NSURLConnection sendSynchronousRequest:request returningResponse:&response error:&failure];
+    NSInteger status = [response isKindOfClass:[NSHTTPURLResponse class]] ? [(NSHTTPURLResponse *)response statusCode] : 0;
     if (!data || status < 200 || status >= 300) {
-        if (errorText) {
-            if (err) *errorText = [err localizedDescription];
-            else *errorText = [NSString stringWithFormat:@"Android player HTTP %d", (int)status];
-        }
+        if (errorText) *errorText = failure ? [failure localizedDescription] :
+            [NSString stringWithFormat:@"player HTTP %d", (int)status];
         return nil;
     }
-
-    NSString *json = [[[NSString alloc] initWithData:data
-                                            encoding:NSUTF8StringEncoding] autorelease];
-    if (!json && errorText) *errorText = @"Android player response was not UTF-8.";
+    NSString *json = [[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease];
+    NSString *trimmed = [json stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (![trimmed hasPrefix:@"{"]) {
+        if (errorText) *errorText = @"YouTube returned a page instead of a player response.";
+        return nil;
+    }
     return json;
 }
 
@@ -254,22 +261,144 @@ static NSString *YTHTML(NSString *url, NSString **errorText) {
     return html;
 }
 
-static NSString *YTFormatForItag(NSString *player, NSInteger itag) {
-    for (NSString *arrayName in [NSArray arrayWithObjects:@"formats", @"adaptiveFormats", nil]) {
-        for (NSString *format in YTJSONObjectStringsInArray(player, arrayName))
-            if (YTJSONIntForKey(format, @"itag") == itag) return format;
+static NSString *YTObjectForKey(NSString *text, NSString *key) {
+    NSRange location = [text rangeOfString:[NSString stringWithFormat:@"\"%@\"", key]];
+    if (!text || location.location == NSNotFound) return nil;
+    NSUInteger index = location.location + location.length;
+    while (index < [text length] && [text characterAtIndex:index] != '{') index++;
+    return YTBalancedObject(text, index);
+}
+static NSString *YTQueryValue(NSString *address, NSString *wanted) {
+    NSRange question = [address rangeOfString:@"?"];
+    if (!address || question.location == NSNotFound) return nil;
+    for (NSString *part in [[address substringFromIndex:question.location + 1] componentsSeparatedByString:@"&"]) {
+        NSRange equals = [part rangeOfString:@"="];
+        if (equals.location != NSNotFound && [[part substringToIndex:equals.location] isEqualToString:wanted])
+            return [[part substringFromIndex:equals.location + 1] stringByReplacingPercentEscapesUsingEncoding:NSUTF8StringEncoding];
     }
     return nil;
 }
 static NSURL *YTFormatURL(NSString *format) {
     NSString *address = YTJSONStringForKey(format, @"url", 0);
+    if (![address length]) {
+        NSString *cipher = YTJSONStringForKey(format, @"signatureCipher", 0);
+        if (!cipher) cipher = YTJSONStringForKey(format, @"cipher", 0);
+        NSString *encrypted = YTQueryValue([@"?" stringByAppendingString:(cipher ? cipher : @"")], @"s");
+        if (![encrypted length]) {
+            address = YTQueryValue([@"?" stringByAppendingString:(cipher ? cipher : @"")], @"url");
+            NSString *signature = YTQueryValue([@"?" stringByAppendingString:(cipher ? cipher : @"")], @"sig");
+            if ([signature length]) {
+                NSString *parameter = YTQueryValue([@"?" stringByAppendingString:cipher], @"sp");
+                if (![parameter length]) parameter = @"signature";
+                address = [address stringByAppendingFormat:@"&%@=%@", parameter, YTQueryEscape(signature)];
+            }
+        }
+    }
     return [address hasPrefix:@"https://"] ? [NSURL URLWithString:address] : nil;
 }
 static long long YTFormatLength(NSString *format) {
     NSString *value = YTJSONStringForKey(format, @"contentLength", 0);
-    if ([value length]) return [value longLongValue];
-    NSInteger numeric = YTJSONIntForKey(format, @"contentLength");
-    return numeric > 0 ? numeric : 0;
+    if ([value longLongValue] > 0) return [value longLongValue];
+    if (format) {
+        NSRange key = [format rangeOfString:@"\"contentLength\""];
+        if (key.location != NSNotFound) {
+            NSScanner *scan = [NSScanner scannerWithString:[format substringFromIndex:key.location + key.length]];
+            long long length = 0;
+            if ([scan scanString:@":" intoString:NULL] && [scan scanLongLong:&length] && length > 0) return length;
+        }
+    }
+    return [YTQueryValue([YTFormatURL(format) absoluteString], @"clen") longLongValue];
+}
+static NSInteger YTFormatRank(NSString *format, BOOL video) {
+    NSInteger itag = YTJSONIntForKey(format, @"itag");
+    NSString *mime = YTJSONStringForKey(format, @"mimeType", 0);
+    if (video) {
+        if ([mime length] && ([mime rangeOfString:@"video/mp4"].location == NSNotFound ||
+                             [mime rangeOfString:@"avc1"].location == NSNotFound)) return -1;
+        NSInteger width = YTJSONIntForKey(format, @"width"), height = YTJSONIntForKey(format, @"height");
+        if (width > 0 && height > 0) {
+            if (width > 384 || height > 384 || width * height > 38400) return -1;
+        } else if (itag != 597 && itag != 160) return -1;
+        return itag == 597 ? 0 : itag == 160 ? 1 : 2;
+    }
+    if ([mime length] && ([mime rangeOfString:@"audio/mp4"].location == NSNotFound ||
+                         [mime rangeOfString:@"mp4a.40.2"].location == NSNotFound)) return -1;
+    if (![mime length] && itag != 140) return -1;
+    return itag == 140 ? 0 : 1;
+}
+static NSString *YTChooseFormat(NSArray *formats, BOOL video) {
+    NSString *best = nil;
+    NSInteger bestRank = 999;
+    for (NSString *format in formats) {
+        NSInteger rank = YTFormatRank(format, video);
+        if (rank >= 0 && YTFormatLength(format) <= 0) rank += 10;
+        if (rank >= 0 && rank < bestRank && YTFormatURL(format)) { best = format; bestRank = rank; }
+    }
+    return best;
+}
+static NSString *YTPlayerDiagnostic(NSString *player, NSArray *formats) {
+    NSString *playability = YTObjectForKey(player, @"playabilityStatus");
+    NSString *status = YTJSONStringForKey(playability, @"status", 0);
+    NSString *reason = YTJSONStringForKey(playability, @"reason", 0);
+    if (![reason length]) reason = YTJSONStringForKey(playability, @"simpleText", 0);
+    if ([reason length]) return [NSString stringWithFormat:@"%@: %@", status ? status : @"YouTube", reason];
+    NSMutableArray *available = [NSMutableArray array];
+    for (NSString *format in formats) {
+        NSInteger itag = YTJSONIntForKey(format, @"itag");
+        NSString *access = YTFormatURL(format) ? @"URL" : @"ciphered";
+        [available addObject:[NSString stringWithFormat:@"%d/%@", (int)itag, access]];
+        if ([available count] >= 24) break;
+    }
+    return [NSString stringWithFormat:@"status %@; formats %@", status ? status : @"missing",
+            [available count] ? [available componentsJoinedByString:@","] : @"none"];
+}
+
+@interface YTLengthRequest : NSObject {
+@public
+    long long length;
+    BOOL done;
+    NSURLConnection *connection;
+}
+@end
+@implementation YTLengthRequest
+- (void)connection:(NSURLConnection *)sender didReceiveResponse:(NSURLResponse *)response {
+    if ([response isKindOfClass:[NSHTTPURLResponse class]]) {
+        NSHTTPURLResponse *http = (NSHTTPURLResponse *)response;
+        NSString *mime = [response MIMEType];
+        if (([http statusCode] == 200 || [http statusCode] == 206) &&
+            ([mime hasPrefix:@"video/"] || [mime hasPrefix:@"audio/"] || [mime isEqualToString:@"application/octet-stream"])) {
+            for (NSString *key in [http allHeaderFields]) {
+                if ([key caseInsensitiveCompare:@"Content-Range"] == NSOrderedSame) {
+                    NSString *value = [[http allHeaderFields] objectForKey:key];
+                    NSRange slash = [value rangeOfString:@"/" options:NSBackwardsSearch];
+                    if (slash.location != NSNotFound) length = [[value substringFromIndex:slash.location + 1] longLongValue];
+                }
+            }
+            if (length <= 0 && [http statusCode] == 200) length = [response expectedContentLength];
+        }
+    }
+    done = YES;
+    [sender cancel];
+}
+- (void)connection:(NSURLConnection *)sender didFailWithError:(NSError *)error { done = YES; }
+- (void)connectionDidFinishLoading:(NSURLConnection *)sender { done = YES; }
+- (void)dealloc { [connection cancel]; [connection release]; [super dealloc]; }
+@end
+static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
+    NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:6.0];
+    [request setHTTPMethod:@"HEAD"];
+    [request setValue:userAgent forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"identity" forHTTPHeaderField:@"Accept-Encoding"];
+    YTLengthRequest *probe = [[YTLengthRequest alloc] init];
+    probe->connection = [[NSURLConnection alloc] initWithRequest:request delegate:probe];
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:6.5];
+    while (probe->connection && !probe->done && [deadline timeIntervalSinceNow] > 0)
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+    long long length = probe->length;
+    [probe->connection cancel];
+    [probe release];
+    return length;
 }
 
 @implementation YTYouTube
@@ -341,32 +470,70 @@ static long long YTFormatLength(NSString *format) {
     return results;
 }
 
-+ (NSDictionary *)playbackStreamsForID:(NSString *)videoID error:(NSString **)errorText {
-    NSString *failure = nil;
-    NSString *player = YTAndroidPlayerResponse(videoID, &failure);
-    if (!player) { if (errorText) *errorText = failure; return nil; }
-    NSString *video = YTFormatForItag(player, 597);
-    if (!YTFormatURL(video)) video = YTFormatForItag(player, 160);
-    NSString *audio = YTFormatForItag(player, 140);
-    NSURL *videoURL = YTFormatURL(video), *audioURL = YTFormatURL(audio);
-    long long videoLength = YTFormatLength(video), audioLength = YTFormatLength(audio);
-    if (!videoURL || !audioURL || videoLength <= 0 || audioLength <= 0) {
-        NSString *reason = YTJSONStringForKey(player, @"reason", 0);
-        if (errorText) *errorText = [reason length] ? reason :
-            @"YouTube did not provide direct 144p H.264 and AAC streams. This video may require sign-in or a newer client.";
++ (NSDictionary *)streamsFromPlayerResponse:(NSString *)player userAgent:(NSString *)userAgent error:(NSString **)errorText {
+    NSString *streaming = YTObjectForKey(player, @"streamingData");
+    NSMutableArray *formats = [NSMutableArray array];
+    if (streaming) {
+        [formats addObjectsFromArray:YTJSONObjectStringsInArray(streaming, @"formats")];
+        [formats addObjectsFromArray:YTJSONObjectStringsInArray(streaming, @"adaptiveFormats")];
+    }
+    NSString *video = YTChooseFormat(formats, YES), *audio = YTChooseFormat(formats, NO);
+    if (!video || !audio) {
+        if (errorText) *errorText = [NSString stringWithFormat:@"%@ missing; %@",
+            !video && !audio ? @"144p H.264 and AAC-LC" : !video ? @"144p H.264" : @"AAC-LC",
+            YTPlayerDiagnostic(player, formats)];
         return nil;
     }
-    NSInteger width = YTJSONIntForKey(video, @"width"), height = YTJSONIntForKey(video, @"height");
-    if (width <= 0 || height <= 0 || width > 384 || height > 384 || width * height > 38400) {
-        if (errorText) *errorText = @"YouTube did not provide a small enough 144p video for this phone.";
-        return nil;
-    }
-    // Pass through the signed URLs. No probing, full downloads, or conversion.
     return [NSDictionary dictionaryWithObjectsAndKeys:
-        videoURL, @"videoURL", audioURL, @"audioURL",
-        [NSNumber numberWithLongLong:videoLength], @"videoLength",
-        [NSNumber numberWithLongLong:audioLength], @"audioLength",
-        @"com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip", @"userAgent", nil];
+        YTFormatURL(video), @"videoURL", YTFormatURL(audio), @"audioURL",
+        [NSNumber numberWithLongLong:YTFormatLength(video)], @"videoLength",
+        [NSNumber numberWithLongLong:YTFormatLength(audio)], @"audioLength",
+        userAgent, @"userAgent", nil];
+}
+
++ (NSDictionary *)playbackStreamsForID:(NSString *)videoID error:(NSString **)errorText {
+    NSMutableArray *clients = [NSMutableArray arrayWithArray:YTPlayerClients()];
+    NSString *preferred = [[NSUserDefaults standardUserDefaults] stringForKey:@"YTWorkingClient"];
+    for (NSDictionary *client in [NSArray arrayWithArray:clients]) {
+        if ([[client objectForKey:@"label"] isEqualToString:preferred]) {
+            [clients removeObject:client]; [clients insertObject:client atIndex:0]; break;
+        }
+    }
+    NSMutableArray *errors = [NSMutableArray array];
+    for (NSDictionary *client in clients) {
+        NSString *failure = nil;
+        NSString *player = YTPlayerResponse(videoID, client, &failure);
+        NSMutableDictionary *streams = player ? [[[self streamsFromPlayerResponse:player
+            userAgent:[client objectForKey:@"ua"] error:&failure] mutableCopy] autorelease] : nil;
+        if (streams) {
+            long long videoLength = [[streams objectForKey:@"videoLength"] longLongValue];
+            long long audioLength = [[streams objectForKey:@"audioLength"] longLongValue];
+            if (videoLength <= 0) videoLength = YTRemoteLength([streams objectForKey:@"videoURL"], [client objectForKey:@"ua"]);
+            if (audioLength <= 0) audioLength = YTRemoteLength([streams objectForKey:@"audioURL"], [client objectForKey:@"ua"]);
+            [streams setObject:[NSNumber numberWithLongLong:videoLength] forKey:@"videoLength"];
+            [streams setObject:[NSNumber numberWithLongLong:audioLength] forKey:@"audioLength"];
+            if (videoLength <= 0 || audioLength <= 0) {
+                failure = [NSString stringWithFormat:@"URLs found but byte lengths missing (video %lld, audio %lld).", videoLength, audioLength];
+            } else {
+                YTMediaSource *video = [[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"videoURL"]
+                    length:videoLength userAgent:[client objectForKey:@"ua"]] autorelease];
+                YTMediaSource *audio = [[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"audioURL"]
+                    length:audioLength userAgent:[client objectForKey:@"ua"]] autorelease];
+                unsigned char header[12];
+                if ([video readAtOffset:0 into:header count:12] != 12) failure = [video errorText];
+                else if ([audio readAtOffset:0 into:header count:12] != 12) failure = [audio errorText];
+                else {
+                    [streams setObject:video forKey:@"videoSource"];
+                    [streams setObject:audio forKey:@"audioSource"];
+                    [[NSUserDefaults standardUserDefaults] setObject:[client objectForKey:@"label"] forKey:@"YTWorkingClient"];
+                    return streams;
+                }
+            }
+        }
+        [errors addObject:[NSString stringWithFormat:@"%@: %@", [client objectForKey:@"label"], failure ? failure : @"No usable stream."]];
+    }
+    if (errorText) *errorText = [errors componentsJoinedByString:@"\n\n"];
+    return nil;
 }
 
 + (NSString *)videoIDFromText:(NSString *)text {
@@ -400,4 +567,3 @@ static long long YTFormatLength(NSString *format) {
 }
 
 @end
-

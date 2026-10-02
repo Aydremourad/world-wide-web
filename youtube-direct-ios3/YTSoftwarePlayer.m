@@ -320,12 +320,12 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     playback.controller = self; playback.audio = &audio;
     playback.stop = &_stop; playback.paused = &_paused;
     playback.firstPTS = NAN; playback.frameDuration = 1.0 / 15.0;
-    _videoSource = [[YTMediaSource alloc] initWithURL:[_streams objectForKey:@"videoURL"]
-        length:[[_streams objectForKey:@"videoLength"] longLongValue]
-        userAgent:[_streams objectForKey:@"userAgent"]];
-    _audioSource = [[YTMediaSource alloc] initWithURL:[_streams objectForKey:@"audioURL"]
-        length:[[_streams objectForKey:@"audioLength"] longLongValue]
-        userAgent:[_streams objectForKey:@"userAgent"]];
+    _videoSource = [[_streams objectForKey:@"videoSource"] retain];
+    _audioSource = [[_streams objectForKey:@"audioSource"] retain];
+    if (!_videoSource) _videoSource = [[YTMediaSource alloc] initWithURL:[_streams objectForKey:@"videoURL"]
+        length:[[_streams objectForKey:@"videoLength"] longLongValue] userAgent:[_streams objectForKey:@"userAgent"]];
+    if (!_audioSource) _audioSource = [[YTMediaSource alloc] initWithURL:[_streams objectForKey:@"audioURL"]
+        length:[[_streams objectForKey:@"audioLength"] longLongValue] userAgent:[_streams objectForKey:@"userAgent"]];
     io.source = _videoSource; audio.source = _audioSource;
     if (_stop) goto finished;
     av_register_all();
