@@ -37,6 +37,7 @@ int main(int argc,char **argv) {
     assert(info && [[info objectForKey:@"eligible"] boolValue] && [[info objectForKey:@"profile"] intValue]==66);
     [Movie release]; Movie=[[NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[4]]] retain];
     info=YTNativeStreamInfo(Streams());
+    NSLog(@"Simple Profile probe: %@",info);
     assert(info && [[info objectForKey:@"eligible"] boolValue] && [[info objectForKey:@"profile"] intValue]==0);
     NSLog(@"Native MPEG-4 Simple Profile route passed.");
     NSMutableData *advanced=[Movie mutableCopy]; unsigned char *headers=[advanced mutableBytes]; BOOL changed=NO;

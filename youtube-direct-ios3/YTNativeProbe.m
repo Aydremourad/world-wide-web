@@ -62,6 +62,15 @@ NSDictionary *YTNativeStreamInfo(NSDictionary *streams) {
             result=[NSDictionary dictionaryWithObjectsAndKeys:
                 [NSNumber numberWithBool:eligible],@"eligible",[NSNumber numberWithInt:profile],@"profile",
                 [NSNumber numberWithInt:level],@"level",
+                [NSNumber numberWithInt:codec->codec_id],@"codec",
+                [NSNumber numberWithBool:supportedVideo],@"supportedVideo",
+                [NSNumber numberWithDouble:fps],@"fps",
+                [NSNumber numberWithInt:aacObject],@"aacObject",
+                [NSNumber numberWithInt:audio->channels],@"audioChannels",
+                [NSNumber numberWithInt:audio->sample_rate],@"audioRate",
+                [NSNumber numberWithLongLong:audio->bit_rate],@"audioBitrate",
+                [NSNumber numberWithLongLong:format->bit_rate],@"bitrate",
+                [NSData dataWithBytes:codec->extradata length:codec->extradata_size>64 ? 64 : codec->extradata_size],@"videoHeader",
                 [NSNumber numberWithInt:codec->width],@"width",[NSNumber numberWithInt:codec->height],@"height",[NSNumber numberWithLongLong:[source length]],@"length",nil];
         }
     }
