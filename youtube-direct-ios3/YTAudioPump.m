@@ -68,7 +68,22 @@ static void YTAudioRecover(YTAudio *audio) {
     if (!audio->started || YTAudioStopped(audio)) return;
     YTAudioMediaTime(audio);
     double now = YTAudioWallTime();
-    if (audio->paused && *audio->paused) { audio->lastAdvance = audio->lastBufferAdvance = now; return; }
+    if (audio->paused && *audio->paused) {
+        if(!audio->heldForPause) {
+            OSStatus status=audio->sink.pause ? audio->sink.pause(audio->sink.context) : noErr;
+            if(status!=noErr) { audio->error=status; audio->failed=YES; }
+            audio->heldForPause=YES;
+        }
+        audio->lastAdvance=audio->lastBufferAdvance=now; return;
+    }
+    if(audio->heldForPause) {
+        OSStatus status=audio->sink.start(audio->sink.context);
+        if(status!=noErr) { audio->error=status; audio->failed=YES; return; }
+        audio->heldForPause=NO;
+        pthread_mutex_lock(&audio->mutex); audio->mediaClockReady=NO; pthread_mutex_unlock(&audio->mutex);
+        audio->lastAdvance=audio->lastBufferAdvance=now;
+        if(audio->eof) audio->sink.drain(audio->sink.context);
+    }
     double clock = audio->sink.clock ? audio->sink.clock(audio->sink.context) : -1;
     if (clock >= 0 && clock < audio->lastClock - 1.0) { audio->lastClock=clock; audio->lastAdvance=now; }
     if (!audio->lastAdvance || clock > audio->lastClock + 0.005) {

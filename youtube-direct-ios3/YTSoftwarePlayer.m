@@ -79,7 +79,6 @@ static int YTInterruptVideo(void *opaque) { return *(volatile BOOL *)opaque; }
 static BOOL YTWaitForPause(YTPlayback *playback) {
     while (*playback->paused && !*playback->stop && !playback->audio->failed) {
         if (!playback->queuePaused) {
-            if (playback->audioStarted) AudioQueuePause(playback->audio->queue);
             playback->queuePaused = YES;
             playback->pauseStart = [NSDate timeIntervalSinceReferenceDate];
         }
@@ -87,7 +86,6 @@ static BOOL YTWaitForPause(YTPlayback *playback) {
     }
     if (playback->queuePaused && !*playback->stop) {
         playback->pauseTotal += [NSDate timeIntervalSinceReferenceDate] - playback->pauseStart;
-        if (playback->audioStarted) AudioQueueStart(playback->audio->queue, NULL);
         playback->queuePaused = NO;
     }
     return !*playback->stop && !playback->audio->failed;

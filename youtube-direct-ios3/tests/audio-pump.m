@@ -188,6 +188,15 @@ int main(int argc,char **argv) {
     YTFakeCleanUp(&audio,&queue);
     assert([NSDate timeIntervalSinceReferenceDate]-before < 1.0);
     NSLog(@"Audio producer cancellation and cleanup passed.");
+    Requests=0; YTFakeSetUp(&audio,&queue,&stop,&paused);
+    paused=YES; [NSThread sleepForTimeInterval:0.25];
+    pthread_mutex_lock(&queue.mutex); BOOL wasPaused=!queue.running; unsigned pauseStarts=queue.starts; pthread_mutex_unlock(&queue.mutex);
+    assert(wasPaused);
+    [NSThread sleepForTimeInterval:0.3];
+    pthread_mutex_lock(&queue.mutex); assert(!queue.running && queue.starts==pauseStarts); pthread_mutex_unlock(&queue.mutex);
+    paused=NO; [NSThread sleepForTimeInterval:0.25]; assert(YTFakeRunning(&queue));
+    YTFakeCleanUp(&audio,&queue);
+    NSLog(@"Single-owner pause and resume passed.");
     // A song shorter than the initial PCM prefill must still drain cleanly.
     [Movie release]; Movie=[[NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[2]]] retain];
     Requests=0; YTFakeSetUp(&audio,&queue,&stop,&paused); assert(audio.eof && !audio.workerCreated && audio.monitorCreated);

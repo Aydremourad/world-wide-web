@@ -25,7 +25,7 @@ typedef struct {
     void *compressed;
     UInt64 decodedFrames, playedFrames;
     double mediaBase, rawBase, rawPrevious, mediaTime;
-    BOOL mediaClockReady;
+    BOOL mediaClockReady, heldForPause;
     AudioQueueRef queue;
     AudioStreamBasicDescription format;
     AudioStreamPacketDescription *descriptions;

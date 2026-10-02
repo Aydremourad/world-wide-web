@@ -588,6 +588,7 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
     [video setRequestTimeout:3]; [audio setRequestTimeout:3];
     unsigned char bytes[12];
     if([video readAtOffset:0 into:bytes count:12]!=12 || [audio readAtOffset:0 into:bytes count:12]!=12) return nil;
+    [video setRequestTimeout:12]; [audio setRequestTimeout:12];
     [streams setObject:video forKey:@"videoSource"]; [streams setObject:audio forKey:@"audioSource"];
     return streams;
 }
