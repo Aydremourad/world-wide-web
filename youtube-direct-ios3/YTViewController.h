@@ -1,5 +1,4 @@
 #import <UIKit/UIKit.h>
-#import <MediaPlayer/MediaPlayer.h>
 
 @interface YTViewController : UIViewController
     <UITableViewDataSource, UITableViewDelegate, UISearchBarDelegate> {
@@ -8,7 +7,6 @@
     NSArray *_results;
     UIActivityIndicatorView *_spinner;
     UILabel *_statusLabel;
-    MPMoviePlayerController *_moviePlayer;
-    NSDate *_movieStartedAt;
 }
 @end
+

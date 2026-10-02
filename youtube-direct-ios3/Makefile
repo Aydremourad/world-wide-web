@@ -8,10 +8,11 @@ TARGET = iphone:clang:$(SDKVERSION):3.0
 include $(THEOS)/makefiles/common.mk
 
 APPLICATION_NAME = YouTubeDirect
-YouTubeDirect_FILES = main.m YTAppDelegate.m YTViewController.m YTYouTube.m
-YouTubeDirect_FRAMEWORKS = UIKit Foundation MediaPlayer
-YouTubeDirect_CFLAGS = -fno-objc-arc -miphoneos-version-min=3.0 -Wno-unused-function
-YouTubeDirect_LDFLAGS = -miphoneos-version-min=3.0
+YouTubeDirect_FILES = main.m YTAppDelegate.m YTViewController.m YTYouTube.m YTMediaSource.m YTVideoSurface.m YTSoftwarePlayer.m
+YouTubeDirect_FRAMEWORKS = UIKit Foundation AudioToolbox OpenGLES QuartzCore
+YouTubeDirect_CFLAGS = -fno-objc-arc -miphoneos-version-min=3.0 -Wno-unused-function -O2 -I$(CURDIR)/.deps/FFmpeg-2.8.22
+YouTubeDirect_LDFLAGS = -miphoneos-version-min=3.0 $(CURDIR)/.deps/FFmpeg-2.8.22/libavformat/libavformat.a $(CURDIR)/.deps/FFmpeg-2.8.22/libavcodec/libavcodec.a $(CURDIR)/.deps/FFmpeg-2.8.22/libswscale/libswscale.a $(CURDIR)/.deps/FFmpeg-2.8.22/libavutil/libavutil.a -lm
 TARGET_CODESIGN_FLAGS = -S -Hsha1
 
 include $(THEOS_MAKE_PATH)/application.mk
+

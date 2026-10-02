@@ -1,0 +1,35 @@
+name: iOS 3 native player
+on:
+  push:
+    branches: [youtube-native-player-ios3]
+    paths: [youtube-direct-ios3/**, .github/workflows/ios3-native-player.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build ARMv6 linker and fetch SDK
+        run: |
+          brew install ldid autoconf automake libtool
+          git clone --depth 1 https://github.com/tpoechtrager/cctools-port.git "$RUNNER_TEMP/cctools-port"
+          cd "$RUNNER_TEMP/cctools-port/cctools"
+          ./configure --prefix="$RUNNER_TEMP/cctools-armv6" --target=arm-apple-darwin11 --without-libtapi
+          make -j3
+          make install
+          mkdir -p "$RUNNER_TEMP/ios3/sdks"
+          curl -fL --retry 2 https://github.com/qianjigui/iOS-sdks/raw/master/iPhoneOS3.1.3.sdk.tbz2 -o "$RUNNER_TEMP/sdk.tbz2"
+          tar -xjf "$RUNNER_TEMP/sdk.tbz2" -C "$RUNNER_TEMP/ios3/sdks"
+      - name: Build and check iPhone OS 3 application
+        working-directory: youtube-direct-ios3
+        env:
+          THEOS: ${{ runner.temp }}/ios3
+          LEGACY_LD: ${{ runner.temp }}/cctools-armv6/bin/arm-apple-darwin11-ld
+        run: sh ./ci-build.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: YouTubeDirect-iOS3-armv6
+          path: youtube-direct-ios3/packages/*.deb

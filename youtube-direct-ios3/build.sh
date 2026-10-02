@@ -51,8 +51,8 @@ export TARGET_LD="$LINK_WRAPPER"
 echo "Using armv6 linker: $LEGACY_LD"
 
 echo
-echo "Preparing bundled ARMv6 converter..."
-SDKVER="$SDKVER" LEGACY_LD="$LEGACY_LD" sh ./build-static-ffmpeg.sh
+echo "Preparing static ARMv6 decoder libraries..."
+SDKVER="$SDKVER" LEGACY_LD="$LEGACY_LD" sh ./build-decoder.sh
 
 make clean SDKVERSION="$SDKVER" FINALPACKAGE=1
 make package SDKVERSION="$SDKVER" FINALPACKAGE=1
@@ -90,3 +90,4 @@ fi
 echo
 echo "Built packages:"
 find packages -type f -name '*.deb' -maxdepth 2 -print
+

@@ -1,5 +1,6 @@
 #import "YTViewController.h"
 #import "YTYouTube.h"
+#import "YTSoftwarePlayer.h"
 
 @implementation YTViewController
 
@@ -29,7 +30,7 @@
     _statusLabel.textAlignment = UITextAlignmentCenter;
     _statusLabel.numberOfLines = 4;
     _statusLabel.font = [UIFont systemFontOfSize:14];
-    _statusLabel.text = @"Direct YouTube client for iPhone OS 3.\nNo TubeRepair, Render, Piped, or Invidious.\nSearch above or paste a YouTube link.";
+    _statusLabel.text = @"YouTube for iPhone OS 3.\n144p playback over Wi-Fi.\nSearch above or paste a YouTube link.";
     _statusLabel.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [self.view addSubview:_statusLabel];
 
@@ -127,82 +128,37 @@
 }
 
 - (void)beginResolve:(NSString *)videoID {
-    [self setBusy:YES text:@"Trying legacy 3GP / ultralow 144p..."];
+    [self setBusy:YES text:@"Getting the 144p stream..."];
     [NSThread detachNewThreadSelector:@selector(resolveThread:) toTarget:self withObject:videoID];
 }
 
 - (void)resolveThread:(NSString *)videoID {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     NSString *error = nil;
-    NSURL *url = [YTYouTube directVideoURLForID:videoID error:&error];
+    NSDictionary *streams = [YTYouTube playbackStreamsForID:videoID error:&error];
     NSDictionary *payload = [NSDictionary dictionaryWithObjectsAndKeys:
-        (url ? [url absoluteString] : @""), @"url",
+        (streams ? (id)streams : (id)[NSNull null]), @"streams",
         (error ? error : @""), @"error", nil];
     [self performSelectorOnMainThread:@selector(resolveFinished:) withObject:payload waitUntilDone:NO];
     [pool release];
 }
 
 - (void)resolveFinished:(NSDictionary *)payload {
-    NSString *urlString = [payload objectForKey:@"url"];
-    if (![urlString length]) {
+    NSDictionary *streams = [payload objectForKey:@"streams"];
+    if (![streams isKindOfClass:[NSDictionary class]]) {
         [self showError:[payload objectForKey:@"error"]];
         return;
     }
-
     [_spinner stopAnimating];
     _tableView.hidden = NO;
     _searchBar.userInteractionEnabled = YES;
     _statusLabel.hidden = YES;
-
-    if (_moviePlayer) {
-        [[NSNotificationCenter defaultCenter] removeObserver:self
-                                                        name:MPMoviePlayerPlaybackDidFinishNotification
-                                                      object:_moviePlayer];
-        [_moviePlayer stop];
-        [_moviePlayer release];
-        _moviePlayer = nil;
-    }
-
-    _moviePlayer = [[MPMoviePlayerController alloc] initWithContentURL:[NSURL URLWithString:urlString]];
-    [_movieStartedAt release];
-    _movieStartedAt = [[NSDate date] retain];
-
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(movieFinished:)
-                                                 name:MPMoviePlayerPlaybackDidFinishNotification
-                                               object:_moviePlayer];
-    [_moviePlayer play];
-}
-
-- (void)movieFinished:(NSNotification *)note {
-    NSTimeInterval elapsed = _movieStartedAt ? -[_movieStartedAt timeIntervalSinceNow] : 999.0;
-    NSDictionary *info = [note userInfo];
-    NSError *mediaError = [info objectForKey:@"error"];
-
-    [[NSNotificationCenter defaultCenter] removeObserver:self
-                                                    name:MPMoviePlayerPlaybackDidFinishNotification
-                                                  object:_moviePlayer];
-    [_moviePlayer release];
-    _moviePlayer = nil;
-    [_movieStartedAt release];
-    _movieStartedAt = nil;
-
-    if (mediaError || elapsed < 4.0) {
-        NSString *message = nil;
-        if (mediaError)
-            message = [NSString stringWithFormat:@"The local MP4 was rejected by iPhone OS 3 MediaPlayer: %@",
-                       [mediaError localizedDescription]];
-        else
-            message = @"The local MP4 was downloaded successfully, but iPhone OS 3 MediaPlayer rejected it immediately. This means the remaining problem is the video file/container itself, not YouTube networking.";
-        [self showError:message];
-    }
+    YTSoftwarePlayer *player = [[YTSoftwarePlayer alloc] initWithStreams:streams];
+    [self presentModalViewController:player animated:YES];
+    [player release];
 }
 
 - (void)dealloc {
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
-    [_moviePlayer stop];
-    [_moviePlayer release];
-    [_movieStartedAt release];
     [_results release];
     [_spinner release];
     [_statusLabel release];
@@ -212,3 +168,4 @@
 }
 
 @end
+
