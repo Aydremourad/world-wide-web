@@ -197,6 +197,7 @@ int main(int argc,char **argv) {
     paused=NO; [NSThread sleepForTimeInterval:0.25]; assert(YTFakeRunning(&queue));
     YTFakeCleanUp(&audio,&queue);
     NSLog(@"Single-owner pause and resume passed.");
+    [NSThread sleepForTimeInterval:0.3]; // Let cancelled fixture callbacks finish before resetting counters.
     // A song shorter than the initial PCM prefill must still drain cleanly.
     [Movie release]; Movie=[[NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[2]]] retain];
     Requests=0; YTFakeSetUp(&audio,&queue,&stop,&paused); assert(audio.eof && !audio.workerCreated && audio.monitorCreated);

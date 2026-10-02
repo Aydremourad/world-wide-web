@@ -9,23 +9,28 @@
 
 static NSData *Movie;
 static int Requests;
-@interface YTMovieProtocol : NSURLProtocol
+@interface YTMovieProtocol : NSURLProtocol { NSData *_fixture; }
 @end
 @implementation YTMovieProtocol
 + (BOOL)canInitWithRequest:(NSURLRequest *)request { return [[[request URL] host] isEqualToString:@"movie.example"]; }
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
+- (id)initWithRequest:(NSURLRequest *)request cachedResponse:(NSCachedURLResponse *)response client:(id<NSURLProtocolClient>)client {
+    if((self=[super initWithRequest:request cachedResponse:response client:client])) _fixture=[Movie retain];
+    return self;
+}
+- (void)dealloc { [_fixture release]; [super dealloc]; }
 - (void)startLoading {
     assert([[[self request] URL] query] == nil);
     long long start = 0, end = 0;
     NSScanner *scan = [NSScanner scannerWithString:[[self request] valueForHTTPHeaderField:@"Range"]];
     assert([scan scanString:@"bytes=" intoString:NULL] && [scan scanLongLong:&start] &&
            [scan scanString:@"-" intoString:NULL] && [scan scanLongLong:&end]);
-    assert(start >= 0 && end >= start && end < (long long)[Movie length] && end - start + 1 <= 262144);
+    assert(start >= 0 && end >= start && end < (long long)[_fixture length] && end - start + 1 <= 262144);
     __sync_add_and_fetch(&Requests,1);
-    NSData *bytes = [Movie subdataWithRange:NSMakeRange((NSUInteger)start, (NSUInteger)(end-start+1))];
+    NSData *bytes = [_fixture subdataWithRange:NSMakeRange((NSUInteger)start, (NSUInteger)(end-start+1))];
     NSDictionary *headers = [NSDictionary dictionaryWithObjectsAndKeys:@"video/mp4", @"Content-Type",
         [NSString stringWithFormat:@"%lld", end-start+1], @"Content-Length",
-        [NSString stringWithFormat:@"bytes %lld-%lld/%lu", start, end, (unsigned long)[Movie length]], @"Content-Range", nil];
+        [NSString stringWithFormat:@"bytes %lld-%lld/%lu", start, end, (unsigned long)[_fixture length]], @"Content-Range", nil];
     NSHTTPURLResponse *response = [[[NSHTTPURLResponse alloc] initWithURL:[[self request] URL] statusCode:206
         HTTPVersion:@"HTTP/1.1" headerFields:headers] autorelease];
     [[self client] URLProtocol:self didReceiveResponse:response cacheStoragePolicy:NSURLCacheStorageNotAllowed];
