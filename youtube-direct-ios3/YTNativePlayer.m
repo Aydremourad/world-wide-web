@@ -15,7 +15,7 @@
     _movie=[[MPMoviePlayerController alloc] initWithContentURL:[_server movieURL]];
     if(!_movie) { [_server stop]; return NO; }
     _movie.scalingMode=MPMovieScalingModeAspectFit;
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(movieFinished:) name:MPMoviePlayerPlaybackDidFinishNotification object:_movie];
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(movieFinished:) name:MPMoviePlayerPlaybackDidFinishNotification object:nil];
     [_movie play]; // iPhone OS 3 presents Apple's own full-screen controller.
     return YES;
 }

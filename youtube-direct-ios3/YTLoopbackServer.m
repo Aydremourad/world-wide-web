@@ -126,8 +126,9 @@ static BOOL YTSendText(int fd,NSString *text) {
     } else if(!_stopped) {
         YTSendText(fd,[NSString stringWithFormat:@"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */%lld\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",(long long)_length]);
     }
-    shutdown(fd,SHUT_RDWR); close(fd);
-    [_lock lock]; [_clients removeObjectForKey:key]; [_lock unlock];
+    // Retire the entry before the kernel can reuse this socket number.
+    [_lock lock]; [_clients removeObjectForKey:key];
+    shutdown(fd,SHUT_RDWR); close(fd); [_lock unlock];
     [source release]; [pool release];
 }
 - (void)stop {
