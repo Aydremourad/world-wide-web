@@ -1,6 +1,6 @@
 Package: com.aydre.youtubedirect
 Name: YouTube Direct
-Version: 0.4.2
+Version: 0.4.3
 Architecture: iphoneos-arm
 Description: Direct-to-YouTube client for iPhone OS 3. No TubeRepair or proxy server.
 Maintainer: Aydre
