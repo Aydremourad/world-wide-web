@@ -45,10 +45,13 @@ jobs:
         run: sh tests/run-range-test.sh
       - uses: actions/cache/restore@v4
         id: decoder
+        if: always()
         with:
           key: ios3-armv6-ffmpeg-2.8.22-decoder-v1
           path: youtube-direct-ios3/.deps
       - name: Build and check iPhone OS 3 application
+        id: app_build
+        if: always()
         working-directory: youtube-direct-ios3
         env:
           THEOS: ${{ runner.temp }}/ios3
@@ -60,6 +63,7 @@ jobs:
           key: ios3-armv6-ffmpeg-2.8.22-decoder-v1
           path: youtube-direct-ios3/.deps
       - uses: actions/upload-artifact@v4
+        if: always() && steps.app_build.outcome == 'success'
         with:
           name: YouTubeDirect-iOS3-armv6
           path: youtube-direct-ios3/packages/*.deb

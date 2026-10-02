@@ -36,7 +36,16 @@ class Handler(BaseHTTPRequestHandler):
             pass
 
 
-server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+class FixtureServer(ThreadingHTTPServer):
+    def server_bind(self):
+        # Avoid macOS runner reverse-DNS delays for localhost during startup.
+        self.socket.bind(self.server_address)
+        self.server_address = self.socket.getsockname()
+        self.server_name = "localhost"
+        self.server_port = self.server_address[1]
+
+
+server = FixtureServer(("127.0.0.1", 0), Handler)
 with open(sys.argv[1], "w") as output:
     output.write(str(server.server_port))
 server.serve_forever()
