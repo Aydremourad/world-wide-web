@@ -58,6 +58,7 @@ typedef struct {
 - (void)attachAudioQueue:(NSDictionary *)info;
 - (void)detachAudioQueue;
 - (void)controlsTick:(NSTimer *)timer;
+- (void)layoutPlayerChrome;
 @end
 
 static int YTReadVideo(void *opaque, uint8_t *bytes, int count) {
@@ -176,7 +177,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
 - (void)viewDidLoad {
     [super viewDidLoad];
     _oldStatusHidden = [UIApplication sharedApplication].statusBarHidden;
-    [[UIApplication sharedApplication] setStatusBarHidden:YES animated:YES];
+    [[UIApplication sharedApplication] setStatusBarHidden:YES animated:NO];
     AudioSessionInitialize(NULL, NULL, NULL, NULL);
     UInt32 category = kAudioSessionCategory_MediaPlayback;
     AudioSessionSetProperty(kAudioSessionProperty_AudioCategory, sizeof(category), &category);
@@ -207,7 +208,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     [_topBar setItems:[NSArray arrayWithObjects:done, space, qualityItem, space, _fitItem, nil]];
     [self.view addSubview:_topBar];
     _bottomControls = [[UIView alloc] initWithFrame:CGRectMake(0, bounds.size.height-100, bounds.size.width, 100)];
-    _bottomControls.backgroundColor = [UIColor colorWithWhite:0 alpha:0.70];
+    _bottomControls.backgroundColor = [UIColor colorWithWhite:0 alpha:0.78];
     _bottomControls.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleTopMargin;
     [self.view addSubview:_bottomControls];
     _elapsedLabel = [[UILabel alloc] initWithFrame:CGRectMake(8, 3, 48, 26)];
@@ -235,7 +236,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     _backItem.enabled=_forwardItem.enabled=NO; [self updateTransport];
     [_bottomControls addSubview:_transportBar];
     _volume = [[UISlider alloc] initWithFrame:CGRectMake(35, 70, bounds.size.width-70, 30)];
-    _volume.minimumValue=0; _volume.maximumValue=1; _volume.value=1;
+    _volume.minimumValue=0; _volume.maximumValue=1; _volume.value=1; _volume.continuous=YES;
     _volume.autoresizingMask=UIViewAutoresizingFlexibleWidth;
     [_volume addTarget:self action:@selector(volumeChanged) forControlEvents:UIControlEventValueChanged];
     [_bottomControls addSubview:_volume];
@@ -248,12 +249,39 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     _message.textColor=[UIColor whiteColor]; _message.backgroundColor=[UIColor clearColor];
     _message.font=[UIFont systemFontOfSize:14]; _message.textAlignment=UITextAlignmentCenter;
     _message.numberOfLines=3; _message.text=@"Loading..."; [self.view addSubview:_message];
+    [self layoutPlayerChrome];
     _lastControlTouch=[NSDate timeIntervalSinceReferenceDate];
     _controlsTimer=[[NSTimer scheduledTimerWithTimeInterval:0.25 target:self selector:@selector(controlsTick:) userInfo:nil repeats:YES] retain];
     [self retain];
     [NSThread detachNewThreadSelector:@selector(playThread:) toTarget:self withObject:nil];
 }
 - (BOOL)shouldAutorotateToInterfaceOrientation:(UIInterfaceOrientation)orientation { return YES; }
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    [self layoutPlayerChrome];
+}
+- (void)willAnimateRotationToInterfaceOrientation:(UIInterfaceOrientation)orientation duration:(NSTimeInterval)duration {
+    [self layoutPlayerChrome];
+}
+- (void)didRotateFromInterfaceOrientation:(UIInterfaceOrientation)fromInterfaceOrientation {
+    [super didRotateFromInterfaceOrientation:fromInterfaceOrientation];
+    [self layoutPlayerChrome];
+}
+- (void)layoutPlayerChrome {
+    CGRect bounds=self.view.bounds;
+    CGFloat width=bounds.size.width, height=bounds.size.height;
+    CGFloat bottomHeight=100.0f;
+    _surface.frame=bounds;
+    _topBar.frame=CGRectMake(0,0,width,44);
+    _bottomControls.frame=CGRectMake(0,height-bottomHeight,width,bottomHeight);
+    _elapsedLabel.frame=CGRectMake(8,3,48,26);
+    _durationLabel.frame=CGRectMake(width-58,3,50,26);
+    _progress.frame=CGRectMake(60,0,width-124,32);
+    _transportBar.frame=CGRectMake(0,30,width,40);
+    _volume.frame=CGRectMake(35,68,width-70,30);
+    _spinner.center=CGPointMake(width/2,height/2-15);
+    _message.frame=CGRectMake(20,height/2+10,width-40,55);
+}
 - (NSString *)timeString:(double)seconds {
     int time=(int)(seconds > 0 ? seconds : 0);
     return [NSString stringWithFormat:@"%d:%02d",time/60,time%60];
@@ -429,7 +457,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     if(_sessionStop) { [_videoSource cancel]; [_audioSource cancel]; }
     [_seekCondition unlock];
     io.source = _videoSource; audio.source = _audioSource;
-    [NSThread setThreadPriority:0.5];
+    [NSThread setThreadPriority:0.60];
     if (_sessionStop) goto finished;
     av_register_all();
     format = avformat_alloc_context();
@@ -552,7 +580,7 @@ finished:
         if ([networkError length]) failure = networkError;
         else if (audio.failed) failure = [NSString stringWithFormat:@"AAC playback stopped (%ld).", (long)audio.error];
     }
-    NSString *message = [(failure ? failure : @"Finished.") retain];
+    NSString *message = [(failure ? failure : @"Playback complete.\nTap Play to replay.") retain];
     [_seekCondition lock];
     [_videoSource release]; _videoSource=nil; [_audioSource release]; _audioSource=nil;
     [_seekCondition unlock];

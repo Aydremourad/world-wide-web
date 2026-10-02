@@ -25,6 +25,7 @@
                                              style:UITableViewStylePlain];
     _tableView.dataSource = self;
     _tableView.delegate = self;
+    _tableView.rowHeight = 56.0f;
     _tableView.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     [self.view addSubview:_tableView];
 
@@ -54,6 +55,7 @@
 }
 
 - (void)setBusy:(BOOL)busy text:(NSString *)text {
+    [UIApplication sharedApplication].networkActivityIndicatorVisible = busy;
     if (busy) [_spinner startAnimating];
     else [_spinner stopAnimating];
     _statusLabel.hidden = ![text length];
@@ -111,6 +113,7 @@
     [_tableView reloadData];
     _tableView.hidden = NO;
     _searchBar.userInteractionEnabled = YES;
+    [UIApplication sharedApplication].networkActivityIndicatorVisible = NO;
     [_spinner stopAnimating];
     _statusLabel.hidden = ([_results count] != 0);
     if (![_results count]) _statusLabel.text = @"No videos found.";
@@ -128,7 +131,9 @@
 
     NSDictionary *item = [_results objectAtIndex:indexPath.row];
     cell.textLabel.text = [item objectForKey:@"title"];
+    cell.textLabel.font = [UIFont boldSystemFontOfSize:14.0f];
     cell.detailTextLabel.text = [item objectForKey:@"author"];
+    cell.detailTextLabel.font = [UIFont systemFontOfSize:11.0f];
     cell.accessoryType = UITableViewCellAccessoryDisclosureIndicator;
     return cell;
 }
@@ -163,7 +168,7 @@
     if(streams) {
         NSDictionary *info=[streams objectForKey:@"nativeInfo"];
         NSString *route=[[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue] ? @"Apple player" : @"Software player";
-        NSString *diagnostic=[NSString stringWithFormat:@"YouTube 0.9.2\nPlayer: %@\nHeight: %@\nNative probe: %@\n",route,[streams objectForKey:@"height"],info ? info : @"separate tracks"];
+        NSString *diagnostic=[NSString stringWithFormat:@"Player: %@\nHeight: %@\nNative probe: %@\n",route,[streams objectForKey:@"height"],info ? info : @"separate tracks"];
         [diagnostic writeToFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"YouTube-playback.txt"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
     }
     NSDictionary *payload = [NSDictionary dictionaryWithObjectsAndKeys:
@@ -182,6 +187,7 @@
     [_spinner stopAnimating];
     _tableView.hidden = NO;
     _searchBar.userInteractionEnabled = YES;
+    [UIApplication sharedApplication].networkActivityIndicatorVisible = NO;
     _statusLabel.hidden = YES;
     if ([[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue]) {
         _nativePlayer=[[YTNativePlayer alloc] initWithStreams:streams delegate:self];
@@ -203,6 +209,7 @@
     [streams release];
 }
 - (void)dealloc {
+    [UIApplication sharedApplication].networkActivityIndicatorVisible = NO;
     [_nativePlayer stop]; [_nativePlayer release];
     [_results release];
     [_spinner release];

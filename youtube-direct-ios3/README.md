@@ -32,7 +32,7 @@ The stock YouTube player's hardware decoder cannot provide this software path.
 ## Installation
 
 The [Actions build](https://github.com/Aydremourad/world-wide-web/actions/workflows/ios3-native-player.yml)
-produces `com.aydre.youtubedirect_0.9.0_iphoneos-arm.deb` in the
+produces `com.aydre.youtubedirect_1.0.0_iphoneos-arm.deb` in the
 `YouTubeDirect-iOS3-armv6` artifact. Install with iFile, or from a phone terminal:
 
 ```sh
@@ -175,3 +175,26 @@ playback on the physical 2G. The Home Screen installer fix from 0.9.1-1 remains.
 The regression suite exercises bidirectional MP4 seeks, sought AAC PCM lengths
 and media-clock origins, continuing non-key pictures under ordinary lateness,
 reader cancellation isolation, and the native MPEG-4 Simple Profile probe.
+
+
+## 1.0.0 refinement pass
+
+1.0.0 is the first release-candidate-quality build based on the device-tested
+0.9.2 player. The software player's controls now run an explicit layout pass
+after full-screen presentation and rotation, fixing the iPhone OS 3 geometry
+race that could leave the portrait volume slider off-screen until a landscape
+round trip. Full-screen status-bar changes are immediate to avoid another
+intermediate layout.
+
+Video presentation is adaptive rather than all-or-nothing: near sync, every
+decoded picture may be shown; once video starts falling behind, expensive
+RGB conversion and OpenGL uploads are capped progressively at 20 or 15 fps.
+This gives the ARMv6 decoder more CPU to recover without returning to the old
+four-fps/keyframe-only behavior. The video worker receives a modest priority
+increase while remaining below the audio producer. Audio buffering, PCM output,
+seek behavior and the native Apple-player route are otherwise unchanged.
+
+The search screen gets a small 1.0 polish pass with slightly roomier result
+rows, tuned title/byline typography and the iPhone OS network activity
+indicator during search and stream resolution. The playback diagnostic no
+longer hard-codes a version string; the About sheet reads the bundle version.

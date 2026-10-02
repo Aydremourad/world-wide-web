@@ -15,6 +15,18 @@ int main(void) {
         if (YTShouldPresentFrame(-2,now,last)) { presented++; last=now; }
     }
     assert(presented>=95 && presented<=105);
+    last=0; presented=0;
+    for (int i=1;i<=200;i++) {
+        double now=i*0.025;
+        if (YTShouldPresentFrame(-0.20,now,last)) { presented++; last=now; }
+    }
+    assert(presented>=90 && presented<=110);
+    last=0; presented=0;
+    for (int i=1;i<=200;i++) {
+        double now=i*0.025;
+        if (YTShouldPresentFrame(-0.03,now,last)) { presented++; last=now; }
+    }
+    assert(presented==200);
     assert(YTClampSeekTime(-5,40)==0);
     assert(YTClampSeekTime(10,40)==10);
     assert(YTClampSeekTime(100,40)==39.9);
@@ -23,6 +35,6 @@ int main(void) {
     assert(YTNeedsVideoResync(10,14,100,0));
     assert(!YTNeedsVideoResync(10,14,102,100));
     assert(YTNeedsVideoResync(10,14,105,100));
-    puts("Player timing passed: late display has no four-fps cap, bounded seeks and restart clock continuity.");
+    puts("Player timing passed: adaptive late-frame pacing, bounded seeks and restart clock continuity.");
     return 0;
 }
