@@ -23,14 +23,16 @@ ROOT="$(pwd)"
 DEPS="$ROOT/.deps"
 SRC="$DEPS/FFmpeg-2.8.22"
 OUT="$ROOT/layout/usr/libexec/ytdirect-ffmpeg"
+REVFILE="$ROOT/layout/usr/libexec/ytdirect-ffmpeg.rev"
+CONVERTER_REV="2"
 mkdir -p "$DEPS" "$ROOT/layout/usr/libexec"
 
-if [ -x "$OUT" ]; then
+if [ -x "$OUT" ] && [ -f "$REVFILE" ] && [ "$(cat "$REVFILE")" = "$CONVERTER_REV" ]; then
   if file "$OUT" | grep -q "Mach-O executable arm_v6" \
     && ! xcrun otool -L "$OUT" | egrep -q 'libav(codec|format|util|filter)|libsw(scale|resample)' \
     && ! xcrun otool -l "$OUT" | grep -q LC_MAIN \
     && xcrun otool -l "$OUT" | grep -q LC_UNIXTHREAD; then
-    echo "Reusing existing bundled static converter: $OUT"
+    echo "Reusing optimized bundled static converter: $OUT"
     exit 0
   fi
 fi
@@ -70,7 +72,9 @@ echo "Configuring static armv6 FFmpeg..."
   --ld="$LD_WRAP" \
   --disable-shared \
   --enable-static \
-  --disable-asm \
+  --disable-neon \
+  --disable-armv6t2 \
+  --disable-vfp \
   --disable-yasm \
   --disable-debug \
   --disable-stripping \
@@ -138,4 +142,5 @@ if ! xcrun otool -l "$OUT" | grep -q LC_UNIXTHREAD; then
   exit 1
 fi
 
-echo "Bundled static converter ready: $OUT"
+echo "$CONVERTER_REV" > "$REVFILE"
+echo "Bundled optimized static converter ready: $OUT"
