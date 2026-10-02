@@ -34,6 +34,25 @@ int main(int argc, char **argv) {
     CheckRead(source, 100, 1500, 1500); // Seek backward, including cached data.
     CheckRead(source, 262200, 100, 17); // The last range is shorter than one chunk.
     CheckRead(source, 262217, 100, 0);
+    CheckRead(Source(base, @"/double"), 65000, 2000, 2000);
+    CheckRead(Source(base, @"/header"), 65000, 2000, 2000);
+    CheckRead(Source(base, @"/query"), 65000, 2000, 2000);
+    CheckRead(Source(base, @"/switch"), 65000, 2000, 2000);
+    YTMediaSource *oversized = [[[YTMediaSource alloc] initWithURL:
+        [NSURL URLWithString:[base stringByAppendingString:@"/media"]]
+        length:400000 userAgent:@"fixture"] autorelease];
+    CheckRead(oversized, 262200, 100, 17);
+    assert([oversized length] == 262217);
+    YTMediaSource *strict = [[[YTMediaSource alloc] initWithURL:
+        [NSURL URLWithString:[base stringByAppendingString:@"/strict"]]
+        length:400000 userAgent:@"fixture"] autorelease];
+    CheckRead(strict, 262200, 100, 17);
+    assert([strict length] == 262217);
+    YTMediaSource *beyond = [[[YTMediaSource alloc] initWithURL:
+        [NSURL URLWithString:[base stringByAppendingString:@"/media"]]
+        length:500000 userAgent:@"fixture"] autorelease];
+    CheckRead(beyond, 400000, 100, 0);
+    assert([beyond length] == 262217 && ![[beyond errorText] length]);
     unsigned char byte;
     assert([Source(base, @"/ignore") readAtOffset:65536 into:&byte count:1] == -1);
     assert([Source(base, @"/wrong") readAtOffset:65536 into:&byte count:1] == -1);
@@ -43,7 +62,7 @@ int main(int argc, char **argv) {
     NSTimeInterval start = [NSDate timeIntervalSinceReferenceDate];
     assert([slow readAtOffset:0 into:&byte count:1] == -1);
     assert([NSDate timeIntervalSinceReferenceDate] - start < 1.0);
-    NSLog(@"Range boundaries, random seeks, short responses, range rejection and cancellation passed.");
+    NSLog(@"Range checks passed: exclusive selectors, nonzero 416 fallback, corrected lengths, strict EOF limits, random seeks, invalid responses and cancellation.");
     [pool release];
     return 0;
 }

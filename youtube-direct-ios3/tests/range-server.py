@@ -13,10 +13,30 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         address = urlsplit(self.path)
-        start, end = map(int, parse_qs(address.query)["range"][0].split("-"))
-        if self.headers.get("Range") != f"bytes={start}-{end}":
+        query = parse_qs(address.query).get("range", [None])[0]
+        header = self.headers.get("Range")
+        value = header.removeprefix("bytes=") if header else query
+        if not value:
             self.send_error(400)
             return
+        start, end = map(int, value.split("-"))
+        rejected = (address.path == "/query" and header is not None) or (
+            address.path == "/header" and query is not None)
+        if address.path == "/switch":
+            rejected = (start == 0 and header is not None) or (start > 0 and query is not None)
+        # Emulate a server applying a URL slice first, then the HTTP range to
+        # that smaller slice. The old dual-selector reader fails beyond chunk 0.
+        if address.path == "/double" and query and header and start > 0:
+            rejected = True
+        if start >= LENGTH or (address.path == "/strict" and end >= LENGTH):
+            rejected = True
+        if rejected:
+            self.send_response(416)
+            self.send_header("Content-Range", f"bytes */{LENGTH}")
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        end = min(end, LENGTH - 1)
         if address.path == "/slow":
             time.sleep(3)
         if address.path == "/ignore":

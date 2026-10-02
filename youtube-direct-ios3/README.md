@@ -28,11 +28,11 @@ The stock YouTube player's hardware decoder cannot provide this software path.
 ## Installation
 
 The [Actions build](https://github.com/Aydremourad/world-wide-web/actions/workflows/ios3-native-player.yml)
-produces `com.aydre.youtubedirect_0.7.2_iphoneos-arm.deb` in the
+produces `com.aydre.youtubedirect_0.7.3_iphoneos-arm.deb` in the
 `YouTubeDirect-iOS3-armv6` artifact. Install with iFile, or from a phone terminal:
 
 ```sh
-dpkg -i com.aydre.youtubedirect_0.7.2_iphoneos-arm.deb
+dpkg -i com.aydre.youtubedirect_0.7.3_iphoneos-arm.deb
 killall SpringBoard
 ```
 
@@ -89,3 +89,11 @@ AAC packets and decodes/scales Main-profile H.264 from a synthetic combined
 MP4 using the production reader, audio-file opener, video decoder and FFmpeg
 2.8.22. It runs on macOS; it does not verify iPhone OS 3's audio parser,
 AudioQueue playback or the original iPhone's speed.
+
+0.7.3 sends byte ranges in either the HTTP header or the URL query, never both
+at once. It remembers a working method and tries the alternative after a
+rejected range or an ignored header. Successful Content-Range responses
+correct the source's byte length. A 416 with `bytes */N` can correct a stale
+length and retry within the real file bounds; reads beyond the real EOF
+return EOF. Any unrecovered 416 includes the requested offset, length and
+range method without exposing signed URLs.

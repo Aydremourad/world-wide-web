@@ -7,6 +7,7 @@
     NSURL *_url;
     NSString *_userAgent;
     int64_t _length;
+    NSInteger _rangeMode;
     NSMutableDictionary *_chunks;
     NSMutableArray *_order;
     NSString *_errorText;

@@ -15,6 +15,7 @@ static int Requests;
 + (BOOL)canInitWithRequest:(NSURLRequest *)request { return [[[request URL] host] isEqualToString:@"movie.example"]; }
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
 - (void)startLoading {
+    assert([[[self request] URL] query] == nil);
     long long start = 0, end = 0;
     NSScanner *scan = [NSScanner scannerWithString:[[self request] valueForHTTPHeaderField:@"Range"]];
     assert([scan scanString:@"bytes=" intoString:NULL] && [scan scanLongLong:&start] &&
