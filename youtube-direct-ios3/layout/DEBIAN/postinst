@@ -1,5 +1,7 @@
 #!/bin/sh
 set -e
+# Stop a backgrounded copy so the next launch loads the installed binary.
+if command -v killall >/dev/null 2>&1; then killall YouTubeDirect >/dev/null 2>&1 || true; fi
 # Use the exact stock artwork already installed on this iOS 3 device.
 APP=/Applications/YouTubeDirect.app
 for STOCK_ICON in /Applications/YouTube.app/icon.png /Applications/YouTube.app/Icon.png; do

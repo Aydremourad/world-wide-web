@@ -8,6 +8,9 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"YouTube";
+    UIButton *info=[UIButton buttonWithType:UIButtonTypeInfoDark];
+    [info addTarget:self action:@selector(showBuildInfo) forControlEvents:UIControlEventTouchUpInside];
+    self.navigationItem.rightBarButtonItem=[[[UIBarButtonItem alloc] initWithCustomView:info] autorelease];
     self.view.backgroundColor = [UIColor whiteColor];
 
     CGRect bounds = self.view.bounds;
@@ -40,6 +43,14 @@
     _spinner.hidesWhenStopped = YES;
     _spinner.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin | UIViewAutoresizingFlexibleRightMargin;
     [self.view addSubview:_spinner];
+}
+
+- (void)showBuildInfo {
+    NSString *version=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
+    NSString *details=[NSString stringWithContentsOfFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"YouTube-playback.txt"] encoding:NSUTF8StringEncoding error:NULL];
+    NSString *message=[NSString stringWithFormat:@"Version %@\n\n%@",version,details ? details : @"No video opened yet."];
+    UIAlertView *alert=[[[UIAlertView alloc] initWithTitle:@"YouTube" message:message delegate:nil cancelButtonTitle:@"OK" otherButtonTitles:nil] autorelease];
+    [alert show];
 }
 
 - (void)setBusy:(BOOL)busy text:(NSString *)text {
