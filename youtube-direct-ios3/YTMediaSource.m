@@ -171,6 +171,8 @@
         _errorText = [(lastError ? lastError : @"Playback cancelled.") copy];
         return nil;
     }
+    [_errorText release];
+    _errorText = nil;
     [_chunks setObject:result forKey:key];
     [_order addObject:key];
     while ([_order count] > YT_CACHED_CHUNKS) {
