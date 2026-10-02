@@ -27,6 +27,7 @@ GASPRE="$GASDIR/gas-preprocessor.pl"
 OUT="$ROOT/layout/usr/libexec/ytdirect-ffmpeg"
 REVFILE="$ROOT/layout/usr/libexec/ytdirect-ffmpeg.rev"
 CONVERTER_REV="4"
+CACHEBIN="$SRC/ffmpeg"
 mkdir -p "$DEPS" "$ROOT/layout/usr/libexec"
 
 if [ -x "$OUT" ] && [ -f "$REVFILE" ] && [ "$(cat "$REVFILE")" = "$CONVERTER_REV" ]; then
@@ -35,6 +36,26 @@ if [ -x "$OUT" ] && [ -f "$REVFILE" ] && [ "$(cat "$REVFILE")" = "$CONVERTER_REV
     && ! xcrun otool -l "$OUT" | grep -q LC_MAIN \
     && xcrun otool -l "$OUT" | grep -q LC_UNIXTHREAD; then
     echo "Reusing optimized bundled static converter: $OUT"
+    exit 0
+  fi
+fi
+
+if [ -x "$CACHEBIN" ]; then
+  if file "$CACHEBIN" | grep -q "Mach-O executable arm_v6" \
+    && ! xcrun otool -L "$CACHEBIN" | egrep -q 'libav(codec|format|util|filter)|libsw(scale|resample)' \
+    && ! xcrun otool -l "$CACHEBIN" | grep -q LC_MAIN \
+    && xcrun otool -l "$CACHEBIN" | grep -q LC_UNIXTHREAD; then
+    echo "Reusing cached optimized ARMv6 converter: $CACHEBIN"
+    cp "$CACHEBIN" "$OUT"
+    chmod 0755 "$OUT"
+    LDID="$(command -v ldid 2>/dev/null || true)"
+    if [ -z "$LDID" ]; then
+      LDID="$(find "$THEOS" -type f -name ldid -perm -111 2>/dev/null | head -1)"
+    fi
+    if [ -n "$LDID" ]; then
+      "$LDID" -S -Hsha1 "$OUT"
+    fi
+    echo "$CONVERTER_REV" > "$REVFILE"
     exit 0
   fi
 fi
