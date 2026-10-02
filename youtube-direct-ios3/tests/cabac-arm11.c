@@ -35,6 +35,8 @@ static int reference(CABACContext *c,uint8_t *state) {
     return s&1;
 }
 int main(void) {
+    ff_init_cabac_states();
+    assert(ff_h264_lps_range[0]>0 && ff_h264_norm_shift[2]>0);
     uint8_t bytes[32];
     for(int i=0;i<32;i++) bytes[i]=(uint8_t)nextRandom();
     for(int i=0;i<1000000;i++) {
