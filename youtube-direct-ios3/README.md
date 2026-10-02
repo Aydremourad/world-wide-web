@@ -261,3 +261,26 @@ Debug2's player title reports two live rates: D is decoded video frames per seco
 and P is frames actually presented on screen. For example, "144p D13.8 P13.4"
 means decoding and rendering are both near the 15 fps source rate; a high D with a
 low P points to the render/handoff path instead.
+
+
+## 1.1
+
+1.1 is the polished release build after on-device debug1/debug2 validation.
+
+The main screen keeps its original launch geometry. Status-bar/application-frame
+repair is armed only when the custom player is actually presented and runs only
+when returning from playback.
+
+The player UI is release-clean again: the center title shows only the selected
+resolution. Per-frame NSDictionary/NSNumber allocation was replaced with a
+lightweight frame packet, OpenGL ES caches geometry and matrix state until layout
+or Fit/Fill changes, and CPU frame data is released immediately after texture
+upload. Hidden controls stop rebuilding playback labels until shown again.
+
+Low-resolution H.264 disables the expensive loop filter, the AVIO reader uses a
+64 KiB buffer, and FFmpeg decoder revision 4 is rebuilt with final -O3 and
+ARM1176JZF-S-specific flags instead of allowing a trailing -O2 to win.
+
+Direct AAC AudioQueue playback, RGB565 rendering, low-workload 144p selection,
+adaptive catch-up, seeking, Fit/Fill, volume, rotation and Apple's native playback
+route remain enabled.
