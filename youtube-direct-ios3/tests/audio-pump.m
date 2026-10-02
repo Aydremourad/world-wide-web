@@ -22,7 +22,7 @@ typedef struct {
     BOOL running;
     BOOL draining;
 } FakeQueue;
-static OSStatus Enqueue(void *opaque, AudioQueueBufferRef buffer, UInt32 packets,
+static OSStatus YTFakeEnqueue(void *opaque, AudioQueueBufferRef buffer, UInt32 packets,
                         AudioStreamPacketDescription *descriptions) {
     FakeQueue *queue=opaque;
     assert(packets && buffer->mAudioDataByteSize && buffer->mAudioDataByteSize <= 32768);
@@ -36,36 +36,36 @@ static OSStatus Enqueue(void *opaque, AudioQueueBufferRef buffer, UInt32 packets
     pthread_mutex_unlock(&queue->mutex);
     return noErr;
 }
-static BOOL Running(void *opaque) {
+static BOOL YTFakeRunning(void *opaque) {
     FakeQueue *queue=opaque;
     pthread_mutex_lock(&queue->mutex); BOOL value=queue->running; pthread_mutex_unlock(&queue->mutex);
     return value;
 }
-static OSStatus Start(void *opaque) {
+static OSStatus YTFakeStart(void *opaque) {
     FakeQueue *queue=opaque;
     pthread_mutex_lock(&queue->mutex); queue->running=YES; queue->starts++; pthread_mutex_unlock(&queue->mutex);
     return noErr;
 }
-static void Drain(void *opaque) {
+static void YTFakeDrain(void *opaque) {
     FakeQueue *queue=opaque;
     pthread_mutex_lock(&queue->mutex); queue->draining=YES; pthread_mutex_unlock(&queue->mutex);
 }
-static void SetUp(YTAudio *audio, FakeQueue *queue, volatile BOOL *stop, volatile BOOL *paused) {
+static void YTFakeSetUp(YTAudio *audio, FakeQueue *queue, volatile BOOL *stop, volatile BOOL *paused) {
     memset(audio,0,sizeof(*audio)); memset(queue,0,sizeof(*queue));
     pthread_mutex_init(&queue->mutex,NULL);
     audio->stop=stop; audio->paused=paused;
     audio->source=[[YTMediaSource alloc] initWithURL:[NSURL URLWithString:@"https://movie.example/combined.mp4"]
         length:[Movie length] userAgent:@"fixture"];
     assert(YTAudioOpen(audio) == noErr);
-    audio->sink=(YTAudioSink){queue,Enqueue,Running,Start,Drain};
+    audio->sink=(YTAudioSink){queue,YTFakeEnqueue,YTFakeRunning,YTFakeStart,YTFakeDrain};
     for (unsigned i=0;i<YT_AUDIO_BUFFERS;i++) {
         AudioQueueBuffer initial={.mAudioDataBytesCapacity=32768,.mAudioData=malloc(32768)};
         audio->buffers[i]=malloc(sizeof(initial)); memcpy(audio->buffers[i],&initial,sizeof(initial));
     }
     assert(YTAudioBegin(audio) == noErr && !audio->eof);
-    audio->started=YES; Start(queue);
+    audio->started=YES; YTFakeStart(queue);
 }
-static BOOL Consume(YTAudio *audio, FakeQueue *queue, double *slowest) {
+static BOOL YTFakeConsume(YTAudio *audio, FakeQueue *queue, double *slowest) {
     pthread_mutex_lock(&queue->mutex);
     AudioQueueBufferRef buffer=NULL;
     if (queue->running && queue->count) {
@@ -85,7 +85,7 @@ static BOOL Consume(YTAudio *audio, FakeQueue *queue, double *slowest) {
     }
     return empty;
 }
-static void CleanUp(YTAudio *audio, FakeQueue *queue) {
+static void YTFakeCleanUp(YTAudio *audio, FakeQueue *queue) {
     YTShutdownAudio(audio);
     for (unsigned i=0;i<YT_AUDIO_BUFFERS;i++) {
         free(audio->buffers[i]->mAudioData); free(audio->buffers[i]);
@@ -99,14 +99,14 @@ int main(int argc,char **argv) {
     assert([Movie length] > 1024*1024);
     [NSURLProtocol registerClass:[YTSlowMovieProtocol class]];
     volatile BOOL stop=NO,paused=NO; YTAudio audio; FakeQueue queue;
-    SetUp(&audio,&queue,&stop,&paused);
+    YTFakeSetUp(&audio,&queue,&stop,&paused);
     UInt64 expected=0; UInt32 size=sizeof(expected);
     assert(AudioFileGetProperty(audio.file,kAudioFilePropertyAudioDataPacketCount,&size,&expected) == noErr);
     assert(expected > 1000);
     double slowest=0,deadline=[NSDate timeIntervalSinceReferenceDate]+12;
     BOOL finished=NO;
     while ([NSDate timeIntervalSinceReferenceDate]<deadline && !audio.failed) {
-        BOOL empty=Consume(&audio,&queue,&slowest);
+        BOOL empty=YTFakeConsume(&audio,&queue,&slowest);
         if (audio.eof && empty) { finished=YES; break; }
         [NSThread sleepForTimeInterval:0.005];
     }
@@ -115,13 +115,13 @@ int main(int argc,char **argv) {
     assert(queue.starts > 1 && Requests > 8 && slowest < 0.10);
     NSLog(@"Delayed audio test passed: %llu packets consumed across %d network chunks, %u queue starts, longest callback %.4f seconds.",
         (unsigned long long)queue.consumed,Requests,queue.starts,slowest);
-    CleanUp(&audio,&queue);
+    YTFakeCleanUp(&audio,&queue);
     // Cancel while the producer is fetching, then join before releasing its file.
-    Requests=0; SetUp(&audio,&queue,&stop,&paused);
-    for (unsigned i=0;i<YT_AUDIO_BUFFERS;i++) Consume(&audio,&queue,&slowest);
+    Requests=0; YTFakeSetUp(&audio,&queue,&stop,&paused);
+    for (unsigned i=0;i<YT_AUDIO_BUFFERS;i++) YTFakeConsume(&audio,&queue,&slowest);
     [NSThread sleepForTimeInterval:0.03];
     double before=[NSDate timeIntervalSinceReferenceDate];
-    CleanUp(&audio,&queue);
+    YTFakeCleanUp(&audio,&queue);
     assert([NSDate timeIntervalSinceReferenceDate]-before < 1.0);
     NSLog(@"Audio producer cancellation and cleanup passed.");
     [NSURLProtocol unregisterClass:[YTSlowMovieProtocol class]];
