@@ -75,7 +75,17 @@ def validate(video_id):
 
 
 def base_url():
-    # Render terminates HTTPS before forwarding HTTP to the container.
+    # PUBLIC_BASE_URL may be discovered after the local server has already
+    # started (for example, a Cloudflare Quick Tunnel). Allow the Mac runner
+    # to publish it through a tiny state file without restarting the backend.
+    public_file = STATE / 'public-base-url.txt'
+    if public_file.is_file():
+        try:
+            discovered = public_file.read_text().strip()
+            if discovered:
+                return discovered.rstrip('/')
+        except OSError:
+            pass
     return (os.environ.get('PUBLIC_BASE_URL') or
             os.environ.get('RENDER_EXTERNAL_URL') or request.url_root).rstrip('/')
 
