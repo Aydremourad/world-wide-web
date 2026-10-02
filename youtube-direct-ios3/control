@@ -1,6 +1,6 @@
 Package: com.aydre.youtubedirect
 Name: YouTube
-Version: 0.8.0
+Version: 0.9.0
 Architecture: iphoneos-arm
 Description: Search and watch videos.
 Maintainer: Aydre

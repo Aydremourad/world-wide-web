@@ -1,6 +1,7 @@
 #import "YTViewController.h"
 #import "YTYouTube.h"
 #import "YTSoftwarePlayer.h"
+#import "YTNativeProbe.h"
 
 @implementation YTViewController
 
@@ -135,7 +136,11 @@
 - (void)resolveThread:(NSString *)videoID {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     NSString *error = nil;
-    NSDictionary *streams = [YTYouTube playbackStreamsForID:videoID error:&error];
+    NSMutableDictionary *streams = [[[YTYouTube playbackStreamsForID:videoID error:&error] mutableCopy] autorelease];
+    if (streams) {
+        NSDictionary *info=YTNativeStreamInfo(streams);
+        if(info) [streams setObject:info forKey:@"nativeInfo"];
+    }
     NSDictionary *payload = [NSDictionary dictionaryWithObjectsAndKeys:
         (streams ? (id)streams : (id)[NSNull null]), @"streams",
         (error ? error : @""), @"error", nil];
@@ -153,12 +158,27 @@
     _tableView.hidden = NO;
     _searchBar.userInteractionEnabled = YES;
     _statusLabel.hidden = YES;
+    if ([[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue]) {
+        _nativePlayer=[[YTNativePlayer alloc] initWithStreams:streams delegate:self];
+        if([_nativePlayer play]) return;
+        [_nativePlayer stop]; [_nativePlayer release]; _nativePlayer=nil;
+    }
+    [self playSoftwareStreams:streams];
+}
+- (void)playSoftwareStreams:(NSDictionary *)streams {
     YTSoftwarePlayer *player = [[YTSoftwarePlayer alloc] initWithStreams:streams];
     [self presentModalViewController:player animated:YES];
     [player release];
 }
 
+- (void)nativePlayer:(YTNativePlayer *)player finishedWithError:(BOOL)failed {
+    NSDictionary *streams=[[player streams] retain];
+    [_nativePlayer release]; _nativePlayer=nil;
+    if(failed) [self performSelector:@selector(playSoftwareStreams:) withObject:streams afterDelay:0.4];
+    [streams release];
+}
 - (void)dealloc {
+    [_nativePlayer stop]; [_nativePlayer release];
     [_results release];
     [_spinner release];
     [_statusLabel release];

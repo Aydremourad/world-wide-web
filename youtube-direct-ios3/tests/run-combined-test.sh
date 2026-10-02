@@ -36,3 +36,10 @@ xcrun clang -fno-objc-arc -Wno-deprecated-declarations -I. -I"$TESTDIR/decoder" 
     "$TESTDIR/decoder/libswscale/libswscale.a" "$TESTDIR/decoder/libavutil/libavutil.a" \
     -lm -o "$TESTDIR/video-catchup-test"
 "$TESTDIR/video-catchup-test" tests/fixtures/audio-pump-main-aac.mp4
+
+xcrun clang -fno-objc-arc -Wno-deprecated-declarations -I. -I"$TESTDIR/decoder" \
+    -framework Foundation -framework AudioToolbox YTMediaSource.m YTAudioFile.m YTNativeProbe.m YTLoopbackServer.m YTVideoDecoder.c tests/native-route.m \
+    "$TESTDIR/decoder/libavformat/libavformat.a" "$TESTDIR/decoder/libavcodec/libavcodec.a" \
+    "$TESTDIR/decoder/libswscale/libswscale.a" "$TESTDIR/decoder/libavutil/libavutil.a" \
+    -lm -o "$TESTDIR/native-route-test"
+"$TESTDIR/native-route-test" tests/fixtures/combined-main-aac.mp4 tests/fixtures/combined-baseline-aac.mp4 tests/fixtures/audio-pump-main-aac.mp4

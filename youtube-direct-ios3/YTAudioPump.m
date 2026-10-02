@@ -17,6 +17,7 @@ void YTAudioBufferReturned(void *opaque, AudioQueueRef queue, AudioQueueBufferRe
         if (audio->buffers[i] == buffer && !audio->available[i]) {
             audio->available[i] = YES;
             if (audio->pending) audio->pending--;
+            audio->returnedBuffers++;
             if (!audio->pending && audio->started && !audio->eof) audio->starved = YES;
             pthread_cond_signal(&audio->ready);
             break;
@@ -31,53 +32,71 @@ static double YTAudioWallTime(void) {
 static void YTAudioRecover(YTAudio *audio) {
     if (!audio->started || YTAudioStopped(audio)) return;
     double now = YTAudioWallTime();
-    if (audio->paused && *audio->paused) { audio->lastAdvance = now; return; }
+    if (audio->paused && *audio->paused) { audio->lastAdvance = audio->lastBufferAdvance = now; return; }
     double clock = audio->sink.clock ? audio->sink.clock(audio->sink.context) : -1;
+    if (clock >= 0 && clock < audio->lastClock - 1.0) { audio->lastClock=clock; audio->lastAdvance=now; }
     if (!audio->lastAdvance || clock > audio->lastClock + 0.005) {
         audio->lastClock = clock; audio->lastAdvance = now; audio->stalledRestarts = 0;
     }
     pthread_mutex_lock(&audio->mutex);
     unsigned pending = audio->pending;
+    unsigned returned=audio->returnedBuffers;
     pthread_mutex_unlock(&audio->mutex);
+    if (!audio->lastBufferAdvance || returned!=audio->lastReturned) {
+        audio->lastReturned=returned; audio->lastBufferAdvance=now;
+    }
     if (!pending || (pending < 3 && !audio->eof)) return;
-    BOOL stuck = clock >= 0 && now - audio->lastAdvance > 2.0;
-    if (audio->starved || !audio->sink.running(audio->sink.context) || stuck) {
+    double bufferDuration=YT_AUDIO_BUFFER_BYTES / (audio->format.mBytesPerFrame * audio->format.mSampleRate);
+    double callbackLimit=bufferDuration*2+1; if(callbackLimit<2) callbackLimit=2;
+    BOOL stuck = (clock >= 0 && now - audio->lastAdvance > 2.0) || now-audio->lastBufferAdvance>callbackLimit;
+    BOOL running=audio->sink.running(audio->sink.context);
+    if (audio->starved || !running || stuck) {
         // Start alone can be a no-op on an old queue that still reports running.
         // Pause preserves queued packets; Reset would discard them.
-        OSStatus status = audio->sink.pause ? audio->sink.pause(audio->sink.context) : noErr;
+        OSStatus status = running && audio->sink.pause ? audio->sink.pause(audio->sink.context) : noErr;
         if (status == noErr) status = audio->sink.start(audio->sink.context);
         if (status != noErr || (stuck && ++audio->stalledRestarts > 3)) {
             audio->error = status != noErr ? status : kAudioFileUnspecifiedError;
             audio->failed = YES;
         } else {
-            audio->starved = NO; audio->lastAdvance = now; audio->lastClock = clock;
+            audio->starved = NO; audio->lastAdvance = audio->lastBufferAdvance = now; audio->lastClock = clock;
             if (audio->eof) audio->sink.drain(audio->sink.context);
         }
     }
 }
+static OSStatus YTConverterInput(AudioConverterRef converter, UInt32 *packets,
+    AudioBufferList *data, AudioStreamPacketDescription **descriptions, void *opaque) {
+    YTAudio *audio=opaque;
+    if(YTAudioStopped(audio)) { *packets=0; return noErr; }
+    if(*packets>audio->packetsPerBuffer) *packets=audio->packetsPerBuffer;
+    UInt32 bytes=YT_AUDIO_BUFFER_BYTES;
+    OSStatus status=AudioFileReadPackets(audio->file,false,&bytes,audio->descriptions,audio->packet,packets,audio->compressed);
+    if(status!=noErr && status!=(OSStatus)-39) return status;
+    audio->packet+=*packets;
+    data->mNumberBuffers=1; data->mBuffers[0].mNumberChannels=audio->inputFormat.mChannelsPerFrame;
+    data->mBuffers[0].mData=audio->compressed; data->mBuffers[0].mDataByteSize=bytes;
+    if(descriptions) *descriptions=audio->descriptions;
+    return noErr;
+}
 static OSStatus YTProduceAudio(YTAudio *audio, unsigned slot) {
-    AudioQueueBufferRef buffer = audio->buffers[slot];
-    UInt32 bytes = buffer->mAudioDataBytesCapacity;
-    UInt32 packets = audio->packetsPerBuffer;
-    OSStatus status = AudioFileReadPackets(audio->file, false, &bytes,
-        audio->descriptions, audio->packet, &packets, buffer->mAudioData);
-    if (YTAudioStopped(audio)) return noErr;
-    if (status != noErr && status != (OSStatus)-39) return status;
-    if (!packets) {
-        audio->eof = YES;
-        if (audio->started) {
-            YTAudioRecover(audio);
-            audio->sink.drain(audio->sink.context);
-        }
+    AudioQueueBufferRef buffer=audio->buffers[slot];
+    AudioBufferList data; memset(&data,0,sizeof(data)); data.mNumberBuffers=1;
+    data.mBuffers[0].mNumberChannels=audio->format.mChannelsPerFrame;
+    data.mBuffers[0].mData=buffer->mAudioData; data.mBuffers[0].mDataByteSize=buffer->mAudioDataBytesCapacity;
+    UInt32 frames=buffer->mAudioDataBytesCapacity/audio->format.mBytesPerFrame;
+    OSStatus status=AudioConverterFillComplexBuffer(audio->converter,YTConverterInput,audio,&frames,&data,NULL);
+    if(YTAudioStopped(audio)) return noErr;
+    if(status!=noErr && status!=(OSStatus)-39) return status;
+    if(!frames) {
+        audio->eof=YES;
+        if(audio->started) { YTAudioRecover(audio); audio->sink.drain(audio->sink.context); }
         return noErr;
     }
-    buffer->mAudioDataByteSize = bytes;
-    audio->packet += packets;
-    pthread_mutex_lock(&audio->mutex);
-    audio->pending++;
-    pthread_mutex_unlock(&audio->mutex);
-    status = audio->sink.enqueue(audio->sink.context, buffer, packets, audio->descriptions);
-    if (status == noErr) YTAudioRecover(audio);
+    buffer->mAudioDataByteSize=data.mBuffers[0].mDataByteSize;
+    audio->decodedFrames+=frames;
+    pthread_mutex_lock(&audio->mutex); audio->pending++; pthread_mutex_unlock(&audio->mutex);
+    status=audio->sink.enqueue(audio->sink.context,buffer,frames,NULL);
+    if(status==noErr) YTAudioRecover(audio);
     return status;
 }
 static void *YTAudioProducer(void *opaque) {
@@ -114,19 +133,39 @@ OSStatus YTAudioOpen(YTAudio *audio) {
     audio->syncReady = YES;
     OSStatus result = YTOpenAudioFile(audio->source, &audio->file);
     if (result != noErr) return result;
-    UInt32 size = sizeof(audio->format);
-    result = AudioFileGetProperty(audio->file, kAudioFilePropertyDataFormat, &size, &audio->format);
-    if (result != noErr) return result;
-    if (audio->format.mFormatID != kAudioFormatMPEG4AAC || audio->format.mSampleRate <= 0)
+    UInt32 size=sizeof(audio->inputFormat);
+    result=AudioFileGetProperty(audio->file,kAudioFilePropertyDataFormat,&size,&audio->inputFormat);
+    if(result!=noErr) return result;
+    if(audio->inputFormat.mFormatID!=kAudioFormatMPEG4AAC || audio->inputFormat.mSampleRate<=0 ||
+       audio->inputFormat.mChannelsPerFrame<1 || audio->inputFormat.mChannelsPerFrame>2)
         return kAudioFileUnsupportedDataFormatError;
-    UInt32 maximum = 0; size = sizeof(maximum);
-    result = AudioFileGetProperty(audio->file, kAudioFilePropertyPacketSizeUpperBound, &size, &maximum);
-    if (result != noErr || !maximum || maximum > YT_AUDIO_BUFFER_BYTES) return kAudioFileUnspecifiedError;
-    audio->packetsPerBuffer = YT_AUDIO_BUFFER_BYTES / maximum;
-    if (audio->packetsPerBuffer > 64) audio->packetsPerBuffer = 64;
-    audio->descriptions = calloc(audio->packetsPerBuffer, sizeof(AudioStreamPacketDescription));
-    return audio->descriptions ? noErr : kAudioFileUnspecifiedError;
+    UInt32 maximum=0; size=sizeof(maximum);
+    result=AudioFileGetProperty(audio->file,kAudioFilePropertyPacketSizeUpperBound,&size,&maximum);
+    if(result!=noErr || !maximum || maximum>YT_AUDIO_BUFFER_BYTES) return kAudioFileUnspecifiedError;
+    audio->packetsPerBuffer=YT_AUDIO_BUFFER_BYTES/maximum;
+    if(audio->packetsPerBuffer>64) audio->packetsPerBuffer=64;
+    audio->descriptions=calloc(audio->packetsPerBuffer,sizeof(AudioStreamPacketDescription));
+    audio->compressed=malloc(YT_AUDIO_BUFFER_BYTES);
+    if(!audio->descriptions || !audio->compressed) return kAudioFileUnspecifiedError;
+    memset(&audio->format,0,sizeof(audio->format));
+    audio->format.mSampleRate=audio->inputFormat.mSampleRate;
+    audio->format.mFormatID=kAudioFormatLinearPCM;
+    audio->format.mFormatFlags=kLinearPCMFormatFlagIsSignedInteger | kLinearPCMFormatFlagIsPacked;
+    audio->format.mChannelsPerFrame=audio->inputFormat.mChannelsPerFrame;
+    audio->format.mBitsPerChannel=16; audio->format.mFramesPerPacket=1;
+    audio->format.mBytesPerPacket=audio->format.mBytesPerFrame=2*audio->format.mChannelsPerFrame;
+    result=AudioConverterNew(&audio->inputFormat,&audio->format,&audio->converter);
+    if(result!=noErr) return result;
+    UInt32 cookieSize=0;
+    if(AudioFileGetPropertyInfo(audio->file,kAudioFilePropertyMagicCookieData,&cookieSize,NULL)==noErr && cookieSize) {
+        void *cookie=malloc(cookieSize); if(!cookie) return kAudioFileUnspecifiedError;
+        result=AudioFileGetProperty(audio->file,kAudioFilePropertyMagicCookieData,&cookieSize,cookie);
+        if(result==noErr) result=AudioConverterSetProperty(audio->converter,kAudioConverterDecompressionMagicCookie,cookieSize,cookie);
+        free(cookie); if(result!=noErr) return result;
+    }
+    return noErr;
 }
+
 OSStatus YTAudioBegin(YTAudio *audio) {
     for (unsigned i = 0; i < YT_AUDIO_BUFFERS && !YTAudioStopped(audio) && !audio->eof; i++) {
         audio->available[i] = NO;
@@ -140,7 +179,7 @@ OSStatus YTAudioBegin(YTAudio *audio) {
     return noErr;
 }
 static OSStatus YTEnqueue(void *context, AudioQueueBufferRef buffer, UInt32 packets, AudioStreamPacketDescription *descriptions) {
-    return AudioQueueEnqueueBuffer((AudioQueueRef)context, buffer, packets, descriptions);
+    return AudioQueueEnqueueBuffer((AudioQueueRef)context, buffer, 0, NULL);
 }
 static BOOL YTRunning(void *context) {
     UInt32 running = 0, size = sizeof(running);
@@ -166,15 +205,6 @@ OSStatus YTPrepareAudio(YTAudio *audio) {
     audio->sink.enqueue = YTEnqueue; audio->sink.running = YTRunning;
     audio->sink.start = YTStart; audio->sink.drain = YTDrain;
     audio->sink.pause = YTPause; audio->sink.clock = YTClock;
-    UInt32 size = 0;
-    if (AudioFileGetPropertyInfo(audio->file, kAudioFilePropertyMagicCookieData, &size, NULL) == noErr && size) {
-        void *cookie = malloc(size);
-        if (!cookie) return kAudioFileUnspecifiedError;
-        result = AudioFileGetProperty(audio->file, kAudioFilePropertyMagicCookieData, &size, cookie);
-        if (result == noErr) result = AudioQueueSetProperty(audio->queue, kAudioQueueProperty_MagicCookie, cookie, size);
-        free(cookie);
-        if (result != noErr) return result;
-    }
     for (unsigned i = 0; i < YT_AUDIO_BUFFERS; i++) {
         result = AudioQueueAllocateBuffer(audio->queue, YT_AUDIO_BUFFER_BYTES, &audio->buffers[i]);
         if (result != noErr) return result;
@@ -189,6 +219,8 @@ void YTShutdownAudio(YTAudio *audio) {
         pthread_join(audio->worker, NULL); audio->workerCreated = NO;
     }
     if (audio->queue) { AudioQueueStop(audio->queue, true); AudioQueueDispose(audio->queue, true); audio->queue = NULL; }
+    if (audio->converter) { AudioConverterDispose(audio->converter); audio->converter=NULL; }
+    free(audio->compressed); audio->compressed=NULL;
     if (audio->file) { AudioFileClose(audio->file); audio->file = NULL; }
     free(audio->descriptions); audio->descriptions = NULL;
     if (audio->syncReady) {

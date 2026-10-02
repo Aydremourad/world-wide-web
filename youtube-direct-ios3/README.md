@@ -32,11 +32,11 @@ The stock YouTube player's hardware decoder cannot provide this software path.
 ## Installation
 
 The [Actions build](https://github.com/Aydremourad/world-wide-web/actions/workflows/ios3-native-player.yml)
-produces `com.aydre.youtubedirect_0.8.0_iphoneos-arm.deb` in the
+produces `com.aydre.youtubedirect_0.9.0_iphoneos-arm.deb` in the
 `YouTubeDirect-iOS3-armv6` artifact. Install with iFile, or from a phone terminal:
 
 ```sh
-dpkg -i com.aydre.youtubedirect_0.8.0_iphoneos-arm.deb
+dpkg -i com.aydre.youtubedirect_0.9.0_iphoneos-arm.deb
 killall SpringBoard
 ```
 
@@ -122,3 +122,18 @@ duration, playback progress, volume, Fit/Fill and tap-to-show controls. It is
 named YouTube, without the introductory description. Installation copies the
 stock iOS 3 icon from /Applications/YouTube.app/icon.png, preserving the original
 app. Refresh SpringBoard after installation if its old icon/name is cached.
+
+0.9.0 inspects actual AVC profile and uses iOS 3's MPMoviePlayerController
+for compatible combined Baseline H.264/AAC-LC MP4s. A loopback-only server
+bridges the existing bounded HTTPS reader to HTTP byte ranges consumed by
+Apple's player, including HEAD, suffix ranges, seeks and progressive GETs.
+It performs no transcoding and no complete download before playback. Main-
+profile or separate-track sources retain the software player. The source
+profile is checked rather than inferred from its format number.
+
+The software fallback converts AAC to 16-bit PCM using AudioConverter on the
+producer thread before enqueueing audio. AudioQueue receives fixed PCM
+frames, avoiding its compressed AAC queue and packet-boundary handling.
+Twelve bounded buffers provide about 4.5 seconds at stereo 44.1 kHz. The
+AAC magic cookie is applied to the converter. The screen and branding remain
+unchanged; compatible streams use Apple's native player controls.

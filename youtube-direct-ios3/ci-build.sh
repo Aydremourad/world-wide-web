@@ -9,11 +9,11 @@ APP="$STAGE/Applications/YouTubeDirect.app"
 mkdir -p "$APP" "$STAGE/DEBIAN" packages
 xcrun clang -arch armv6 -isysroot "$SDKROOT" -miphoneos-version-min=3.0 \
     -fno-objc-arc -O2 -Wno-deprecated-declarations -I"$SRC" \
-    main.m YTAppDelegate.m YTViewController.m YTYouTube.m YTMediaSource.m YTVideoSurface.m YTSoftwarePlayer.m YTAudioFile.m YTAudioPump.m YTVideoDecoder.c \
+    main.m YTAppDelegate.m YTViewController.m YTYouTube.m YTMediaSource.m YTVideoSurface.m YTSoftwarePlayer.m YTAudioFile.m YTAudioPump.m YTNativeProbe.m YTLoopbackServer.m YTNativePlayer.m YTVideoDecoder.c \
     "$SRC/libavformat/libavformat.a" "$SRC/libavcodec/libavcodec.a" \
     "$SRC/libswscale/libswscale.a" "$SRC/libavutil/libavutil.a" \
     -framework UIKit -framework Foundation -framework AudioToolbox -framework QuartzCore \
-    -framework OpenGLES -lm -fuse-ld="$LEGACY_LD" -Wl,-no_new_main -Wl,-no_pie \
+    -framework OpenGLES -framework MediaPlayer -lm -fuse-ld="$LEGACY_LD" -Wl,-no_new_main -Wl,-no_pie \
     -o "$APP/YouTubeDirect"
 cp Resources/Info.plist "$APP/Info.plist"
 cp control "$STAGE/DEBIAN/control"
@@ -32,5 +32,5 @@ fi
 if xcrun otool -L "$APP/YouTubeDirect" | grep -qE 'libav(codec|format|util)|libswscale'; then
     echo "The binary depends on unbundled decoder libraries."; exit 1
 fi
-python3 ./package-deb.py "$STAGE" packages/com.aydre.youtubedirect_0.8.0_iphoneos-arm.deb
+python3 ./package-deb.py "$STAGE" packages/com.aydre.youtubedirect_0.9.0_iphoneos-arm.deb
 echo "ARMv6, legacy startup, static decoder and gzip package checks passed."

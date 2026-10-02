@@ -4,7 +4,7 @@
 #import <AudioToolbox/AudioToolbox.h>
 #include <pthread.h>
 @class YTMediaSource;
-#define YT_AUDIO_BUFFERS 8
+#define YT_AUDIO_BUFFERS 12
 #define YT_AUDIO_BUFFER_BYTES 65536
 
 typedef struct {
@@ -20,6 +20,10 @@ typedef struct {
 typedef struct {
     YTMediaSource *source;
     AudioFileID file;
+    AudioConverterRef converter;
+    AudioStreamBasicDescription inputFormat;
+    void *compressed;
+    UInt64 decodedFrames;
     AudioQueueRef queue;
     AudioStreamBasicDescription format;
     AudioStreamPacketDescription *descriptions;
@@ -41,6 +45,8 @@ typedef struct {
     BOOL syncReady;
     BOOL workerCreated;
     unsigned pending;
+    unsigned returnedBuffers, lastReturned;
+    double lastBufferAdvance;
     YTAudioSink sink;
     double lastClock;
     double lastAdvance;
