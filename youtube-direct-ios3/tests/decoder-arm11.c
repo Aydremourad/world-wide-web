@@ -6,6 +6,10 @@
 #include "YTVideoDecoder.h"
 #include "libavutil/cpu.h"
 #include "libavutil/mem.h"
+#include "config.h"
+#include "libavcodec/h264qpel.h"
+#include "libavcodec/h264chroma.h"
+#include "libavcodec/h264dsp.h"
 #define MAX_PICTURES 1024
 typedef struct { FILE *file; long length; } Fixture;
 static int fixture_read(void *opaque,uint8_t *bytes,int length) {
@@ -99,6 +103,19 @@ static void forward_seeks(const char *file) {
 }
 int main(int argc,char **argv) {
     assert(argc==2); av_register_all(); av_log_set_level(AV_LOG_ERROR);
+#if ARCH_ARM
+    H264QpelContext genericQpel={0},armQpel={0};
+    H264ChromaContext genericChroma={0},armChroma={0};
+    H264DSPContext genericDsp={0},armDsp={0};
+    av_force_cpu_flags(0);
+    ff_h264qpel_init(&genericQpel,8); ff_h264chroma_init(&genericChroma,8); ff_h264dsp_init(&genericDsp,8,1);
+    av_force_cpu_flags(AV_CPU_FLAG_ARMV6);
+    ff_h264qpel_init(&armQpel,8); ff_h264chroma_init(&armChroma,8); ff_h264dsp_init(&armDsp,8,1);
+    assert(genericQpel.put_h264_qpel_pixels_tab[0][2]!=armQpel.put_h264_qpel_pixels_tab[0][2]);
+    assert(genericChroma.put_h264_chroma_pixels_tab[0]!=armChroma.put_h264_chroma_pixels_tab[0]);
+    assert(genericDsp.h264_idct_add16!=armDsp.h264_idct_add16);
+    puts("Production decoder selects the ARM11 motion, chroma, and IDCT callbacks.");
+#endif
     Pictures original,optimized,referenceOnly;
     decode(argv[1],0,0,&original); decode(argv[1],AV_CPU_FLAG_ARMV6,0,&optimized);
     assert(original.count==optimized.count && original.count>=180);

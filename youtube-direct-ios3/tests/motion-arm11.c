@@ -21,10 +21,14 @@ int main(void) {
     av_force_cpu_flags(0);
     ff_h264qpel_init(&reference,8); ff_h264chroma_init(&chromaReference,8);
     yt_h264qpel_arm11_init(&optimized); yt_h264chroma_arm11_init(&chromaOptimized);
-    uint8_t source[48*48],a[48*48],b[48*48];
+    uint8_t source[48*48] __attribute__((aligned(16)));
+    uint8_t a[48*48] __attribute__((aligned(16))),b[48*48] __attribute__((aligned(16)));
     unsigned comparisons=0;
     for(int iteration=0;iteration<256;iteration++) {
-        int stride=40+(iteration&7),offset=5*stride+5+(iteration&1);
+        // Qpel/chroma callbacks require destination alignment equal to block
+        // width and a frame stride preserving it. Motion-vector sources may
+        // be odd, which remains part of this comparison.
+        int stride=48,offset=5*stride+5+(iteration&7),destOffset=4*stride+16;
         for(size_t i=0;i<sizeof(source);i++) {
             switch(iteration&15) {
                 case 0: source[i]=0; break;
@@ -41,18 +45,18 @@ int main(void) {
             qpel_mc_func fast=avg ? optimized.avg_h264_qpel_pixels_tab[size][phase] : optimized.put_h264_qpel_pixels_tab[size][phase];
             if(!ref) continue;
             for(size_t i=0;i<sizeof(a);i++) a[i]=b[i]=random_byte();
-            ref(a+offset,source+offset,stride); fast(b+offset,source+offset,stride);
+            ref(a+destOffset,source+offset,stride); fast(b+destOffset,source+offset,stride);
             same(a,b,sizeof(a),"luma",16>>size,phase,avg,iteration); comparisons++;
         }
         for(int size=0;size<3;size++) for(int y=0;y<8;y++) for(int x=0;x<8;x++) for(int avg=0;avg<2;avg++) {
             int height=2+2*(iteration&7);
             for(size_t i=0;i<sizeof(a);i++) a[i]=b[i]=random_byte();
             if(avg) {
-                chromaReference.avg_h264_chroma_pixels_tab[size](a+offset,source+offset,stride,height,x,y);
-                chromaOptimized.avg_h264_chroma_pixels_tab[size](b+offset,source+offset,stride,height,x,y);
+                chromaReference.avg_h264_chroma_pixels_tab[size](a+destOffset,source+offset,stride,height,x,y);
+                chromaOptimized.avg_h264_chroma_pixels_tab[size](b+destOffset,source+offset,stride,height,x,y);
             } else {
-                chromaReference.put_h264_chroma_pixels_tab[size](a+offset,source+offset,stride,height,x,y);
-                chromaOptimized.put_h264_chroma_pixels_tab[size](b+offset,source+offset,stride,height,x,y);
+                chromaReference.put_h264_chroma_pixels_tab[size](a+destOffset,source+offset,stride,height,x,y);
+                chromaOptimized.put_h264_chroma_pixels_tab[size](b+destOffset,source+offset,stride,height,x,y);
             }
             same(a,b,sizeof(a),"chroma",8>>size,y*8+x,avg,iteration); comparisons++;
         }
@@ -60,11 +64,12 @@ int main(void) {
     printf("ARM11 motion: %u exact luma/chroma block comparisons, including untouched padding.\n",comparisons);
     H264DSPContext dspReference={0},dspOptimized={0};
     ff_h264dsp_init(&dspReference,8,1); yt_h264idct_arm11_init(&dspOptimized,1);
-    int16_t coefficients[48*16],coefficientsCopy[48*16];
+    int16_t coefficients[48*16] __attribute__((aligned(16)));
+    int16_t coefficientsCopy[48*16] __attribute__((aligned(16)));
     int offsets[48]; uint8_t nonzero[120];
     for(int i=0;i<48;i++) offsets[i]=(i%6)*4+(i/6)*4*48;
     for(int iteration=0;iteration<4096;iteration++) {
-        int stride=40+(iteration&7),offset=2*stride+2+(iteration&1);
+        int stride=48,offset=4*stride+16;
         for(int operation=0;operation<5;operation++) {
             for(size_t i=0;i<sizeof(a);i++) a[i]=b[i]=random_byte();
             for(int i=0;i<48*16;i++) {
@@ -104,15 +109,15 @@ int main(void) {
             clock_t start=clock();
             for(int i=0;i<300000;i++) {
                 int phase=i&15,size=(i>>4)&1;
-                q->put_h264_qpel_pixels_tab[size][phase](a+5*48+5,source+5*48+5,48);
-                c->put_h264_chroma_pixels_tab[size](a+5*48+5,source+5*48+5,48,8,i&7,(i>>3)&7);
+                q->put_h264_qpel_pixels_tab[size][phase](a+4*48+16,source+5*48+5,48);
+                c->put_h264_chroma_pixels_tab[size](a+4*48+16,source+5*48+5,48,8,i&7,(i>>3)&7);
             }
             printf("Motion benchmark (%s): %.3f CPU seconds, checksum %u.\n",mode ? "ARM11" : "generic",
-                (double)(clock()-start)/CLOCKS_PER_SEC,a[5*48+5]);
+                (double)(clock()-start)/CLOCKS_PER_SEC,a[4*48+16]);
             start=clock();
             for(int i=0;i<300000;i++) {
                 coefficients[0]=1024; coefficients[1]=-120; coefficients[3]=230;
-                (mode ? dspOptimized.h264_idct_add : dspReference.h264_idct_add)(a+5*48+5,coefficients,48);
+                (mode ? dspOptimized.h264_idct_add : dspReference.h264_idct_add)(a+4*48+16,coefficients,48);
             }
             printf("IDCT benchmark (%s): %.3f CPU seconds.\n",mode ? "ARM11" : "generic",(double)(clock()-start)/CLOCKS_PER_SEC);
         }
