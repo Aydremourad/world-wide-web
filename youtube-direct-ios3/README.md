@@ -284,3 +284,31 @@ ARM1176JZF-S-specific flags instead of allowing a trailing -O2 to win.
 Direct AAC AudioQueue playback, RGB565 rendering, low-workload 144p selection,
 adaptive catch-up, seeking, Fit/Fill, volume, rotation and Apple's native playback
 route remain enabled.
+
+
+## 1.1.1 playback refinement
+
+Restores the navigation controller, navigation bar, and content view to their
+exact pre-player frames after modal dismissal. Startup geometry stays under UIKit
+control; applicationFrame is no longer applied as an extra status-bar inset.
+
+Software video uses a bounded three-picture decode-ahead queue. CADisplayLink
+selects the most recent due picture against the existing AudioQueue media clock;
+future pictures stay queued, pause holds presentation, and seek/close flushes the
+queue and wakes the producer. A timer supports systems without CADisplayLink.
+The decoder no longer sleeps until each picture's presentation timestamp before
+starting the next picture. Autoreleased network/demux objects drain per packet.
+
+Decoder revision 5 adapts FFmpeg 2.8's existing ARM CABAC routine to ARMv6 A32.
+Thumb IT and ARMv6T2 MOVW instructions are replaced; byte loads support unaligned
+input. The original FFmpeg license headers remain. Low-resolution RGB565 conversion
+uses ARM11 USAT for exact signed clipping. The stream selection and audio pump
+are unchanged.
+
+CI executes one million CABAC comparisons in each checked/unchecked mode and
+18.8 million RGB565 pixel comparisons on an emulated ARM1176, plus queue timing
+and the existing audio/seek/player regressions. Emulation verifies instructions
+and output correctness, not real-device speed or UIKit layout. The info button
+shows playback FPS and decode/conversion/read/display costs after closing a video;
+the player controls remain clean. Actual 2G FPS and dismissal geometry still need
+on-device validation.

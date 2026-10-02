@@ -10,10 +10,11 @@ DEPS="$ROOT/.deps"
 SRC="$DEPS/FFmpeg-2.8.22"
 GASDIR="$DEPS/gas-preprocessor"
 REVFILE="$SRC/.ytdirect-decoder-rev"
+DECODER_REV="5-arm11-cabac"
 
 test -d "$SDKROOT" || { echo "Missing SDK: $SDKROOT"; exit 1; }
 test -x "$LEGACY_LD" || { echo "Missing ARMv6 linker: $LEGACY_LD"; exit 1; }
-if [ -f "$REVFILE" ] && [ "$(cat "$REVFILE")" = "4" ] &&
+if [ -f "$REVFILE" ] && [ "$(cat "$REVFILE")" = "$DECODER_REV" ] &&
    [ -f "$SRC/libavformat/libavformat.a" ] && [ -f "$SRC/libavcodec/libavcodec.a" ] &&
    [ -f "$SRC/libavutil/libavutil.a" ] && [ -f "$SRC/libswscale/libswscale.a" ]; then
     echo "Using cached ARMv6 decoder libraries."
@@ -39,6 +40,7 @@ EOF
 chmod +x "$CC_WRAP" "$LD_WRAP" "$GASDIR/gas-preprocessor.pl"
 cd "$SRC"
 make distclean >/dev/null 2>&1 || true
+python3 "$ROOT/patch-decoder.py" "$SRC"
 ./configure --enable-cross-compile --target-os=darwin --arch=arm --cpu=arm1176jzf-s \
     --sysroot="$SDKROOT" --cc="$CC_WRAP" --as="$GASDIR/gas-preprocessor.pl $CC_WRAP -arch armv6" \
     --ld="$LD_WRAP" --disable-shared --enable-static --disable-neon --disable-armv6t2 \
@@ -56,5 +58,7 @@ if grep '^CFLAGS=' config.mak | grep -Eq '(^|[[:space:]])-O(0|1|2|s)([[:space:]]
     echo "A lower optimization level is overriding the ARM11 speed build."; exit 1
 fi
 grep -q '^#define CONFIG_SMALL 0' config.h
+grep -q '^#define HAVE_ARMV6_INLINE 1' config.h
+grep -q 'YT_ARM11_CABAC' libavcodec/arm/cabac.h
 make -j"${JOBS:-3}" libavformat/libavformat.a libavcodec/libavcodec.a libswscale/libswscale.a libavutil/libavutil.a
-echo "4" > "$REVFILE"
+echo "$DECODER_REV" > "$REVFILE"

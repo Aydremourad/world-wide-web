@@ -10,6 +10,7 @@
     UILabel *_statusLabel;
     YTNativePlayer *_nativePlayer;
     BOOL _restoreChromeAfterPlayer;
+    BOOL _savedStatusHidden;
+    CGRect _savedNavigationFrame, _savedNavigationBarFrame, _savedContentFrame;
 }
 @end
-

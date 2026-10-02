@@ -6,11 +6,15 @@
 @implementation YTViewController
 
 - (void)restoreApplicationChrome {
-    [[UIApplication sharedApplication] setStatusBarHidden:NO animated:NO];
-    CGRect appFrame=[[UIScreen mainScreen] applicationFrame];
-    self.navigationController.view.frame=appFrame;
-    [self.navigationController.view setNeedsLayout];
-    [self.view setNeedsLayout];
+    [[UIApplication sharedApplication] setStatusBarHidden:_savedStatusHidden animated:NO];
+    // Restore UIKit's known-good launch geometry in its original coordinate
+    // system. applicationFrame adds another status-bar inset on iOS 3.
+    UINavigationController *navigation=self.navigationController;
+    navigation.view.frame=_savedNavigationFrame;
+    [navigation.view setNeedsLayout];
+    [navigation.view layoutIfNeeded];
+    navigation.navigationBar.frame=_savedNavigationBarFrame;
+    self.view.frame=_savedContentFrame;
 }
 - (void)finishPlayerChromeRestore {
     if(!_restoreChromeAfterPlayer) return;
@@ -223,6 +227,10 @@
 }
 - (void)playSoftwareStreams:(NSDictionary *)streams {
     YTSoftwarePlayer *player = [[YTSoftwarePlayer alloc] initWithStreams:streams];
+    _savedStatusHidden=[UIApplication sharedApplication].statusBarHidden;
+    _savedNavigationFrame=self.navigationController.view.frame;
+    _savedNavigationBarFrame=self.navigationController.navigationBar.frame;
+    _savedContentFrame=self.view.frame;
     _restoreChromeAfterPlayer=YES;
     [[UIApplication sharedApplication] setStatusBarHidden:YES animated:NO];
     player.wantsFullScreenLayout=YES;

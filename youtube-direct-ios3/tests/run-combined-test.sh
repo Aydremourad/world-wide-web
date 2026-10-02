@@ -4,6 +4,9 @@ ROOT="$(pwd)"
 xcrun clang -std=c99 -Wall -Wextra tests/player-timing.c -o /tmp/yt-player-timing-$$
 /tmp/yt-player-timing-$$
 rm /tmp/yt-player-timing-$$
+xcrun clang -std=c99 -Wall -Wextra tests/frame-queue.c -o /tmp/yt-frame-queue-$$
+/tmp/yt-frame-queue-$$
+rm /tmp/yt-frame-queue-$$
 TESTDIR="$(mktemp -d)"
 trap 'rm -rf "$TESTDIR"' EXIT
 # Build the same FFmpeg revision as the phone app, for the runner's CPU.
@@ -17,6 +20,11 @@ cd "$TESTDIR/decoder"
     --enable-demuxer=mov --enable-decoder=h264,mpeg4 --enable-parser=h264,mpeg4video --disable-small --optflags="-O3" > "$TESTDIR/config.log" 2>&1
 make -j3 libavformat/libavformat.a libavcodec/libavcodec.a libswscale/libswscale.a libavutil/libavutil.a > "$TESTDIR/build.log" 2>&1
 cd "$ROOT"
+xcrun clang -O3 -I. -I"$TESTDIR/decoder" YTVideoDecoder.c tests/pixels.c \
+    "$TESTDIR/decoder/libavformat/libavformat.a" "$TESTDIR/decoder/libavcodec/libavcodec.a" \
+    "$TESTDIR/decoder/libswscale/libswscale.a" "$TESTDIR/decoder/libavutil/libavutil.a" \
+    -lm -o "$TESTDIR/pixels-test"
+"$TESTDIR/pixels-test"
 xcrun clang -fno-objc-arc -Wno-deprecated-declarations -I. -I"$TESTDIR/decoder" \
     -framework Foundation -framework AudioToolbox YTMediaSource.m YTAudioFile.m YTNativeProbe.m YTLoopbackServer.m YTVideoDecoder.c tests/native-route.m \
     "$TESTDIR/decoder/libavformat/libavformat.a" "$TESTDIR/decoder/libavcodec/libavcodec.a" \

@@ -1,6 +1,8 @@
 #import <UIKit/UIKit.h>
 #import <AudioToolbox/AudioToolbox.h>
+#include "YTFrameQueue.h"
 @class YTMediaSource, YTVideoSurface;
+@class CADisplayLink;
 @interface YTSoftwarePlayer : UIViewController {
     NSDictionary *_streams;
     YTVideoSurface *_surface;
@@ -14,7 +16,12 @@
     NSTimer *_controlsTimer;
     YTMediaSource *_videoSource, *_audioSource, *_videoCache, *_audioCache;
     NSCondition *_seekCondition;
-    id _pendingFrame;
+    YTFrameQueue _frameQueue;
+    CADisplayLink *_displayLink;
+    NSTimer *_frameTimer;
+    unsigned _decodedFrames, _presentedFrames, _supersededFrames;
+    double _decodeSeconds, _convertSeconds, _renderSeconds, _readSeconds;
+    double _performanceLastTick, _performanceSeconds, _sourceFPS;
     double _seekTime;
     unsigned _seekSerial;
     AudioQueueRef _outputQueue;
@@ -23,7 +30,7 @@
     NSTimeInterval _lastControlTouch;
     int _qualityHeight;
     BOOL _controlsHidden, _oldStatusHidden, _finished, _scrubbing, _wasPaused;
-    BOOL _seekPending, _frameScheduled;
+    BOOL _seekPending;
     volatile BOOL _stop, _paused, _sessionStop;
 }
 - (id)initWithStreams:(NSDictionary *)streams;

@@ -49,15 +49,23 @@ int YTSeekVideoToTime(AVFormatContext *format,int track,AVCodecContext *codec,do
     if(result>=0) avcodec_flush_buffers(codec);
     return result;
 }
-static int YTClip8(int value) {
+static int YTScaledClip8(int value) {
+#if defined(__arm__) && (defined(__ARM_ARCH_6__) || defined(__ARM_ARCH_6J__) || defined(__ARM_ARCH_6K__) || defined(__ARM_ARCH_6ZK__) || defined(__ARM_ARCH_6Z__))
+    unsigned clipped;
+    // ARM11 performs the signed shift and unsigned saturation in one instruction.
+    __asm__("usat %0, #8, %1, asr #8" : "=r"(clipped) : "r"(value));
+    return clipped;
+#else
+    value >>= 8;
     if (value < 0) return 0;
     if (value > 255) return 255;
     return value;
+#endif
 }
 static uint16_t YTPackRGB565(int yTerm,int rAdd,int gAdd,int bAdd) {
-    int r=YTClip8((yTerm+rAdd+128)>>8);
-    int g=YTClip8((yTerm+gAdd+128)>>8);
-    int b=YTClip8((yTerm+bAdd+128)>>8);
+    int r=YTScaledClip8(yTerm+rAdd+128);
+    int g=YTScaledClip8(yTerm+gAdd+128);
+    int b=YTScaledClip8(yTerm+bAdd+128);
     return (uint16_t)(((r&0xf8)<<8)|((g&0xfc)<<3)|(b>>3));
 }
 static int YTConvert420ToRGB565(YTVideoImage *image,const AVFrame *frame) {
