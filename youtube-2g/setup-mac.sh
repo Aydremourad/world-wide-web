@@ -10,7 +10,7 @@ if ! command -v brew >/dev/null 2>&1; then
 fi
 
 echo "Installing/updating Mac dependencies..."
-brew install python@3.12 ffmpeg node deno git
+brew install python@3.12 ffmpeg node deno git tailscale
 
 PY="$(brew --prefix python@3.12)/bin/python3.12"
 if [ ! -x "$PY" ]; then
@@ -41,4 +41,6 @@ mkdir -p state
 
 echo
 echo "Mac backend dependencies are ready."
-echo "Next: install/sign in to Tailscale, then run ./run-mac-funnel.sh"
+echo "Start Tailscale with: sudo brew services start tailscale"
+echo "Then sign in with: sudo tailscale up"
+echo "After that run: ./run-mac-funnel.sh"
