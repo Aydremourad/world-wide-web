@@ -19,7 +19,11 @@ if [ -z "$TAILSCALE" ] && [ -x /Applications/Tailscale.app/Contents/MacOS/Tailsc
 fi
 if [ -z "$TAILSCALE" ]; then
   echo "Tailscale CLI was not found."
-  echo "Install Tailscale, sign in, then run this script again."
+  echo "Install the Funnel-capable Homebrew formula with:"
+  echo "  brew install --formula tailscale"
+  echo "  sudo brew services start tailscale"
+  echo "  sudo tailscale up"
+  echo "Then run this script again."
   exit 1
 fi
 
