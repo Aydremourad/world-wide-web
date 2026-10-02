@@ -252,6 +252,55 @@ static NSString *YTPlayerPOST(NSString *videoID,
     return json;
 }
 
+
+static NSString *YTWebSafariPlayerResponse(NSString *videoID, NSString **errorText) {
+    return YTPlayerPOST(videoID,
+        @"WEB",
+        @"2.20260708.00.00",
+        @"1",
+        @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)",
+        NO, errorText);
+}
+
+static NSURL *YTHLSManifestURL(NSString *player, NSString **errorText) {
+    NSString *url = YTJSONStringForKey(player, @"hlsManifestUrl", 0);
+    if (url && [url hasPrefix:@"https://"])
+        return [NSURL URLWithString:url];
+    if (errorText) *errorText = @"No HLS manifest URL in player response.";
+    return nil;
+}
+
+static BOOL YTProbeHLSURL(NSURL *url, NSString **errorText) {
+    NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:url
+                                                       cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
+                                                   timeoutInterval:18.0];
+    [req setHTTPMethod:@"GET"];
+    [req setValue:@"Mozilla/5.0 (iPhone; U; CPU iPhone OS 3_1_3 like Mac OS X; en-us) AppleWebKit/528.18 (KHTML, like Gecko) Version/4.0 Mobile/7E18 Safari/528.16"
+forHTTPHeaderField:@"User-Agent"];
+
+    NSURLResponse *response = nil;
+    NSError *err = nil;
+    NSData *data = [NSURLConnection sendSynchronousRequest:req
+                                         returningResponse:&response
+                                                     error:&err];
+    NSInteger status = 0;
+    if ([response isKindOfClass:[NSHTTPURLResponse class]])
+        status = [(NSHTTPURLResponse *)response statusCode];
+
+    if (data && status >= 200 && status < 300) {
+        NSString *text = [[[NSString alloc] initWithData:data
+                                                 encoding:NSUTF8StringEncoding] autorelease];
+        if ([text rangeOfString:@"#EXTM3U"].location != NSNotFound)
+            return YES;
+    }
+
+    if (errorText) {
+        if (err) *errorText = [err localizedDescription];
+        else *errorText = [NSString stringWithFormat:@"HLS HTTP %d", (int)status];
+    }
+    return NO;
+}
+
 static NSString *YTEmbeddedPlayerResponse(NSString *videoID, NSString **errorText) {
     return YTPlayerPOST(videoID,
         @"WEB_EMBEDDED_PLAYER",
@@ -730,6 +779,21 @@ static NSURL *YTDownloadAndConvertForOriginalIPhone(NSURL *remoteURL,
     NSMutableArray *errors = [NSMutableArray array];
     NSString *err = nil;
     NSURL *stream = nil;
+
+    // Best path for iPhone OS 3: pre-merged HLS from YouTube's Safari web client.
+    // This avoids any on-device transcoding when YouTube exposes hlsManifestUrl.
+    NSString *safari = YTWebSafariPlayerResponse(videoID, &err);
+    if (safari) {
+        NSURL *hls = YTHLSManifestURL(safari, &err);
+        if (hls) {
+            NSString *probeError = nil;
+            if (YTProbeHLSURL(hls, &probeError))
+                return hls;
+            err = [NSString stringWithFormat:@"HLS manifest rejected: %@",
+                   probeError ? probeError : @"unknown HLS error"];
+        }
+    }
+    if (err) [errors addObject:[NSString stringWithFormat:@"Safari HLS: %@", err]];
 
     // First choice: WEB_EMBEDDED_PLAYER. Current yt-dlp policy does not require
     // a GVS PO token for this client. It only works when the video is embeddable.
