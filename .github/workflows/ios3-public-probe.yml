@@ -1,0 +1,15 @@
+name: Check public iOS 3 video relay
+on:
+  push:
+    branches: [youtube-native-player-ios3]
+    paths: [tools/public-stream-probe.py, .github/workflows/ios3-public-probe.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 tools/public-stream-probe.py
