@@ -1,11 +1,27 @@
 #!/bin/zsh
 set -e
 
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+cd "$ROOT"
+
 BASE="$1"
 VIDEO="$2"
-if [ -z "$BASE" ]; then BASE="http://127.0.0.1:10000"; fi
+
+if [ -z "$BASE" ] && [ -f state/public-base-url.txt ]; then
+  BASE="$(cat state/public-base-url.txt)"
+fi
+
+if [ -z "$BASE" ]; then
+  echo "No public tunnel URL is available."
+  echo "Start this in another Terminal and leave it running:"
+  echo "  cd ~/youtube-direct-ios3/youtube-2g"
+  echo "  zsh run-mac-tunnel.sh"
+  exit 2
+fi
+
 if [ -z "$VIDEO" ]; then VIDEO="jNQXAC9IVRw"; fi
 
+echo "Testing: $BASE"
 echo "Diagnostics:"
 curl -fsS "$BASE/diagnostics"
 echo
