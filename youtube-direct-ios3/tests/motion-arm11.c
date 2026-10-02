@@ -15,16 +15,18 @@ static void same(const uint8_t *a,const uint8_t *b,size_t n,const char *kind,int
             kind,size,phase,avg,iteration,(unsigned long)i,a[i],b[i]); exit(1);
     }
 }
-int main(void) {
+int main(int argc,char **argv) {
+    int benchmarkOnly=argc==2,chosen=benchmarkOnly ? atoi(argv[1]) : -1;
     H264QpelContext reference={0},optimized={0};
     H264ChromaContext chromaReference={0},chromaOptimized={0};
     av_force_cpu_flags(0);
     ff_h264qpel_init(&reference,8); ff_h264chroma_init(&chromaReference,8);
-    yt_h264qpel_arm11_init(&optimized); yt_h264chroma_arm11_init(&chromaOptimized);
+    optimized=reference; yt_h264qpel_arm11_init(&optimized); yt_h264chroma_arm11_init(&chromaOptimized);
     uint8_t source[48*48] __attribute__((aligned(16)));
     uint8_t a[48*48] __attribute__((aligned(16))),b[48*48] __attribute__((aligned(16)));
     unsigned comparisons=0;
-    for(int iteration=0;iteration<256;iteration++) {
+    for(size_t i=0;i<sizeof(source);i++) source[i]=random_byte();
+    for(int iteration=0;iteration<(benchmarkOnly ? 0 : 256);iteration++) {
         // Qpel/chroma callbacks require destination alignment equal to block
         // width and a frame stride preserving it. Motion-vector sources may
         // be odd, which remains part of this comparison.
@@ -68,7 +70,7 @@ int main(void) {
     int16_t coefficientsCopy[48*16] __attribute__((aligned(16)));
     int offsets[48]; uint8_t nonzero[120];
     for(int i=0;i<48;i++) offsets[i]=(i%6)*4+(i/6)*4*48;
-    for(int iteration=0;iteration<4096;iteration++) {
+    for(int iteration=0;iteration<(benchmarkOnly ? 0 : 4096);iteration++) {
         int stride=48,offset=4*stride+16;
         for(int operation=0;operation<5;operation++) {
             for(size_t i=0;i<sizeof(a);i++) a[i]=b[i]=random_byte();
@@ -102,8 +104,10 @@ int main(void) {
         }
     }
     puts("ARM11 IDCT: 20480 exact transform/dispatch comparisons, including coefficient clearing and signed overflow.");
-    if(getenv("YT_MOTION_BENCH")) {
+    if(getenv("YT_MOTION_BENCH") || benchmarkOnly) {
+        memset(coefficients,0,sizeof(coefficients));
         for(int mode=0;mode<2;mode++) {
+            if(benchmarkOnly && mode!=chosen) continue;
             H264QpelContext *q=mode ? &optimized : &reference;
             H264ChromaContext *c=mode ? &chromaOptimized : &chromaReference;
             clock_t start=clock();

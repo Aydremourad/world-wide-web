@@ -36,6 +36,12 @@ arm-linux-gnueabi-gcc -O3 -std=c99 -mcpu=arm1176jzf-s -marm -static -I. -I"$TEST
     tests/motion-arm11.c "$TESTDIR/decoder/libavcodec/libavcodec.a" \
     "$TESTDIR/decoder/libavutil/libavutil.a" -lm -lpthread -o "$TESTDIR/motion-test"
 YT_MOTION_BENCH=1 qemu-arm -cpu arm1176 "$TESTDIR/motion-test"
+# Emulator elapsed time includes software emulation of ARM11 packed DSP.
+# Count real guest instructions for the identical motion/IDCT workload too.
+curl -fsSL https://raw.githubusercontent.com/qemu/qemu/v8.2.2/include/qemu/qemu-plugin.h -o "$TESTDIR/qemu-plugin.h"
+gcc -O2 -fPIC -shared -I"$TESTDIR" tests/count-arm-instructions.c -o "$TESTDIR/count.so"
+qemu-arm -cpu arm1176 -plugin "$TESTDIR/count.so" "$TESTDIR/motion-test" 0
+qemu-arm -cpu arm1176 -plugin "$TESTDIR/count.so" "$TESTDIR/motion-test" 1
 arm-linux-gnueabi-gcc -O3 -std=c99 -mcpu=arm1176jzf-s -marm -static -I. -I"$TESTDIR/decoder" \
     YTVideoDecoder.c tests/decoder-arm11.c "$TESTDIR/decoder/libavformat/libavformat.a" \
     "$TESTDIR/decoder/libavcodec/libavcodec.a" "$TESTDIR/decoder/libswscale/libswscale.a" \
