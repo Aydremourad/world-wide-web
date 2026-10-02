@@ -412,8 +412,10 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     [_seekCondition lock]; _sessionStop=YES;
     [_videoSource cancel]; [_audioSource cancel]; [_pendingFrame release]; _pendingFrame=nil;
     [_seekCondition signal]; [_seekCondition unlock];
-    [self dismissModalViewControllerAnimated:NO];
+    // Restore the status bar before UIKit reveals the underlying navigation
+    // controller so it receives the 320x460 application geometry immediately.
     [[UIApplication sharedApplication] setStatusBarHidden:_oldStatusHidden animated:NO];
+    [self dismissModalViewControllerAnimated:NO];
 }
 - (void)presentFrame:(NSDictionary *)frame {
     if (_stop || _sessionStop || [[frame objectForKey:@"serial"] unsignedIntValue]!=_seekSerial) return;

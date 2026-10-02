@@ -90,8 +90,8 @@ int main(void) {
     result = Resolve([NSString stringWithFormat:@"%@,%@,%@", Combined, Video, Audio]);
     assert(![[result objectForKey:@"combined"] boolValue]);
     result = Resolve([NSString stringWithFormat:@"%@,%@,%@", HalfRateVideo, Video, Audio]);
-    assert([[[result objectForKey:@"videoURL"] path] isEqualToString:@"/video"]);
-    assert([[result objectForKey:@"videoItag"] intValue]==160 && [[result objectForKey:@"fps"] intValue]==30);
+    assert([[[result objectForKey:@"videoURL"] path] isEqualToString:@"/half"]);
+    assert([[result objectForKey:@"videoItag"] intValue]==597 && [[result objectForKey:@"fps"] intValue]==15);
     NSString *baseline=[Combined stringByReplacingOccurrencesOfString:@"avc1.4d401e" withString:@"avc1.42001e"];
     result=Resolve([NSString stringWithFormat:@"%@,%@,%@",baseline,Video,Audio]);
     assert([[result objectForKey:@"combined"] boolValue]); // Prefer native playback over software 144p.
