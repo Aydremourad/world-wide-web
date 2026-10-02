@@ -276,7 +276,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     _message.numberOfLines=3; _message.text=@"Loading..."; [self.view addSubview:_message];
     [self layoutPlayerChrome];
     _lastControlTouch=[NSDate timeIntervalSinceReferenceDate];
-    _controlsTimer=[[NSTimer scheduledTimerWithTimeInterval:0.25 target:self selector:@selector(controlsTick:) userInfo:nil repeats:YES] retain];
+    _controlsTimer=[[NSTimer scheduledTimerWithTimeInterval:0.5 target:self selector:@selector(controlsTick:) userInfo:nil repeats:YES] retain];
     [self retain];
     [NSThread detachNewThreadSelector:@selector(playThread:) toTarget:self withObject:nil];
 }
@@ -323,7 +323,9 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
 }
 - (void)toggleControls {
     _lastControlTouch=[NSDate timeIntervalSinceReferenceDate];
-    [self setControlsHidden:!_controlsHidden];
+    BOOL hidden=!_controlsHidden;
+    [self setControlsHidden:hidden];
+    if(!hidden) [self controlsTick:nil];
 }
 - (void)toggleFit {
     _lastControlTouch=[NSDate timeIntervalSinceReferenceDate];
@@ -394,7 +396,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
 - (void)controlsTick:(NSTimer *)timer {
     if (_stop) return;
     NSTimeInterval now=[NSDate timeIntervalSinceReferenceDate];
-    if (_audioPump && !_scrubbing) {
+    if (_audioPump && !_scrubbing && !_controlsHidden) {
         double seconds=YTAudioMediaTime((YTAudio *)_audioPump);
         _elapsedLabel.text=[self timeString:seconds];
         _progress.value=seconds;
