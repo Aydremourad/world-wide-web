@@ -165,7 +165,6 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     if ((self = [super init])) {
         _oldStatusHidden = [UIApplication sharedApplication].statusBarHidden;
         self.wantsFullScreenLayout = YES;
-        self.modalPresentationStyle = UIModalPresentationFullScreen;
         _streams = [streams retain]; _seekCondition=[[NSCondition alloc] init];
         _videoCache=[[_streams objectForKey:@"videoSource"] retain];
         _audioCache=[[_streams objectForKey:@"audioSource"] retain];
