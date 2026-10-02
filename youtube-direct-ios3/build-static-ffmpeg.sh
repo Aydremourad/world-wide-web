@@ -26,7 +26,7 @@ GASDIR="$DEPS/gas-preprocessor"
 GASPRE="$GASDIR/gas-preprocessor.pl"
 OUT="$ROOT/layout/usr/libexec/ytdirect-ffmpeg"
 REVFILE="$ROOT/layout/usr/libexec/ytdirect-ffmpeg.rev"
-CONVERTER_REV="3"
+CONVERTER_REV="4"
 mkdir -p "$DEPS" "$ROOT/layout/usr/libexec"
 
 if [ -x "$OUT" ] && [ -f "$REVFILE" ] && [ "$(cat "$REVFILE")" = "$CONVERTER_REV" ]; then
@@ -78,7 +78,7 @@ echo "Configuring static armv6 FFmpeg..."
   --cpu=arm1176jzf-s \
   --sysroot="$SDKROOT" \
   --cc="$CC_WRAP" \
-  --as="$GASPRE $CC_WRAP" \
+  --as="$GASPRE $CC_WRAP -arch armv6" \
   --ld="$LD_WRAP" \
   --disable-shared \
   --enable-static \
