@@ -322,8 +322,10 @@ static NSInteger YTFormatRank(NSString *format, BOOL video) {
             if (width > 384 || height > 384 || width * height > 38400) return -1;
         } else if (itag != 597 && itag != 160) return -1;
         NSInteger fps=YTJSONIntForKey(format, @"fps");
-        NSInteger rank=itag == 160 ? 0 : itag == 597 ? 20 : 5;
-        if(fps>0 && fps<20) rank+=20;
+        // The original iPhone cannot sustain 30 fps Main-profile software
+        // decode. Prefer YouTube's lower-bitrate 15 fps 144p representation.
+        NSInteger rank=itag == 597 ? 0 : itag == 160 ? 10 : 5;
+        if(fps>=24) rank+=5;
         return rank;
     }
     if ([mime length] && ([mime rangeOfString:@"audio/mp4"].location == NSNotFound ||
@@ -530,6 +532,10 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
     }
     NSInteger sourceFPS=YTJSONIntForKey(video,@"fps"); if(sourceFPS<0) sourceFPS=0;
     NSInteger videoItag=YTJSONIntForKey(video,@"itag"); if(videoItag<0) videoItag=0;
+    if(sourceFPS<=0) {
+        if(videoItag==597) sourceFPS=15;
+        else if(videoItag==160) sourceFPS=30;
+    }
     return [NSDictionary dictionaryWithObjectsAndKeys:
         YTFormatURL(video), @"videoURL", YTFormatURL(audio), @"audioURL",
         [NSNumber numberWithLongLong:YTFormatLength(video)], @"videoLength",

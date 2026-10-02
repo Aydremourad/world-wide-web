@@ -71,7 +71,7 @@ static int YTConvert420ToRGB565(YTVideoImage *image,const AVFrame *frame) {
     }
     int width=frame->width,height=frame->height,needed=width*height*2;
     if(needed!=image->pixelBytes) {
-        av_free(image->pixels); image->pixels=av_malloc(needed); image->pixelBytes=needed;
+        free(image->pixels); image->pixels=malloc(needed); image->pixelBytes=needed;
     }
     if(!image->pixels) return AVERROR(ENOMEM);
     uint16_t *out=(uint16_t *)image->pixels;
@@ -107,8 +107,8 @@ int YTConvertVideoFrame(YTVideoImage *image, const AVFrame *frame) {
     if (width < 1 || height < 1) return AVERROR(EINVAL);
     int needed = width * height * 2;
     if (needed != image->pixelBytes) {
-        av_free(image->pixels);
-        image->pixels = av_malloc(needed);
+        free(image->pixels);
+        image->pixels = malloc(needed);
         image->pixelBytes = needed;
     }
     if (!image->pixels) return AVERROR(ENOMEM);
@@ -126,6 +126,6 @@ int YTConvertVideoFrame(YTVideoImage *image, const AVFrame *frame) {
 }
 void YTFreeVideoImage(YTVideoImage *image) {
     if (image->scaler) sws_freeContext(image->scaler);
-    av_free(image->pixels);
+    free(image->pixels);
     memset(image, 0, sizeof(*image));
 }

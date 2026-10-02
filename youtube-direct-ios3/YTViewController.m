@@ -5,6 +5,23 @@
 
 @implementation YTViewController
 
+- (void)restoreApplicationChrome {
+    [[UIApplication sharedApplication] setStatusBarHidden:NO animated:NO];
+    CGRect appFrame=[[UIScreen mainScreen] applicationFrame];
+    self.navigationController.view.frame=appFrame;
+    [self.navigationController.view setNeedsLayout];
+    [self.view setNeedsLayout];
+}
+- (void)viewWillAppear:(BOOL)animated {
+    [super viewWillAppear:animated];
+    [self restoreApplicationChrome];
+}
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    [self restoreApplicationChrome];
+    [self performSelector:@selector(restoreApplicationChrome) withObject:nil afterDelay:0.0];
+}
+
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.title = @"YouTube";
@@ -170,8 +187,10 @@
         [streams setObject:videoID forKey:@"videoID"];
         NSDictionary *info=[streams objectForKey:@"nativeInfo"];
         NSString *route=[[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue] ? @"Apple player" : @"Software player";
-        NSString *diagnostic=[NSString stringWithFormat:@"Build: 1.0.0-debug1\nPlayer: %@\nVideo: itag %@, %@p, source %@ fps\nNative probe: %@\n",
-            route,[streams objectForKey:@"videoItag"],[streams objectForKey:@"height"],[streams objectForKey:@"fps"],
+        NSString *build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"YTBuildLabel"];
+        if(![build length]) build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
+        NSString *diagnostic=[NSString stringWithFormat:@"Build: %@\nPlayer: %@\nVideo: itag %@, %@p, source %@ fps\nNative probe: %@\n",
+            build,route,[streams objectForKey:@"videoItag"],[streams objectForKey:@"height"],[streams objectForKey:@"fps"],
             info ? info : @"separate tracks"];
         [diagnostic writeToFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"YouTube-playback.txt"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
     }

@@ -8,7 +8,7 @@ STAGE=".ci-package"
 APP="$STAGE/Applications/YouTubeDirect.app"
 mkdir -p "$APP" "$STAGE/DEBIAN" packages
 xcrun clang -arch armv6 -isysroot "$SDKROOT" -miphoneos-version-min=3.0 \
-    -fno-objc-arc -O2 -Wno-deprecated-declarations -I"$SRC" \
+    -fno-objc-arc -O3 -mcpu=arm1176jzf-s -marm -fno-math-errno -fno-signed-zeros -Wno-deprecated-declarations -I"$SRC" \
     main.m YTAppDelegate.m YTViewController.m YTYouTube.m YTMediaSource.m YTVideoSurface.m YTSoftwarePlayer.m YTAudioFile.m YTAudioPump.m YTNativeProbe.m YTLoopbackServer.m YTNativePlayer.m YTVideoDecoder.c \
     "$SRC/libavformat/libavformat.a" "$SRC/libavcodec/libavcodec.a" \
     "$SRC/libswscale/libswscale.a" "$SRC/libavutil/libavutil.a" \
