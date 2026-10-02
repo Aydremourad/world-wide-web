@@ -7,8 +7,8 @@
     EAGLContext *_context;
     GLuint _framebuffer, _renderbuffer, _texture;
     GLint _backingWidth, _backingHeight;
-    BOOL _aspectFill;
-    NSData *_lastPixels;
+    BOOL _aspectFill, _geometryDirty, _hasFrame;
+    GLfloat _vertices[8], _coordinates[8];
     int _textureWidth, _textureHeight, _videoWidth, _videoHeight;
 }
 @property(nonatomic) BOOL aspectFill;

@@ -22,6 +22,22 @@ typedef struct {
     volatile BOOL *stop;
 } YTVideoIO;
 
+@interface YTFramePacket : NSObject {
+@public
+    NSData *pixels;
+    int width, height;
+    unsigned serial;
+}
+- (id)initWithPixels:(NSData *)data width:(int)w height:(int)h serial:(unsigned)s;
+@end
+@implementation YTFramePacket
+- (id)initWithPixels:(NSData *)data width:(int)w height:(int)h serial:(unsigned)s {
+    if((self=[super init])) { pixels=[data retain]; width=w; height=h; serial=s; }
+    return self;
+}
+- (void)dealloc { [pixels release]; [super dealloc]; }
+@end
+
 typedef struct {
     YTSoftwarePlayer *controller;
     YTAudio *audio;
@@ -47,8 +63,8 @@ typedef struct {
 } YTPlayback;
 
 @interface YTSoftwarePlayer ()
-- (void)presentFrame:(NSDictionary *)frame;
-- (void)queueFrame:(NSDictionary *)frame;
+- (void)presentFrame:(YTFramePacket *)frame;
+- (void)queueFrame:(YTFramePacket *)frame;
 - (void)displayPendingFrame;
 - (NSString *)playSessionAtTime:(double)time serial:(unsigned)serial;
 - (void)sessionFinished:(NSDictionary *)info;
@@ -60,7 +76,6 @@ typedef struct {
 - (void)detachAudioQueue;
 - (void)controlsTick:(NSTimer *)timer;
 - (void)layoutPlayerChrome;
-- (void)recordDecodedFrame;
 @end
 
 static int YTReadVideo(void *opaque, uint8_t *bytes, int count) {
@@ -109,10 +124,9 @@ static NSData *YTDetachVideoPixels(YTVideoImage *image) {
     if(!image->pixels || image->pixelBytes<=0) return nil;
     void *pixels=image->pixels; NSUInteger length=(NSUInteger)image->pixelBytes;
     image->pixels=NULL; image->pixelBytes=0;
-    return [NSData dataWithBytesNoCopy:pixels length:length freeWhenDone:YES];
+    return [[NSData alloc] initWithBytesNoCopy:pixels length:length freeWhenDone:YES];
 }
 static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRational timeBase) {
-    [playback->controller recordDecodedFrame];
     int64_t timestamp = av_frame_get_best_effort_timestamp(frame);
     double pts = timestamp == AV_NOPTS_VALUE ? playback->nextPTS : timestamp * av_q2d(timeBase);
     if (isnan(playback->firstPTS)) playback->firstPTS = pts;
@@ -122,11 +136,12 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     if(*playback->paused && !playback->audioStarted && !playback->previewShown) {
         if(YTConvertVideoFrame(&playback->image,frame)<0) return NO;
         NSData *previewPixels=YTDetachVideoPixels(&playback->image);
-        NSDictionary *preview=[NSDictionary dictionaryWithObjectsAndKeys:
-            previewPixels,@"pixels",
-            [NSNumber numberWithInt:playback->image.width],@"width",[NSNumber numberWithInt:playback->image.height],@"height",
-            [NSNumber numberWithUnsignedInt:playback->serial],@"serial",nil];
-        [playback->controller queueFrame:preview]; playback->previewShown=YES;
+        YTFramePacket *preview=[[YTFramePacket alloc] initWithPixels:previewPixels
+            width:playback->image.width height:playback->image.height serial:playback->serial];
+        [previewPixels release];
+        [playback->controller queueFrame:preview];
+        [preview release];
+        playback->previewShown=YES;
     }
     if (!YTWaitForPause(playback)) return NO;
     if (!playback->audioStarted) {
@@ -158,15 +173,12 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     if (!YTShouldPresentFrame(wait, now, playback->lastDisplay)) return YES;
     playback->lastDisplay = now;
     if (YTConvertVideoFrame(&playback->image, frame) < 0) return NO;
-    NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     NSData *framePixels=YTDetachVideoPixels(&playback->image);
-    NSDictionary *payload = [NSDictionary dictionaryWithObjectsAndKeys:
-        framePixels, @"pixels",
-        [NSNumber numberWithInt:playback->image.width], @"width",
-        [NSNumber numberWithInt:playback->image.height], @"height",
-        [NSNumber numberWithUnsignedInt:playback->serial], @"serial", nil];
+    YTFramePacket *payload=[[YTFramePacket alloc] initWithPixels:framePixels
+        width:playback->image.width height:playback->image.height serial:playback->serial];
+    [framePixels release];
     [playback->controller queueFrame:payload];
-    [pool release];
+    [payload release];
     return !*playback->stop;
 }
 
@@ -216,10 +228,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     _qualityLabel.textAlignment=UITextAlignmentCenter; _qualityLabel.font=[UIFont boldSystemFontOfSize:13];
     _qualityHeight=[[_streams objectForKey:@"height"] intValue];
     if(!_qualityHeight) _qualityHeight=[[[_streams objectForKey:@"nativeInfo"] objectForKey:@"height"] intValue];
-    NSInteger sourceFPS=[[_streams objectForKey:@"fps"] integerValue];
-    _qualityLabel.text=_qualityHeight>0 ?
-        [NSString stringWithFormat:@"%dp%@",_qualityHeight,sourceFPS>0 ? [NSString stringWithFormat:@" • %ld fps source",(long)sourceFPS] : @""] :
-        @"YouTube Debug";
+    _qualityLabel.text=_qualityHeight>0 ? [NSString stringWithFormat:@"%dp",_qualityHeight] : @"YouTube";
     UIBarButtonItem *qualityItem=[[[UIBarButtonItem alloc] initWithCustomView:_qualityLabel] autorelease];
     [_topBar setItems:[NSArray arrayWithObjects:done, space, qualityItem, space, _fitItem, nil]];
     [self.view addSubview:_topBar];
@@ -267,7 +276,6 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     _message.numberOfLines=3; _message.text=@"Loading..."; [self.view addSubview:_message];
     [self layoutPlayerChrome];
     _lastControlTouch=[NSDate timeIntervalSinceReferenceDate];
-    _debugFPSAt=_lastControlTouch;
     _controlsTimer=[[NSTimer scheduledTimerWithTimeInterval:0.25 target:self selector:@selector(controlsTick:) userInfo:nil repeats:YES] retain];
     [self retain];
     [NSThread detachNewThreadSelector:@selector(playThread:) toTarget:self withObject:nil];
@@ -306,7 +314,6 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     _spinner.center=CGPointMake(width/2,height/2-15);
     _message.frame=CGRectMake(20,height/2+10,width-40,55);
 }
-- (void)recordDecodedFrame { _debugDecodedFrames++; }
 - (NSString *)timeString:(double)seconds {
     int time=(int)(seconds > 0 ? seconds : 0);
     return [NSString stringWithFormat:@"%d:%02d",time/60,time%60];
@@ -378,7 +385,6 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     _outputQueue=[[info objectForKey:@"queue"] pointerValue];
     _audioPump=[[info objectForKey:@"audio"] pointerValue];
     _sampleRate=[[info objectForKey:@"rate"] doubleValue];
-    _debugDirectAAC=[[info objectForKey:@"directAAC"] boolValue];
     _duration=[[info objectForKey:@"duration"] doubleValue];
     _progress.maximumValue=_duration>0 ? _duration : 1; _progress.enabled=_duration>0;
     _backItem.enabled=_forwardItem.enabled=_duration>0;
@@ -388,15 +394,6 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
 - (void)controlsTick:(NSTimer *)timer {
     if (_stop) return;
     NSTimeInterval now=[NSDate timeIntervalSinceReferenceDate];
-    if(now-_debugFPSAt>=1.0) {
-        unsigned frames=_debugFrames-_debugLastFrames;
-        unsigned decoded=_debugDecodedFrames-_debugLastDecodedFrames;
-        double interval=now-_debugFPSAt;
-        _debugFPS=interval>0 ? frames/interval : 0;
-        _debugDecodeFPS=interval>0 ? decoded/interval : 0;
-        _debugLastFrames=_debugFrames; _debugLastDecodedFrames=_debugDecodedFrames; _debugFPSAt=now;
-        if(_qualityHeight>0) _qualityLabel.text=[NSString stringWithFormat:@"%dp D%.1f P%.1f",_qualityHeight,_debugDecodeFPS,_debugFPS];
-    }
     if (_audioPump && !_scrubbing) {
         double seconds=YTAudioMediaTime((YTAudio *)_audioPump);
         _elapsedLabel.text=[self timeString:seconds];
@@ -417,14 +414,14 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     [[UIApplication sharedApplication] setStatusBarHidden:_oldStatusHidden animated:NO];
     [self dismissModalViewControllerAnimated:NO];
 }
-- (void)presentFrame:(NSDictionary *)frame {
-    if (_stop || _sessionStop || [[frame objectForKey:@"serial"] unsignedIntValue]!=_seekSerial) return;
-    _message.hidden=YES; [_spinner stopAnimating]; _debugFrames++;
-    [_surface displayRGB565:[frame objectForKey:@"pixels"] width:[[frame objectForKey:@"width"] intValue] height:[[frame objectForKey:@"height"] intValue]];
+- (void)presentFrame:(YTFramePacket *)frame {
+    if (_stop || _sessionStop || frame->serial!=_seekSerial) return;
+    _message.hidden=YES; [_spinner stopAnimating];
+    [_surface displayRGB565:frame->pixels width:frame->width height:frame->height];
 }
-- (void)queueFrame:(NSDictionary *)frame {
+- (void)queueFrame:(YTFramePacket *)frame {
     [_seekCondition lock];
-    if(!_stop && !_sessionStop && [[frame objectForKey:@"serial"] unsignedIntValue]==_seekSerial) {
+    if(!_stop && !_sessionStop && frame->serial==_seekSerial) {
         [frame retain]; [_pendingFrame release]; _pendingFrame=frame;
         if(!_frameScheduled) {
             _frameScheduled=YES;
@@ -434,7 +431,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     [_seekCondition unlock];
 }
 - (void)displayPendingFrame {
-    [_seekCondition lock]; NSDictionary *frame=_pendingFrame; _pendingFrame=nil; _frameScheduled=NO; [_seekCondition unlock];
+    [_seekCondition lock]; YTFramePacket *frame=_pendingFrame; _pendingFrame=nil; _frameScheduled=NO; [_seekCondition unlock];
     if(frame) [self presentFrame:frame]; [frame release];
 }
 - (void)setBuffering:(NSDictionary *)info {
@@ -499,9 +496,9 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     if (_sessionStop) goto finished;
     av_register_all();
     format = avformat_alloc_context();
-    uint8_t *readBuffer = av_malloc(32768);
+    uint8_t *readBuffer = av_malloc(65536);
     if (!format || !readBuffer) { av_free(readBuffer); failure = @"Not enough memory for the player."; goto finished; }
-    ioContext = avio_alloc_context(readBuffer, 32768, 0, &io, YTReadVideo, NULL, YTSeekVideo);
+    ioContext = avio_alloc_context(readBuffer, 65536, 0, &io, YTReadVideo, NULL, YTSeekVideo);
     if (!ioContext) { av_free(readBuffer); failure = @"Could not create the video reader."; goto finished; }
     format->pb = ioContext;
     format->flags |= AVFMT_FLAG_CUSTOM_IO;

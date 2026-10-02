@@ -12,14 +12,17 @@
     [self.navigationController.view setNeedsLayout];
     [self.view setNeedsLayout];
 }
-- (void)viewWillAppear:(BOOL)animated {
-    [super viewWillAppear:animated];
+- (void)finishPlayerChromeRestore {
+    if(!_restoreChromeAfterPlayer) return;
     [self restoreApplicationChrome];
+    _restoreChromeAfterPlayer=NO;
 }
 - (void)viewDidAppear:(BOOL)animated {
     [super viewDidAppear:animated];
-    [self restoreApplicationChrome];
-    [self performSelector:@selector(restoreApplicationChrome) withObject:nil afterDelay:0.0];
+    if(_restoreChromeAfterPlayer) {
+        [self restoreApplicationChrome];
+        [self performSelector:@selector(finishPlayerChromeRestore) withObject:nil afterDelay:0.0];
+    }
 }
 
 - (void)viewDidLoad {
@@ -221,6 +224,7 @@
 }
 - (void)playSoftwareStreams:(NSDictionary *)streams {
     YTSoftwarePlayer *player = [[YTSoftwarePlayer alloc] initWithStreams:streams];
+    _restoreChromeAfterPlayer=YES;
     [[UIApplication sharedApplication] setStatusBarHidden:YES animated:NO];
     player.wantsFullScreenLayout=YES;
     [self presentModalViewController:player animated:NO];

@@ -27,11 +27,11 @@ int YTOpenH264Decoder(AVCodecContext *codec) {
     codec->flags2 |= AV_CODEC_FLAG2_FAST;
     int mainProfile=codec->codec_id==AV_CODEC_ID_H264 && codec->extradata_size>=4 &&
         codec->extradata[0]==1 && codec->extradata[1]!=66;
-    if (codec->width * codec->height > 38400) {
-        codec->skip_frame = AVDISCARD_NONREF;
-        codec->skip_loop_filter = AVDISCARD_ALL;
-    } else if (mainProfile) {
-        codec->skip_frame = AVDISCARD_DEFAULT;
+    if (codec->codec_id == AV_CODEC_ID_H264) {
+        if (codec->width * codec->height > 38400) codec->skip_frame = AVDISCARD_NONREF;
+        else codec->skip_frame = AVDISCARD_DEFAULT;
+        // Deblocking is one of the most expensive H.264 post-decode steps on
+        // ARM11. At 144p, disabling it is a better trade than dropping frames.
         codec->skip_loop_filter = AVDISCARD_ALL;
     } else codec->skip_loop_filter = AVDISCARD_NONREF;
     AVCodec *decoder = avcodec_find_decoder(codec->codec_id);

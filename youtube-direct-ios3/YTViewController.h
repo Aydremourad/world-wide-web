@@ -9,6 +9,7 @@
     UIActivityIndicatorView *_spinner;
     UILabel *_statusLabel;
     YTNativePlayer *_nativePlayer;
+    BOOL _restoreChromeAfterPlayer;
 }
 @end
 
