@@ -63,7 +63,7 @@ int main(int argc,char **argv) {
             same(a,b,sizeof(a),"chroma",8>>size,y*8+x,avg,iteration); comparisons++;
         }
     }
-    printf("ARM11 motion: %u exact luma/chroma block comparisons, including untouched padding.\n",comparisons);
+    if(!benchmarkOnly) printf("ARM11 motion: %u exact luma/chroma block comparisons, including untouched padding.\n",comparisons);
     H264DSPContext dspReference={0},dspOptimized={0};
     ff_h264dsp_init(&dspReference,8,1); yt_h264idct_arm11_init(&dspOptimized,1);
     int16_t coefficients[48*16] __attribute__((aligned(16)));
@@ -103,7 +103,7 @@ int main(int argc,char **argv) {
             same((uint8_t *)coefficients,(uint8_t *)coefficientsCopy,sizeof(coefficients),"IDCT clearing",4,operation,0,iteration);
         }
     }
-    puts("ARM11 IDCT: 20480 exact transform/dispatch comparisons, including coefficient clearing and signed overflow.");
+    if(!benchmarkOnly) puts("ARM11 IDCT: 20480 exact transform/dispatch comparisons, including coefficient clearing and signed overflow.");
     if(getenv("YT_MOTION_BENCH") || benchmarkOnly) {
         memset(coefficients,0,sizeof(coefficients));
         for(int mode=0;mode<2;mode++) {

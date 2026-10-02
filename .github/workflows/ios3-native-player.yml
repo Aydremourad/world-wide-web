@@ -13,7 +13,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install ARM11 emulator and cross compiler
-        run: sudo apt-get update -qq && sudo apt-get install -y gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi qemu-user
+        run: sudo apt-get update -qq && sudo apt-get install -y gcc-arm-linux-gnueabi binutils-arm-linux-gnueabi qemu-user libglib2.0-dev ninja-build pkg-config python3-venv
       - name: Verify ARM11 decoder DSP, pixels, and 30 fps playback
         working-directory: youtube-direct-ios3
         run: sh tests/run-arm11-test.sh

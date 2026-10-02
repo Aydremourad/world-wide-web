@@ -40,8 +40,22 @@ YT_MOTION_BENCH=1 qemu-arm -cpu arm1176 "$TESTDIR/motion-test"
 # Count real guest instructions for the identical motion/IDCT workload too.
 curl -fsSL https://raw.githubusercontent.com/qemu/qemu/v8.2.2/include/qemu/qemu-plugin.h -o "$TESTDIR/qemu-plugin.h"
 gcc -O2 -fPIC -shared -I"$TESTDIR" tests/count-arm-instructions.c -o "$TESTDIR/count.so"
-qemu-arm -cpu arm1176 -plugin "$TESTDIR/count.so" "$TESTDIR/motion-test" 0
-qemu-arm -cpu arm1176 -plugin "$TESTDIR/count.so" "$TESTDIR/motion-test" 1
+QEMU_COUNT=qemu-arm
+if ! qemu-arm -help | grep -q -- '-plugin'; then
+    # Ubuntu's packaged user-mode emulator omits plugins. Build a test-only
+    # emulator with the public instruction-counter API; it is not an app dep.
+    git clone --quiet --depth 1 --branch v8.2.2 https://github.com/qemu/qemu.git "$TESTDIR/qemu"
+    mkdir "$TESTDIR/qemu-build"
+    cd "$TESTDIR/qemu-build"
+    "$TESTDIR/qemu/configure" --target-list=arm-linux-user --enable-plugins \
+        --disable-system --disable-tools --disable-docs --disable-werror \
+        > "$TESTDIR/qemu-config.log" 2>&1 || { tail -60 "$TESTDIR/qemu-config.log"; exit 1; }
+    make -j3 qemu-arm > "$TESTDIR/qemu-build.log" 2>&1 || { tail -60 "$TESTDIR/qemu-build.log"; exit 1; }
+    QEMU_COUNT="$TESTDIR/qemu-build/qemu-arm"
+    cd "$ROOT"
+fi
+"$QEMU_COUNT" -cpu arm1176 -plugin "$TESTDIR/count.so" "$TESTDIR/motion-test" 0
+"$QEMU_COUNT" -cpu arm1176 -plugin "$TESTDIR/count.so" "$TESTDIR/motion-test" 1
 arm-linux-gnueabi-gcc -O3 -std=c99 -mcpu=arm1176jzf-s -marm -static -I. -I"$TESTDIR/decoder" \
     YTVideoDecoder.c tests/decoder-arm11.c "$TESTDIR/decoder/libavformat/libavformat.a" \
     "$TESTDIR/decoder/libavcodec/libavcodec.a" "$TESTDIR/decoder/libswscale/libswscale.a" \
