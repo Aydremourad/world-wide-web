@@ -204,7 +204,6 @@
     YTSoftwarePlayer *player = [[YTSoftwarePlayer alloc] initWithStreams:streams];
     [[UIApplication sharedApplication] setStatusBarHidden:YES animated:NO];
     player.wantsFullScreenLayout=YES;
-    player.modalPresentationStyle=UIModalPresentationFullScreen;
     [self presentModalViewController:player animated:NO];
     [player release];
 }
