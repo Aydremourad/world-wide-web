@@ -174,15 +174,6 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     // Decode ahead instead of sleeping until every picture's PTS. A bounded
     // queue applies backpressure, and the display link uses the audio clock.
     double wait=pts-YTPlaybackClock(playback);
-    // If the ARM11 decoder falls behind, freeze the audio clock instead of
-    // letting sound run seconds ahead of the picture. Resume as soon as the
-    // decoder has caught back to the held audio position.
-    if(!*playback->paused && playback->audioStarted) {
-        if(!playback->audio->syncHold && wait < -0.30)
-            YTAudioSetSyncHold(playback->audio, YES);
-        else if(playback->audio->syncHold && wait > -0.04)
-            YTAudioSetSyncHold(playback->audio, NO);
-    }
     BOOL buffering=playback->audio->starved && !playback->audio->eof;
     if(buffering!=playback->bufferingShown) {
         playback->bufferingShown=buffering;
