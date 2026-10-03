@@ -140,14 +140,14 @@ int main(void) {
     assert(VRRequests==1 && [[[result objectForKey:@"videoURL"] path] isEqualToString:@"/video"]);
     LighterAvailable=YES; VRRequests=AudioReads=0;
     result=[YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
-    assert(result && VRRequests==1 && AudioReads==1);
-    assert([[result objectForKey:@"fps"] intValue]==15 && [[result objectForKey:@"videoItag"] intValue]==597);
-    assert([[[result objectForKey:@"videoURL"] path] isEqualToString:@"/half"]);
+    assert(result && VRRequests==0);
+    assert([[result objectForKey:@"fps"] intValue]==30 && [[result objectForKey:@"videoItag"] intValue]==160);
+    assert([[[result objectForKey:@"videoURL"] path] isEqualToString:@"/video"]);
     assert([[[result objectForKey:@"audioURL"] path] isEqualToString:@"/audio"]);
     assert([[result objectForKey:@"audioLength"] longLongValue]==80000 && [result objectForKey:@"audioSource"]);
     LighterBroken=YES;
     result=[YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
-    assert(result && [[result objectForKey:@"fps"] intValue]==30);
+    assert(result && VRRequests==0 && [[result objectForKey:@"fps"] intValue]==30);
     assert([[[result objectForKey:@"videoURL"] path] isEqualToString:@"/video"]);
     LighterAvailable=LighterBroken=NO;
     BlockAndroid = YES; AndroidRequests = VisionRequests = 0;
@@ -165,7 +165,7 @@ int main(void) {
     assert(result && ![[result objectForKey:@"combined"] boolValue] && [[result objectForKey:@"videoLength"] longLongValue]==70000);
     [NSURLProtocol unregisterClass:[YTFixtureProtocol class]];
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"YTWorkingClient"];
-    NSLog(@"Resolver checks passed, including lighter video across clients, unchanged working audio, unavailable lighter fallback, and native/progressive routing.");
+    NSLog(@"Resolver checks passed, including cross-client native search, single software fallback preparation, and native/progressive routing.");
     [pool release];
     return 0;
 }
