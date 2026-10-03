@@ -819,9 +819,9 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
     NSMutableArray *fallbacks=[NSMutableArray array];
     NSMutableArray *nativeNotes=[NSMutableArray array];
 
-    // Stable 1.0 keeps experimental HLS out of the startup path. Direct
-    // range playback remains the guaranteed fallback when the 15 fps
-    // Baseline path is unavailable.
+    // If the hardware HLS preflight above is unavailable, direct range
+    // playback remains the guaranteed fallback. Do not let the native route
+    // take away the known-working software player.
     for(NSDictionary *client in clients) {
         NSString *failure=nil;
         NSString *player=YTPlayerResponse(videoID,client,&failure);
