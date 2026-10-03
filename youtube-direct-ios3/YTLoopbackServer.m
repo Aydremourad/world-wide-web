@@ -33,7 +33,7 @@ static BOOL YTSendText(int fd,NSString *text) {
         NSString *address=[[url absoluteString] lowercaseString];
         _threeGP=[address rangeOfString:@"mime=video%2f3gpp"].location!=NSNotFound ||
                  [address rangeOfString:@"mime=video/3gpp"].location!=NSNotFound ||
-                 [[[url pathExtension] lowercaseString] isEqualToString:@"3gp"];
+                 [[[[url path] pathExtension] lowercaseString] isEqualToString:@"3gp"];
         _sharedSource=[[YTMediaSource alloc] initWithURL:url length:length userAgent:userAgent];
         [_sharedSource enableStreamingReadAhead];
         _lock=[[NSLock alloc] init]; _clients=[[NSMutableDictionary alloc] init]; _listener=-1;
