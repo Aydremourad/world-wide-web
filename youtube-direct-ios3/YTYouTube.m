@@ -205,6 +205,21 @@ forHTTPHeaderField:@"Accept"];
 
 static NSArray *YTPlayerClients(void) {
     return [NSArray arrayWithObjects:
+        // Current 2026 mweb/web clients can still expose legacy progressive
+        // format 18 as avc1.42001E + AAC-LC. Probe these first because a true
+        // Baseline format 18 lets iPhone OS 3 use hardware/native playback.
+        [NSDictionary dictionaryWithObjectsAndKeys:
+            @"MWeb", @"label", @"MWEB", @"name", @"2.20260708.05.00", @"version", @"2", @"number",
+            @"Mozilla/5.0 (iPad; CPU OS 16_7_10 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1,gzip(gfe)", @"ua",
+            @"", @"extra", [NSNumber numberWithDouble:3.5], @"timeout", nil],
+        [NSDictionary dictionaryWithObjectsAndKeys:
+            @"Web embedded", @"label", @"WEB_EMBEDDED_PLAYER", @"name", @"2.20260708.00.00", @"version", @"56", @"number",
+            @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)", @"ua",
+            @"", @"extra", [NSNumber numberWithDouble:3.5], @"timeout", nil],
+        [NSDictionary dictionaryWithObjectsAndKeys:
+            @"Web", @"label", @"WEB", @"name", @"2.20260708.00.00", @"version", @"1", @"number",
+            @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36", @"ua",
+            @"", @"extra", [NSNumber numberWithDouble:3.5], @"timeout", nil],
         [NSDictionary dictionaryWithObjectsAndKeys:
             @"Android", @"label", @"ANDROID", @"name", @"21.26.364", @"version", @"3", @"number",
             @"com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip", @"ua",
