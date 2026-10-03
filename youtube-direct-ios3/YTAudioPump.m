@@ -42,7 +42,7 @@ double YTAudioMediaTime(YTAudio *audio) {
         // Some old queues keep their device clock moving through silence.
         // Media time must stop at the audio actually consumed, not that clock.
         media=played; audio->mediaClockReady=NO;
-    } else if(!(audio->paused && *audio->paused) && raw>=0) {
+    } else if(!audio->syncHold && !(audio->paused && *audio->paused) && raw>=0) {
         if(!audio->mediaClockReady || raw<audio->rawPrevious-1) {
             audio->rawBase=raw; audio->mediaBase=media>played ? media : played;
             audio->mediaClockReady=YES;
@@ -57,7 +57,7 @@ double YTAudioMediaTime(YTAudio *audio) {
         if(media>limit) media=limit;
         if(media<played) media=played;
         audio->rawPrevious=raw;
-    } else if(!(audio->paused && *audio->paused)) media=played;
+    } else if(!audio->syncHold && !(audio->paused && *audio->paused)) media=played;
     if(media<audio->mediaTime) media=audio->mediaTime;
     audio->mediaTime=media;
     pthread_mutex_unlock(&audio->mutex);
@@ -67,6 +67,20 @@ BOOL YTAudioIsDrained(YTAudio *audio) {
     pthread_mutex_lock(&audio->mutex); BOOL drained=audio->eof && !audio->pending; pthread_mutex_unlock(&audio->mutex);
     return drained;
 }
+OSStatus YTAudioSetSyncHold(YTAudio *audio, BOOL hold) {
+    if(!audio || !audio->started || audio->failed || audio->localStop) return noErr;
+    if(audio->syncHold==hold) return noErr;
+    YTAudioMediaTime(audio);
+    audio->syncHold=hold;
+    OSStatus status=hold ?
+        (audio->sink.pause ? audio->sink.pause(audio->sink.context) : noErr) :
+        (audio->sink.start ? audio->sink.start(audio->sink.context) : noErr);
+    pthread_mutex_lock(&audio->mutex);
+    audio->mediaClockReady=NO;
+    pthread_mutex_unlock(&audio->mutex);
+    if(status!=noErr) { audio->error=status; audio->failed=YES; }
+    return status;
+}
 static double YTAudioWallTime(void) {
     struct timeval now; gettimeofday(&now, NULL);
     return now.tv_sec + now.tv_usec / 1000000.0;
@@ -75,6 +89,10 @@ static void YTAudioRecover(YTAudio *audio) {
     if (!audio->started || YTAudioStopped(audio)) return;
     YTAudioMediaTime(audio);
     double now = YTAudioWallTime();
+    if(audio->syncHold) {
+        audio->lastAdvance=audio->lastBufferAdvance=now;
+        return;
+    }
     if (audio->paused && *audio->paused) {
         if(!audio->heldForPause) {
             OSStatus status=audio->sink.pause ? audio->sink.pause(audio->sink.context) : noErr;
