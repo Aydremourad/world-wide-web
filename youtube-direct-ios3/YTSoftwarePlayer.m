@@ -582,7 +582,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     format->pb = ioContext;
     format->flags |= AVFMT_FLAG_CUSTOM_IO;
     format->probesize = 65536;
-    format->max_analyze_duration = AV_TIME_BASE;
+    format->max_analyze_duration2 = AV_TIME_BASE;
     format->interrupt_callback.callback = YTInterruptVideo;
     format->interrupt_callback.opaque = (void *)&_sessionStop;
     if (avformat_open_input(&format, NULL, NULL, NULL) < 0) {
