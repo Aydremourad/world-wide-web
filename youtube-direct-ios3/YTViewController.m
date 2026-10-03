@@ -181,7 +181,9 @@
     NSString *error = nil;
     NSMutableDictionary *streams = [[[YTYouTube playbackStreamsForID:videoID error:&error] mutableCopy] autorelease];
     if (streams) {
-        NSDictionary *info=YTNativeStreamInfo(streams);
+        // HLS is already preflighted by the bridge; it has no progressive
+        // videoURL for the FFmpeg native probe to open.
+        NSDictionary *info=[[streams objectForKey:@"nativeHLS"] boolValue] ? nil : YTNativeStreamInfo(streams);
         if(info) [streams setObject:info forKey:@"nativeInfo"];
         // Do not detour through another H.264 client here. The only preferred
         // alternate path is legacy itag 17, selected earlier from Android.
