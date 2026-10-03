@@ -2,6 +2,7 @@
 #import "YTYouTube.h"
 #import "YTMediaSource.h"
 #import "YTSABR.h"
+#import "YTNativeProbe.h"
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -209,15 +210,15 @@ static NSArray *YTPlayerClients(void) {
             @"com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip", @"ua",
             @",\"androidSdkVersion\":30,\"osName\":\"Android\",\"osVersion\":\"11\"", @"extra", nil],
         [NSDictionary dictionaryWithObjectsAndKeys:
-            @"VisionOS", @"label", @"VISIONOS", @"name", @"1.02", @"version", @"101", @"number",
-            @"Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15", @"ua",
-            @",\"deviceMake\":\"Apple\",\"deviceModel\":\"RealityDevice17,1\",\"osName\":\"visionOS\",\"osVersion\":\"26.5.23O471\"", @"extra", nil],
-        [NSDictionary dictionaryWithObjectsAndKeys:
             @"TV", @"label", @"TVHTML5", @"name", @"7.20260707.07.00", @"version", @"7", @"number",
             @"Mozilla/5.0 (ChromiumStylePlatform) Cobalt/25.lts.30.1034943-gold (unlike Gecko), Unknown_TV_Unknown_0/Unknown (Unknown, Unknown)", @"ua", @"", @"extra", nil],
         [NSDictionary dictionaryWithObjectsAndKeys:
             @"TV old", @"label", @"TVHTML5", @"name", @"5.20260707", @"version", @"7", @"number",
-            @"Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version", @"ua", @"", @"extra", nil], nil];
+            @"Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version", @"ua", @"", @"extra", nil],
+        [NSDictionary dictionaryWithObjectsAndKeys:
+            @"VisionOS", @"label", @"VISIONOS", @"name", @"1.02", @"version", @"101", @"number",
+            @"Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15", @"ua",
+            @",\"deviceMake\":\"Apple\",\"deviceModel\":\"RealityDevice17,1\",\"osName\":\"visionOS\",\"osVersion\":\"26.5.23O471\"", @"extra", nil], nil];
 }
 
 static NSString *YTPlayerResponse(NSString *videoID, NSDictionary *client, NSString **errorText) {
@@ -486,6 +487,62 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
     return length;
 }
 
+
+static NSMutableDictionary *YTCombinedCandidateFromPlayer(NSString *player, NSString *userAgent) {
+    NSString *streaming=YTObjectForKey(player,@"streamingData");
+    if(!streaming) return nil;
+    NSMutableArray *formats=[NSMutableArray array];
+    [formats addObjectsFromArray:YTJSONObjectStringsInArray(streaming,@"formats")];
+    [formats addObjectsFromArray:YTJSONObjectStringsInArray(streaming,@"adaptiveFormats")];
+    NSString *format=YTChooseLegacy3GP(formats);
+    if(!format) format=YTChooseCombinedMP4(formats);
+    if(!format) return nil;
+    NSURL *url=YTFormatURL(format);
+    if(!url) return nil;
+    NSInteger itag=YTJSONIntForKey(format,@"itag");
+    NSInteger fps=YTJSONIntForKey(format,@"fps");
+    if(fps<=0 && itag==17) fps=10;
+    NSMutableDictionary *streams=[NSMutableDictionary dictionaryWithObjectsAndKeys:
+        url,@"videoURL",url,@"audioURL",
+        [NSNumber numberWithLongLong:YTFormatLength(format)],@"videoLength",
+        [NSNumber numberWithLongLong:YTFormatLength(format)],@"audioLength",
+        [NSNumber numberWithBool:YES],@"combined",
+        [NSNumber numberWithBool:YES],@"nativeCandidate",
+        [NSNumber numberWithInteger:YTJSONIntForKey(format,@"height")],@"height",
+        [NSNumber numberWithInteger:fps],@"fps",
+        [NSNumber numberWithInteger:itag],@"videoItag",
+        userAgent,@"userAgent",nil];
+    return streams;
+}
+
+static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSString **failure) {
+    long long videoLength=[[streams objectForKey:@"videoLength"] longLongValue];
+    long long audioLength=[[streams objectForKey:@"audioLength"] longLongValue];
+    NSString *ua=[streams objectForKey:@"userAgent"];
+    if(videoLength<=0) videoLength=YTRemoteLength([streams objectForKey:@"videoURL"],ua);
+    if([[streams objectForKey:@"combined"] boolValue]) audioLength=videoLength;
+    if(audioLength<=0) audioLength=YTRemoteLength([streams objectForKey:@"audioURL"],ua);
+    [streams setObject:[NSNumber numberWithLongLong:videoLength] forKey:@"videoLength"];
+    [streams setObject:[NSNumber numberWithLongLong:audioLength] forKey:@"audioLength"];
+    if(videoLength<=0 || audioLength<=0) {
+        if(failure) *failure=[NSString stringWithFormat:@"URLs found but byte lengths missing (video %lld, audio %lld).",videoLength,audioLength];
+        return nil;
+    }
+    YTMediaSource *video=[[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"videoURL"] length:videoLength userAgent:ua] autorelease];
+    YTMediaSource *audio=[[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"audioURL"] length:audioLength userAgent:ua] autorelease];
+    if([[streams objectForKey:@"combined"] boolValue]) [audio shareCacheWithSource:video];
+    unsigned char header[12];
+    if([video readAtOffset:0 into:header count:12]!=12) {
+        if(failure) *failure=[video errorText]; return nil;
+    }
+    if([audio readAtOffset:0 into:header count:12]!=12) {
+        if(failure) *failure=[audio errorText]; return nil;
+    }
+    [streams setObject:video forKey:@"videoSource"];
+    [streams setObject:audio forKey:@"audioSource"];
+    return streams;
+}
+
 @implementation YTYouTube
 
 + (NSArray *)search:(NSString *)query error:(NSString **)errorText {
@@ -601,54 +658,68 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
 }
 
 + (NSDictionary *)playbackStreamsForID:(NSString *)videoID error:(NSString **)errorText {
-    NSMutableArray *clients = [NSMutableArray arrayWithArray:YTPlayerClients()];
-    // Android must stay first: it is the client that can expose legacy itag 17.
-    // Do not let a cached VisionOS/TV success hide the native 3GP opportunity.
-    NSMutableArray *errors = [NSMutableArray array];
-    for (NSDictionary *client in clients) {
-        NSString *failure = nil;
-        NSString *player = YTPlayerResponse(videoID, client, &failure);
-        NSMutableDictionary *streams = player ? [[[self streamsFromPlayerResponse:player
-            userAgent:[client objectForKey:@"ua"] error:&failure] mutableCopy] autorelease] : nil;
-        if (streams) {
-            long long videoLength = [[streams objectForKey:@"videoLength"] longLongValue];
-            long long audioLength = [[streams objectForKey:@"audioLength"] longLongValue];
-            if (videoLength <= 0) videoLength = YTRemoteLength([streams objectForKey:@"videoURL"], [client objectForKey:@"ua"]);
-            if ([[streams objectForKey:@"combined"] boolValue]) audioLength = videoLength;
-            if (audioLength <= 0) audioLength = YTRemoteLength([streams objectForKey:@"audioURL"], [client objectForKey:@"ua"]);
-            [streams setObject:[NSNumber numberWithLongLong:videoLength] forKey:@"videoLength"];
-            [streams setObject:[NSNumber numberWithLongLong:audioLength] forKey:@"audioLength"];
-            if (videoLength <= 0 || audioLength <= 0) {
-                failure = [NSString stringWithFormat:@"URLs found but byte lengths missing (video %lld, audio %lld).", videoLength, audioLength];
-            } else {
-                YTMediaSource *video = [[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"videoURL"]
-                    length:videoLength userAgent:[client objectForKey:@"ua"]] autorelease];
-                YTMediaSource *audio = [[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"audioURL"]
-                    length:audioLength userAgent:[client objectForKey:@"ua"]] autorelease];
-                if ([[streams objectForKey:@"combined"] boolValue]) [audio shareCacheWithSource:video];
-                unsigned char header[12];
-                if ([video readAtOffset:0 into:header count:12] != 12) failure = [video errorText];
-                else if ([audio readAtOffset:0 into:header count:12] != 12) failure = [audio errorText];
-                else {
-                    [streams setObject:[client objectForKey:@"label"] forKey:@"clientLabel"];
-                    [streams setObject:player forKey:@"playerResponse"];
-                    [streams setObject:video forKey:@"videoSource"];
-                    [streams setObject:audio forKey:@"audioSource"];
-                    [[NSUserDefaults standardUserDefaults] setObject:[client objectForKey:@"label"] forKey:@"YTWorkingClient"];
-                    if(![[streams objectForKey:@"nativeCandidate"] boolValue] && [[streams objectForKey:@"fps"] doubleValue]>18) {
-                        NSDictionary *lighter=YTLighterVideoForID(videoID);
-                        if(lighter) {
-                            [streams addEntriesFromDictionary:lighter];
-                            [streams setObject:[NSNumber numberWithBool:NO] forKey:@"combined"];
-                        }
-                    }
-                    return streams;
-                }
-            }
+    NSArray *clients=YTPlayerClients();
+    NSMutableArray *errors=[NSMutableArray array];
+    NSMutableArray *fallbacks=[NSMutableArray array];
+    NSMutableArray *nativeNotes=[NSMutableArray array];
+
+    // Phase 1: search every client for a genuinely hardware-compatible
+    // pre-muxed movie. Do not trust MIME/profile hints; probe the bytes.
+    for(NSDictionary *client in clients) {
+        NSString *failure=nil;
+        NSString *player=YTPlayerResponse(videoID,client,&failure);
+        if(!player) {
+            [errors addObject:[NSString stringWithFormat:@"%@: %@",[client objectForKey:@"label"],failure ? failure : @"No player response."]];
+            continue;
         }
-        [errors addObject:[NSString stringWithFormat:@"%@: %@", [client objectForKey:@"label"], failure ? failure : @"No usable stream."]];
+
+        NSMutableDictionary *normal=[[[self streamsFromPlayerResponse:player userAgent:[client objectForKey:@"ua"] error:&failure] mutableCopy] autorelease];
+        if(normal) {
+            [normal setObject:[client objectForKey:@"label"] forKey:@"clientLabel"];
+            [fallbacks addObject:normal];
+        }
+
+        NSMutableDictionary *candidate=YTCombinedCandidateFromPlayer(player,[client objectForKey:@"ua"]);
+        if(!candidate) {
+            [nativeNotes addObject:[NSString stringWithFormat:@"%@: no combined movie",[client objectForKey:@"label"]]];
+            continue;
+        }
+        [candidate setObject:[client objectForKey:@"label"] forKey:@"clientLabel"];
+        NSString *candidateFailure=nil;
+        if(!YTPrepareStreams(candidate,&candidateFailure)) {
+            [nativeNotes addObject:[NSString stringWithFormat:@"%@: combined unavailable",[client objectForKey:@"label"]]];
+            continue;
+        }
+        NSDictionary *info=YTNativeStreamInfo(candidate);
+        if(info) [candidate setObject:info forKey:@"nativeInfo"];
+        [nativeNotes addObject:[NSString stringWithFormat:@"%@: itag %@ p%@ L%@ %@x%@ %@",
+            [client objectForKey:@"label"],
+            [candidate objectForKey:@"videoItag"] ? [candidate objectForKey:@"videoItag"] : @"?",
+            info ? [info objectForKey:@"profile"] : @"?",
+            info ? [info objectForKey:@"level"] : @"?",
+            info ? [info objectForKey:@"width"] : @"?",
+            info ? [info objectForKey:@"height"] : @"?",
+            (info && [[info objectForKey:@"eligible"] boolValue]) ? @"native" : @"rejected"]];
+        if(info && [[info objectForKey:@"eligible"] boolValue]) {
+            [candidate setObject:[nativeNotes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
+            [[NSUserDefaults standardUserDefaults] setObject:[client objectForKey:@"label"] forKey:@"YTWorkingClient"];
+            return candidate;
+        }
     }
-    if (errorText) *errorText = [errors componentsJoinedByString:@"\n\n"];
+
+    // Phase 2: no hardware-compatible movie exists. Prepare the first working
+    // software fallback only now, avoiding the old extra 144p/VR detours.
+    for(NSMutableDictionary *fallback in fallbacks) {
+        NSString *failure=nil;
+        if(YTPrepareStreams(fallback,&failure)) {
+            if([nativeNotes count]) [fallback setObject:[nativeNotes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
+            [[NSUserDefaults standardUserDefaults] setObject:[fallback objectForKey:@"clientLabel"] forKey:@"YTWorkingClient"];
+            return fallback;
+        }
+        [errors addObject:[NSString stringWithFormat:@"%@: %@",[fallback objectForKey:@"clientLabel"],failure ? failure : @"Media URL failed."]];
+    }
+
+    if(errorText) *errorText=[errors componentsJoinedByString:@"\n\n"];
     return nil;
 }
 
