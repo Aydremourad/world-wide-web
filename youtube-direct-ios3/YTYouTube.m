@@ -651,7 +651,6 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
     }
     if(!video || !audio) return nil;
     long long videoLength=YTFormatLength(video),audioLength=YTFormatLength(audio);
-    if(videoLength<=0 || audioLength<=0) return nil;
     NSMutableDictionary *streams=[NSMutableDictionary dictionaryWithObjectsAndKeys:
         YTFormatURL(video),@"videoURL",YTFormatURL(audio),@"audioURL",
         [NSNumber numberWithLongLong:videoLength],@"videoLength",
@@ -790,9 +789,9 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
     NSMutableArray *fallbacks=[NSMutableArray array];
     NSMutableArray *nativeNotes=[NSMutableArray array];
 
-    // 2.0 recovery: keep the experimental Safari/HLS bridge out of the
-    // startup path until it has been proven on iPhone OS 3 hardware. The
-    // known-working direct resolver must always remain available.
+    // Stable 1.0 keeps experimental HLS out of the startup path. Direct
+    // range playback remains the guaranteed fallback when the 15 fps
+    // Baseline path is unavailable.
     for(NSDictionary *client in clients) {
         NSString *failure=nil;
         NSString *player=YTPlayerResponse(videoID,client,&failure);
@@ -801,9 +800,8 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
             continue;
         }
 
-        // Preserve a real software fallback. 2.0 briefly kept only adaptive
-        // 144p here; when YouTube exposed only a progressive movie that left
-        // fallbacks empty and the UI showed a blank YouTube alert.
+        // Always preserve a real software fallback; a format experiment
+        // must never be allowed to prevent the player from opening.
         NSMutableDictionary *normal=[[[self streamsFromPlayerResponse:player userAgent:[client objectForKey:@"ua"] error:&failure] mutableCopy] autorelease];
         if(normal) {
             [normal setObject:[client objectForKey:@"label"] forKey:@"clientLabel"];
