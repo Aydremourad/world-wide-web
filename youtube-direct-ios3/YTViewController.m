@@ -93,7 +93,7 @@
     [self setBusy:NO text:nil];
     _tableView.hidden = NO;
     UIAlertView *alert = [[[UIAlertView alloc] initWithTitle:@"YouTube"
-                                                    message:(message ? message : @"Unknown error")
+                                                    message:([message length] ? message : @"Unknown playback error. Open the info button for the last playback diagnostic.")
                                                    delegate:nil
                                           cancelButtonTitle:@"OK"
                                           otherButtonTitles:nil] autorelease];
