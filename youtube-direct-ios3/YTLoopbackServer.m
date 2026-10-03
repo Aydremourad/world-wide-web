@@ -30,6 +30,10 @@ static BOOL YTSendText(int fd,NSString *text) {
 - (id)initWithURL:(NSURL *)url length:(int64_t)length userAgent:(NSString *)userAgent {
     if((self=[super init])) {
         _upstream=[url retain]; _length=length; _userAgent=[userAgent copy];
+        NSString *address=[[url absoluteString] lowercaseString];
+        _threeGP=[address rangeOfString:@"mime=video%2f3gpp"].location!=NSNotFound ||
+                 [address rangeOfString:@"mime=video/3gpp"].location!=NSNotFound ||
+                 [[[url pathExtension] lowercaseString] isEqualToString:@"3gp"];
         _sharedSource=[[YTMediaSource alloc] initWithURL:url length:length userAgent:userAgent];
         [_sharedSource enableStreamingReadAhead];
         _lock=[[NSLock alloc] init]; _clients=[[NSMutableDictionary alloc] init]; _listener=-1;
@@ -48,7 +52,9 @@ static BOOL YTSendText(int fd,NSString *text) {
     [NSThread detachNewThreadSelector:@selector(acceptThread:) toTarget:self withObject:nil];
     return YES;
 }
-- (NSURL *)movieURL { return [NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%u/movie.mp4",_port]]; }
+- (NSURL *)movieURL {
+    return [NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%u/%@",_port,_threeGP ? @"movie.3gp" : @"movie.mp4"]];
+}
 - (NSString *)errorText { [_lock lock]; NSString *text=[[_errorText copy] autorelease]; [_lock unlock]; return text; }
 - (void)acceptThread:(id)unused {
     NSAutoreleasePool *pool=[[NSAutoreleasePool alloc] init];
@@ -89,7 +95,8 @@ static BOOL YTSendText(int fd,NSString *text) {
     NSArray *lines=[text componentsSeparatedByString:@"\r\n"];
     NSArray *request=[([lines count] ? [lines objectAtIndex:0] : @"") componentsSeparatedByString:@" "];
     NSString *method=[request count]>=2 ? [request objectAtIndex:0] : @"";
-    BOOL head=[method isEqualToString:@"HEAD"],valid=(head || [method isEqualToString:@"GET"]) && [request count]>=2 && [[request objectAtIndex:1] isEqualToString:@"/movie.mp4"];
+    NSString *moviePath=_threeGP ? @"/movie.3gp" : @"/movie.mp4";
+    BOOL head=[method isEqualToString:@"HEAD"],valid=(head || [method isEqualToString:@"GET"]) && [request count]>=2 && [[request objectAtIndex:1] isEqualToString:moviePath];
     int64_t first=0,last=_length-1; BOOL partial=NO;
     if(valid) for(NSString *line in lines) {
         NSRange colon=[line rangeOfString:@":"]; if(colon.location==NSNotFound) continue;
@@ -111,7 +118,7 @@ static BOOL YTSendText(int fd,NSString *text) {
     }
     if(!_stopped && valid) {
         NSString *range=partial ? [NSString stringWithFormat:@"Content-Range: bytes %lld-%lld/%lld\r\n",(long long)first,(long long)last,(long long)_length] : @"";
-        NSString *response=[NSString stringWithFormat:@"HTTP/1.1 %d %@\r\nContent-Type: video/mp4\r\nContent-Length: %lld\r\nAccept-Ranges: bytes\r\n%@Connection: close\r\n\r\n",partial ? 206 : 200,partial ? @"Partial Content" : @"OK",(long long)(last-first+1),range];
+        NSString *response=[NSString stringWithFormat:@"HTTP/1.1 %d %@\r\nContent-Type: %@\r\nContent-Length: %lld\r\nAccept-Ranges: bytes\r\n%@Connection: close\r\n\r\n",partial ? 206 : 200,partial ? @"Partial Content" : @"OK",_threeGP ? @"video/3gpp" : @"video/mp4",(long long)(last-first+1),range];
         if(YTSendText(fd,response) && !head) {
             uint8_t *bytes=malloc(65536);
             if(bytes) while(!_stopped && first<=last) {
