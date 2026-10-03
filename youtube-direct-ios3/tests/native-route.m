@@ -81,5 +81,14 @@ int main(int argc,char **argv) {
     [NSThread sleepForTimeInterval:0.25];
     assert(![[server errorText] length]); [server release];
     NSLog(@"Native route passed: Baseline accepted, Main rejected, stale CDN length corrected before Apple playback, tiny bootstrap range served from 64 KiB cache, complete 36-second MP4 bridged byte-for-byte, HEAD/ranges/suffix/EOF, concurrent shared cache and stop.");
+    // A query-only CDN negotiates once at startup. Subsequent Apple clients
+    // must inherit that selector instead of redoing failed header requests.
+    QueryOnly=YES; HeaderFailures=0;
+    server=[[YTLoopbackServer alloc] initWithURL:[Streams() objectForKey:@"videoURL"] length:[Movie length] userAgent:@"fixture"];
+    assert([server start] && HeaderFailures==1); url=[server movieURL];
+    assert([Fetch(url,@"GET",@"bytes=300000-500000",206) isEqualToData:wanted]);
+    assert(HeaderFailures==1);
+    [server stop]; [NSThread sleepForTimeInterval:0.25]; [server release];
+    NSLog(@"Query-only native bridge inherited the negotiated range selector.");
     [NSURLProtocol unregisterClass:[YTMovieProtocol class]]; [Movie release]; [pool release]; return 0;
 }

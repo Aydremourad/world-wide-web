@@ -9,6 +9,8 @@
 
 static NSData *Movie;
 static int Requests;
+static BOOL QueryOnly;
+static int HeaderFailures;
 @interface YTMovieProtocol : NSURLProtocol { NSData *_fixture; }
 @end
 @implementation YTMovieProtocol
@@ -20,10 +22,18 @@ static int Requests;
 }
 - (void)dealloc { [_fixture release]; [super dealloc]; }
 - (void)startLoading {
-    assert([[[self request] URL] query] == nil);
+    NSString *query=[[[self request] URL] query];
+    if(QueryOnly && ![query hasPrefix:@"range="]) {
+        __sync_add_and_fetch(&HeaderFailures,1);
+        NSHTTPURLResponse *failure=[[[NSHTTPURLResponse alloc] initWithURL:[[self request] URL] statusCode:400 HTTPVersion:@"HTTP/1.1" headerFields:[NSDictionary dictionaryWithObject:@"0" forKey:@"Content-Length"]] autorelease];
+        [[self client] URLProtocol:self didReceiveResponse:failure cacheStoragePolicy:NSURLCacheStorageNotAllowed];
+        [[self client] URLProtocolDidFinishLoading:self]; return;
+    }
     long long start = 0, end = 0;
-    NSScanner *scan = [NSScanner scannerWithString:[[self request] valueForHTTPHeaderField:@"Range"]];
-    assert([scan scanString:@"bytes=" intoString:NULL] && [scan scanLongLong:&start] &&
+    NSString *value=QueryOnly ? [query substringFromIndex:6] : [[self request] valueForHTTPHeaderField:@"Range"];
+    if(!QueryOnly) assert(query==nil);
+    NSScanner *scan = [NSScanner scannerWithString:value];
+    assert((QueryOnly || [scan scanString:@"bytes=" intoString:NULL]) && [scan scanLongLong:&start] &&
            [scan scanString:@"-" intoString:NULL] && [scan scanLongLong:&end]);
     assert(start >= 0 && end >= start && end < (long long)[_fixture length] && end - start + 1 <= 262144);
     __sync_add_and_fetch(&Requests,1);
