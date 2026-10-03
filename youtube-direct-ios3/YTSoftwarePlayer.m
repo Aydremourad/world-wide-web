@@ -98,8 +98,11 @@ static double YTPlayerWallTime(void) {
 static int YTReadVideo(void *opaque, uint8_t *bytes, int count) {
     YTVideoIO *io = opaque;
     if (*io->stop) return AVERROR_EXIT;
-    int result = io->sequential ? [io->source readInto:bytes count:count] :
-        [io->source readAtOffset:io->position into:bytes count:count];
+    int result;
+    if(io->sequential)
+        result=[(id<YTHLSSequentialReading>)io->source readInto:bytes count:count];
+    else
+        result=[io->source readAtOffset:io->position into:bytes count:count];
     if (result < 0) return AVERROR(EIO);
     if (!result) return AVERROR_EOF;
     io->position += result;
