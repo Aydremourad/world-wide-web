@@ -191,7 +191,8 @@
     }
     if(streams) {
         [streams setObject:videoID forKey:@"videoID"];
-        NSString *route=[[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue] ? @"Apple player" : @"Software player";
+        NSString *route=[streams objectForKey:@"nativeHLS"] ? @"Apple HLS bridge" :
+            ([[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue] ? @"Apple player" : @"Software player");
         NSString *build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"YTBuildLabel"];
         if(![build length]) build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
         NSString *diagnostic=[NSString stringWithFormat:@"Version %@\nPlayback: %@\nQuality: %@p\nSource: %@\nItag: %@\nSource fps: %@\nNative search: %@\n",
@@ -224,6 +225,14 @@
         _nativePlayer=[[YTNativePlayer alloc] initWithStreams:streams delegate:self];
         if([_nativePlayer play]) return;
         [_nativePlayer stop]; [_nativePlayer release]; _nativePlayer=nil;
+        if([[streams objectForKey:@"nativeHLS"] boolValue]) {
+            NSString *videoID=[streams objectForKey:@"videoID"];
+            [self setBusy:YES text:@"Preparing the direct 144p fallback..."];
+            NSDictionary *fallbackPayload=[NSDictionary dictionaryWithObjectsAndKeys:
+                videoID,@"videoID",streams,@"original",nil];
+            [NSThread detachNewThreadSelector:@selector(nativeFallbackThread:) toTarget:self withObject:fallbackPayload];
+            return;
+        }
     }
     [self playSoftwareStreams:streams];
 }
@@ -242,17 +251,26 @@
 - (void)nativeFallbackThread:(NSDictionary *)payload {
     NSAutoreleasePool *pool=[[NSAutoreleasePool alloc] init];
     NSString *videoID=[payload objectForKey:@"videoID"];
-    NSDictionary *lower=[YTYouTube lowResolutionStreamsForID:videoID];
+    NSDictionary *original=[payload objectForKey:@"original"];
+    NSDictionary *lower=nil;
+    if([[original objectForKey:@"nativeHLS"] boolValue])
+        lower=[YTYouTube softwareFallbackForID:videoID error:NULL];
+    else
+        lower=[YTYouTube lowResolutionStreamsForID:videoID];
     NSMutableDictionary *chosen=nil;
     if(lower) {
         chosen=[[lower mutableCopy] autorelease];
         [chosen setObject:videoID forKey:@"videoID"];
-    } else chosen=[payload objectForKey:@"original"];
+    } else if(![[original objectForKey:@"nativeHLS"] boolValue]) chosen=(NSMutableDictionary *)original;
     [self performSelectorOnMainThread:@selector(nativeFallbackFinished:) withObject:chosen waitUntilDone:YES];
     [pool release];
 }
 - (void)nativeFallbackFinished:(NSDictionary *)streams {
     [self setBusy:NO text:nil];
+    if(!streams) {
+        [self showError:@"The Apple HLS route was unavailable and YouTube did not expose a direct 144p fallback."];
+        return;
+    }
     [self playSoftwareStreams:streams];
 }
 
@@ -262,7 +280,9 @@
     if(failed) {
         NSString *videoID=[streams objectForKey:@"videoID"];
         if([videoID length]) {
-            [self setBusy:YES text:@"Apple playback failed. Getting the 144p stream..."];
+            [self setBusy:YES text:[[streams objectForKey:@"nativeHLS"] boolValue] ?
+                @"Apple HLS could not play this rendition. Preparing direct 144p..." :
+                @"Apple playback failed. Getting the 144p stream..."];
             NSDictionary *payload=[NSDictionary dictionaryWithObjectsAndKeys:videoID,@"videoID",streams,@"original",nil];
             [NSThread detachNewThreadSelector:@selector(nativeFallbackThread:) toTarget:self withObject:payload];
         } else [self playSoftwareStreams:streams];
