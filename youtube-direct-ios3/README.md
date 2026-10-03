@@ -20,37 +20,37 @@ playback uses only the phone's Wi-Fi connection.
 
 ## Playback
 
-The phone requests YouTube's Android player response using the previous app's
-client identity. It prefers tiny H.264 format 597 or 160, plus AAC audio format
-140. When those tracks have no usable URL, it selects direct combined MP4
-format 18 instead. Both readers use bounded 64 KiB HTTP ranges; each reader
-shares at most sixteen chunks for a combined movie. MP4 metadata can be read from either end of a file.
+The phone requests YouTube's Android player response using the existing client
+identity. A prepared 144p AVC/AAC MPEG-TS HLS rendition is usable even when
+separate adaptive URLs fail. Compatible Baseline HLS goes to Apple's player;
+Main-profile HLS uses the static ARMv6 H.264 decoder and native AAC audio from
+the same cached segments. Three segments are buffered ahead of the readers.
 
-FFmpeg's static ARMv6 decoder decodes H.264 directly. OpenGL ES 1 displays
-RGB565 frames; AudioQueue plays AAC audio. Audio is the playback clock. Late
-video displays are dropped while H.264 reference frames are preserved. Format
-18 is decoded directly at its source resolution and displayed at up to
-256x144. Non-reference pictures and loop filtering are skipped for larger
-sources to reduce decoder work. AAC is read from the combined MP4 through
-Audio File Services with automatic container detection.
+When HLS is unavailable, the resolver also tries tiny H.264 formats 597 or 160
+with AAC format 140, and direct combined MP4 format 18. These readers use
+bounded HTTP ranges and share their disk cache for a combined movie. MP4
+metadata can be read from either end of the file. Format 18 still requires
+decoding at its source resolution; reducing its displayed size does not remove
+that CPU cost.
 
-Audio packet reads and HTTP requests run on a background producer. The audio
-callback only returns used buffers; it never fetches data. Six buffers provide
-a bounded cushion, and the producer restarts a starved queue after refilling.
+OpenGL ES 1 displays RGB565 frames, and audio provides the playback clock.
+144p retains every picture while in sync. Measured lag may discard
+non-reference pictures; reference B pictures remain intact. Audio packet
+reads and HTTP requests run outside the audio callback, which only returns
+used buffers. The existing pump handles buffering recovery, pause and seek.
 
-The app has Done, Pause/Resume and rotation. It does not encode videos or wait
-for a complete download. Performance and sync still require a physical iPhone
-2G test. A successful build does not establish smooth playback on that CPU.
-The stock YouTube player's hardware decoder cannot provide this software path.
+Navigation, Done, Pause/Resume, seeking and rotation are unchanged. The app
+does not encode videos or wait for a complete download. Sustained speed and
+sync still require a physical iPhone 2G test.
 
 ## Installation
 
 The [Actions build](https://github.com/Aydremourad/world-wide-web/actions/workflows/ios3-native-player.yml)
-produces `com.aydre.youtubedirect_1.0.0_iphoneos-arm.deb` in the
+produces `com.aydre.youtubedirect_1.2.0_iphoneos-arm.deb` in the
 `YouTubeDirect-iOS3-armv6` artifact. Install with iFile, or from a phone terminal:
 
 ```sh
-dpkg -i com.aydre.youtubedirect_0.9.0_iphoneos-arm.deb
+dpkg -i com.aydre.youtubedirect_1.2.0_iphoneos-arm.deb
 killall SpringBoard
 ```
 
@@ -86,7 +86,8 @@ modern collection literals and `NSJSONSerialization`.
 
 ## Limits
 
-- Direct H.264/AAC combined format 18 and tiny separate tracks are supported.
+- Unencrypted MPEG-TS 144p HLS with AAC-LC, direct H.264/AAC combined format 18,
+  and tiny separate tracks are supported.
   Other codecs and sources above 640 pixels per side or 307200 pixels per
   frame are rejected. Decoding format 18 may be too slow for smooth playback
   on a physical 2G; source resolution still determines H.264 decoding work.
@@ -101,8 +102,13 @@ Branch: `youtube-native-player-ios3`. The converter version remains on
 
 ## Regression checks
 
-The resolver tests reproduce an OK Android response with format 18's direct
-URL and unavailable adaptive formats. The combined-player test reads native
+The resolver tests cover 144p HLS without usable adaptive URLs, Baseline
+selection, and an OK Android response with format 18's direct URL and
+unavailable adaptive formats. The HLS audio test passes fragmented TS reads
+through the production AAC reader and Apple's native converter, including
+seeking. ARM11 checks compare decoded pictures and optimized DSP output.
+These tests do not measure physical iPhone FPS or verify iPhone OS 3's native
+audio decoder. The combined-player test reads native
 AAC packets and decodes/scales Main-profile H.264 from a synthetic combined
 MP4 using the production reader, audio-file opener, video decoder and FFmpeg
 2.8.22. It runs on macOS; it does not verify iPhone OS 3's audio parser,
