@@ -43,7 +43,6 @@ typedef struct {
     volatile BOOL eof;
     volatile BOOL started;
     volatile BOOL starved;
-    volatile BOOL syncHold;
     volatile BOOL localStop;
     OSStatus error;
     pthread_mutex_t mutex;
@@ -66,6 +65,5 @@ OSStatus YTPrepareAudio(YTAudio *audio);
 void YTAudioBufferReturned(void *opaque, AudioQueueRef queue, AudioQueueBufferRef buffer);
 double YTAudioMediaTime(YTAudio *audio);
 BOOL YTAudioIsDrained(YTAudio *audio);
-OSStatus YTAudioSetSyncHold(YTAudio *audio, BOOL hold);
 void YTShutdownAudio(YTAudio *audio);
 #endif
