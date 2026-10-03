@@ -1,12 +1,11 @@
 #import <Foundation/Foundation.h>
-@class MPMoviePlayerController,YTLoopbackServer,YTHLSBridge,YTNativePlayer;
+@class MPMoviePlayerController,YTLoopbackServer,YTNativePlayer;
 @protocol YTNativePlayerDelegate
 - (void)nativePlayer:(YTNativePlayer *)player finishedWithError:(BOOL)failed;
 @end
 @interface YTNativePlayer : NSObject {
     MPMoviePlayerController *_movie;
     YTLoopbackServer *_server;
-    YTHLSBridge *_hlsBridge;
     NSDictionary *_streams;
     id<YTNativePlayerDelegate> _delegate;
     BOOL _finished;
