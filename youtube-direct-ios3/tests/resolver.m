@@ -157,8 +157,8 @@ int main(void) {
     BlockAndroid = NO; CombinedOnly = YES; AndroidRequests = VisionRequests = HeadRequests = 0;
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"YTWorkingClient"];
     result = [YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
-    assert(result && AndroidRequests == 0 && VisionRequests == 0 && HeadRequests == 1);
-    assert([[result objectForKey:@"clientLabel"] isEqualToString:@"MWeb"]);
+    assert(result && AndroidRequests == 1 && VisionRequests == 0 && HeadRequests == 1);
+    assert([[result objectForKey:@"clientLabel"] isEqualToString:@"Android"]);
     assert([[result objectForKey:@"combined"] boolValue]);
     assert([[result objectForKey:@"videoLength"] longLongValue] == [[result objectForKey:@"audioLength"] longLongValue]);
     assert([result objectForKey:@"videoSource"] != [result objectForKey:@"audioSource"]);
@@ -166,7 +166,7 @@ int main(void) {
     assert(result && ![[result objectForKey:@"combined"] boolValue] && [[result objectForKey:@"videoLength"] longLongValue]==70000);
     [NSURLProtocol unregisterClass:[YTFixtureProtocol class]];
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"YTWorkingClient"];
-    NSLog(@"Resolver checks passed, including cross-client native search, single software fallback preparation, and native/progressive routing.");
+    NSLog(@"Resolver checks passed, including restored direct fallback, cross-client native search, and native/progressive routing.");
     [pool release];
     return 0;
 }
