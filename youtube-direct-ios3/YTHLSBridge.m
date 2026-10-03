@@ -139,11 +139,14 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
 - (NSInteger)selectedHeight { return _selectedHeight; }
 - (double)selectedFPS { return _selectedFPS; }
 - (BOOL)selectedBaseline { return _selectedBaseline; }
+- (double)totalDuration { double total=0; for(NSNumber *n in _durations) total+=[n doubleValue]; return total; }
 - (NSString *)selectedDescription {
     if(_selectedWidth<=0 || _selectedHeight<=0) return nil;
-    return [NSString stringWithFormat:@"Hardware HLS: %dx%d%@, H.264 Baseline + AAC, 3-segment prebuffer",
+    return [NSString stringWithFormat:@"%@ HLS: %dx%d%@, H.264 %@ + AAC, 3-segment prebuffer",
+        _selectedBaseline ? @"Hardware" : @"Software",
         (int)_selectedWidth,(int)_selectedHeight,_selectedFPS>0 ?
-        [NSString stringWithFormat:@", %.1f fps",_selectedFPS] : @""];
+        [NSString stringWithFormat:@", %.1f fps",_selectedFPS] : @"",
+        _selectedBaseline ? @"Baseline" : @"Main"];
 }
 - (NSData *)fetchURL:(NSURL *)url timeout:(NSTimeInterval)timeout {
     if(_stopped || !url) return nil;
