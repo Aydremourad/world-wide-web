@@ -51,6 +51,7 @@ typedef struct {
     BOOL bufferingShown;
     BOOL droppingNonRef;
     BOOL preferReferenceFrames;
+    BOOL aggressiveFrameDrop;
     unsigned serial;
     double startTime;
     BOOL previewShown;
@@ -173,6 +174,15 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     // Decode ahead instead of sleeping until every picture's PTS. A bounded
     // queue applies backpressure, and the display link uses the audio clock.
     double wait=pts-YTPlaybackClock(playback);
+    // If the ARM11 decoder falls behind, freeze the audio clock instead of
+    // letting sound run seconds ahead of the picture. Resume as soon as the
+    // decoder has caught back to the held audio position.
+    if(!*playback->paused && playback->audioStarted) {
+        if(!playback->audio->syncHold && wait < -0.30)
+            YTAudioSetSyncHold(playback->audio, YES);
+        else if(playback->audio->syncHold && wait > -0.04)
+            YTAudioSetSyncHold(playback->audio, NO);
+    }
     BOOL buffering=playback->audio->starved && !playback->audio->eof;
     if(buffering!=playback->bufferingShown) {
         playback->bufferingShown=buffering;
@@ -608,8 +618,17 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     if (frameRate.num > 0 && frameRate.den > 0) playback.frameDuration = av_q2d(av_inv_q(frameRate));
     _sourceFPS=1.0/playback.frameDuration;
     playback.preferReferenceFrames=YTPreferReferenceFrames(codec->width,codec->height,_sourceFPS);
-    if(codec->codec_id==AV_CODEC_ID_H264 && playback.preferReferenceFrames)
-        codec->skip_frame=AVDISCARD_NONREF;
+    playback.aggressiveFrameDrop=(codec->codec_id==AV_CODEC_ID_H264 &&
+        codec->profile>66 && (_sourceFPS>12.0 || codec->width*codec->height>38400));
+    if(codec->codec_id==AV_CODEC_ID_H264) {
+        if(playback.aggressiveFrameDrop) {
+            // Main-profile YouTube video uses expensive B pictures. On ARM11,
+            // discarding bidirectional pictures before reconstruction saves far
+            // more CPU than decoding them and dropping them after the fact.
+            codec->skip_frame=AVDISCARD_BIDIR;
+            codec->skip_idct=AVDISCARD_BIDIR;
+        } else if(playback.preferReferenceFrames) codec->skip_frame=AVDISCARD_NONREF;
+    }
     playback.firstPTS=YTVideoTimeOrigin(format->streams[videoStream]);
     playback.nextPTS=playback.firstPTS+time;
     if(time>0 && YTSeekVideoToTime(format,videoStream,codec,time)<0) {
@@ -643,7 +662,13 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
                 double packetTime=stamp*av_q2d(format->streams[videoStream]->time_base)-playback.firstPTS;
                 double behind=audioTime-packetTime;
                 playback.droppingNonRef=playback.preferReferenceFrames || YTShouldDropNonRef(playback.droppingNonRef,behind);
-                codec->skip_frame=playback.droppingNonRef ? AVDISCARD_NONREF : AVDISCARD_DEFAULT;
+                if(playback.aggressiveFrameDrop) {
+                    codec->skip_frame=AVDISCARD_BIDIR;
+                    codec->skip_idct=AVDISCARD_BIDIR;
+                } else {
+                    codec->skip_frame=playback.droppingNonRef ? AVDISCARD_NONREF : AVDISCARD_DEFAULT;
+                    codec->skip_idct=AVDISCARD_DEFAULT;
+                }
             }
             if(playback.audioStarted && !_paused && stamp!=AV_NOPTS_VALUE &&
                 YTNeedsVideoResync(stamp*av_q2d(format->streams[videoStream]->time_base)-playback.firstPTS,
