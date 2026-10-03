@@ -42,7 +42,9 @@
     NSDictionary *info=[notification userInfo];
     NSNumber *reason=[info objectForKey:@"MPMoviePlayerPlaybackDidFinishReasonUserInfoKey"];
     BOOL failed=[[_server errorText] length]>0 || [[_hlsBridge errorText] length]>0 ||
-        (reason && [reason intValue]==MPMovieFinishReasonPlaybackError) ||
+        // MPMovieFinishReasonPlaybackError is value 1; use the value directly
+        // because the iPhoneOS 3.1.3 SDK does not expose every later MediaPlayer symbol.
+        (reason && [reason intValue]==1) ||
         [[info objectForKey:@"error"] isKindOfClass:[NSError class]];
     [self stop]; [_delegate nativePlayer:self finishedWithError:failed];
     [self release];
