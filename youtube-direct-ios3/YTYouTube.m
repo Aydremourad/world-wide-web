@@ -294,8 +294,7 @@ static NSDictionary *YTHLSStreamsForID(NSString *videoID) {
     NSString *hls=YTJSONStringForKey(watch,@"hlsManifestUrl",0);
     if(![hls length]) {
         NSString *player=YTPlayerResponse(videoID,client,NULL);
-        NSString *streaming=YTObjectForKey(player,@"streamingData");
-        hls=YTJSONStringForKey(streaming,@"hlsManifestUrl",0);
+        hls=YTJSONStringForKey(player,@"hlsManifestUrl",0);
     }
     if(![hls hasPrefix:@"https://"]) return nil;
     NSDictionary *info=[NSDictionary dictionaryWithObjectsAndKeys:
