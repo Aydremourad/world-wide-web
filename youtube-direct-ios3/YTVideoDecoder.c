@@ -14,7 +14,7 @@ int YTReadVideoMetadata(AVFormatContext *format) {
         if(codec->codec_type==AVMEDIA_TYPE_VIDEO && (codec->width<=0 || codec->height<=0)) {
             // The old MOV demuxer leaves mp4v dimensions unset until its VOL
             // header is parsed. Probe bounded samples before choosing a player.
-            format->probesize=65536; format->max_analyze_duration=AV_TIME_BASE;
+            format->probesize=65536; format->max_analyze_duration2=AV_TIME_BASE;
             return avformat_find_stream_info(format,NULL);
         }
     }
