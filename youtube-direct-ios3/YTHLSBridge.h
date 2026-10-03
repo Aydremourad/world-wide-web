@@ -15,6 +15,7 @@
     NSInteger _selectedWidth;
     NSInteger _selectedHeight;
     double _selectedFPS;
+    BOOL _selectedBaseline;
     NSTimeInterval _prepareDeadline;
 }
 - (id)initWithURL:(NSURL *)url userAgent:(NSString *)userAgent;
@@ -25,4 +26,6 @@
 - (NSInteger)selectedHeight;
 - (double)selectedFPS;
 - (NSString *)selectedDescription;
+- (BOOL)selectedBaseline;
+- (id)newSequentialReaderAtTime:(double)time actualStart:(double *)actualStart;
 @end
