@@ -599,6 +599,8 @@ static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSStr
     YTMediaSource *video=[[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"videoURL"] length:videoLength userAgent:ua] autorelease];
     YTMediaSource *audio=[[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"audioURL"] length:audioLength userAgent:ua] autorelease];
     if([[streams objectForKey:@"combined"] boolValue]) [audio shareCacheWithSource:video];
+    [video enableStreamingReadAhead];
+    [audio enableStreamingReadAhead];
     unsigned char header[12];
     if([video readAtOffset:0 into:header count:12]!=12) {
         if(failure) *failure=[video errorText]; return nil;
@@ -606,9 +608,64 @@ static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSStr
     if([audio readAtOffset:0 into:header count:12]!=12) {
         if(failure) *failure=[audio errorText]; return nil;
     }
+    // Warm another 256 KiB of each independent stream. At YouTube's 144p
+    // bitrates this is substantial playback headroom and removes a second
+    // TLS/range stall immediately after the player opens.
+    unsigned char warm;
+    if(videoLength>262144 && [video readAtOffset:262144 into:&warm count:1]!=1) {
+        if(failure) *failure=[video errorText]; return nil;
+    }
+    if(![[streams objectForKey:@"combined"] boolValue] && audioLength>262144 &&
+       [audio readAtOffset:262144 into:&warm count:1]!=1) {
+        if(failure) *failure=[audio errorText]; return nil;
+    }
     [streams setObject:video forKey:@"videoSource"];
     [streams setObject:audio forKey:@"audioSource"];
     return streams;
+}
+
+static NSDictionary *YTLowFPSWebClient(void) {
+    return [NSDictionary dictionaryWithObjectsAndKeys:
+        @"Web low-FPS",@"label",@"WEB",@"name",@"2.20260708.00.00",@"version",@"1",@"number",
+        @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",@"ua",
+        @"",@"extra",[NSNumber numberWithDouble:3.0],@"timeout",nil];
+}
+static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
+    NSDictionary *client=YTLowFPSWebClient();
+    NSString *player=YTPlayerResponse(videoID,client,NULL);
+    NSString *streaming=YTObjectForKey(player,@"streamingData");
+    if(!streaming) return nil;
+    NSArray *formats=YTJSONObjectStringsInArray(streaming,@"adaptiveFormats");
+    NSString *video=nil,*audio=nil;
+    for(NSString *format in formats) {
+        NSInteger itag=YTJSONIntForKey(format,@"itag");
+        NSString *mime=YTJSONStringForKey(format,@"mimeType",0);
+        NSInteger fps=YTJSONIntForKey(format,@"fps");
+        if(!video && (itag==160 || itag==597) && fps>0 && fps<=18 &&
+           [mime rangeOfString:@"video/mp4" options:NSCaseInsensitiveSearch].location!=NSNotFound &&
+           [mime rangeOfString:@"avc1.42" options:NSCaseInsensitiveSearch].location!=NSNotFound &&
+           YTFormatURL(format)) video=format;
+        if(!audio && itag==140 &&
+           [mime rangeOfString:@"mp4a.40.2" options:NSCaseInsensitiveSearch].location!=NSNotFound &&
+           YTFormatURL(format)) audio=format;
+    }
+    if(!video || !audio) return nil;
+    long long videoLength=YTFormatLength(video),audioLength=YTFormatLength(audio);
+    if(videoLength<=0 || audioLength<=0) return nil;
+    NSMutableDictionary *streams=[NSMutableDictionary dictionaryWithObjectsAndKeys:
+        YTFormatURL(video),@"videoURL",YTFormatURL(audio),@"audioURL",
+        [NSNumber numberWithLongLong:videoLength],@"videoLength",
+        [NSNumber numberWithLongLong:audioLength],@"audioLength",
+        [NSNumber numberWithBool:NO],@"combined",
+        [NSNumber numberWithBool:NO],@"nativeCandidate",
+        [NSNumber numberWithInteger:YTJSONIntForKey(video,@"height")],@"height",
+        [NSNumber numberWithInteger:YTJSONIntForKey(video,@"fps")],@"fps",
+        [NSNumber numberWithInteger:YTJSONIntForKey(video,@"itag")],@"videoItag",
+        [client objectForKey:@"ua"],@"userAgent",
+        @"Web low-FPS Baseline",@"clientLabel",
+        @"15 fps Baseline direct path",@"nativeSearch",nil];
+    NSString *failure=nil;
+    return YTPrepareStreams(streams,&failure);
 }
 
 @implementation YTYouTube
@@ -726,6 +783,8 @@ static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSStr
 }
 
 + (NSDictionary *)playbackStreamsForID:(NSString *)videoID error:(NSString **)errorText {
+    NSMutableDictionary *lowFPS=YTLowFPSStreamsForID(videoID);
+    if(lowFPS) return lowFPS;
     NSArray *clients=YTPlayerClients();
     NSMutableArray *errors=[NSMutableArray array];
     NSMutableArray *fallbacks=[NSMutableArray array];
