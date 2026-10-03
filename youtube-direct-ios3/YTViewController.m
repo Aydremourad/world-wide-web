@@ -2,6 +2,7 @@
 #import "YTYouTube.h"
 #import "YTSoftwarePlayer.h"
 #import "YTNativeProbe.h"
+#import "YTHLSBridge.h"
 
 @implementation YTViewController
 
@@ -263,6 +264,18 @@
     if(lower) {
         chosen=[[lower mutableCopy] autorelease];
         [chosen setObject:videoID forKey:@"videoID"];
+        if([[original objectForKey:@"nativeHLS"] boolValue]) {
+            YTHLSBridge *bridge=[[[YTHLSBridge alloc] initWithURL:[original objectForKey:@"hlsURL"]
+                userAgent:[original objectForKey:@"userAgent"]] autorelease];
+            if([bridge start]) {
+                [chosen setObject:bridge forKey:@"hlsBridge"];
+                [chosen setObject:[NSNumber numberWithBool:YES] forKey:@"softwareHLS"];
+                NSInteger h=[bridge selectedHeight];
+                if(h>0) [chosen setObject:[NSNumber numberWithInteger:h] forKey:@"height"];
+                double f=[bridge selectedFPS];
+                if(f>0) [chosen setObject:[NSNumber numberWithDouble:f] forKey:@"fps"];
+            }
+        }
     } else if(![[original objectForKey:@"nativeHLS"] boolValue]) chosen=(NSMutableDictionary *)original;
     [self performSelectorOnMainThread:@selector(nativeFallbackFinished:) withObject:chosen waitUntilDone:YES];
     [pool release];
