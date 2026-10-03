@@ -273,6 +273,17 @@
         [self showError:@"The Apple HLS route was unavailable and YouTube did not expose a direct 144p fallback."];
         return;
     }
+    NSString *build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"YTBuildLabel"];
+    if(![build length]) build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
+    NSString *diagnostic=[NSString stringWithFormat:
+        @"Version %@\nPlayback: Software player (direct 144p fallback)\nQuality: %@p\nSource: %@\nItag: %@\nSource fps: %@\nNative search: Safari HLS unavailable/rejected; direct adaptive fallback\n",
+        build,
+        [streams objectForKey:@"height"] ? [streams objectForKey:@"height"] : @"?",
+        [streams objectForKey:@"clientLabel"] ? [streams objectForKey:@"clientLabel"] : @"direct",
+        [streams objectForKey:@"videoItag"] ? [streams objectForKey:@"videoItag"] : @"?",
+        [streams objectForKey:@"fps"] ? [streams objectForKey:@"fps"] : @"?"];
+    [diagnostic writeToFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"YouTube-playback.txt"]
+        atomically:YES encoding:NSUTF8StringEncoding error:NULL];
     [self playSoftwareStreams:streams];
 }
 
