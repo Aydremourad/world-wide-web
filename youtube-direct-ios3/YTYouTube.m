@@ -209,21 +209,6 @@ static NSData *YTGET(NSString *urlString, NSString **errorText) {
 
 static NSArray *YTPlayerClients(void) {
     return [NSArray arrayWithObjects:
-        // Current 2026 mweb/web clients can still expose legacy progressive
-        // format 18 as avc1.42001E + AAC-LC. Probe these first because a true
-        // Baseline format 18 lets iPhone OS 3 use hardware/native playback.
-        [NSDictionary dictionaryWithObjectsAndKeys:
-            @"MWeb", @"label", @"MWEB", @"name", @"2.20260708.05.00", @"version", @"2", @"number",
-            @"Mozilla/5.0 (iPad; CPU OS 16_7_10 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Mobile/15E148 Safari/604.1,gzip(gfe)", @"ua",
-            @"", @"extra", [NSNumber numberWithDouble:3.5], @"timeout", nil],
-        [NSDictionary dictionaryWithObjectsAndKeys:
-            @"Web embedded", @"label", @"WEB_EMBEDDED_PLAYER", @"name", @"2.20260708.00.00", @"version", @"56", @"number",
-            @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)", @"ua",
-            @"", @"extra", [NSNumber numberWithDouble:3.5], @"timeout", nil],
-        [NSDictionary dictionaryWithObjectsAndKeys:
-            @"Web", @"label", @"WEB", @"name", @"2.20260708.00.00", @"version", @"1", @"number",
-            @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36", @"ua",
-            @"", @"extra", [NSNumber numberWithDouble:3.5], @"timeout", nil],
         [NSDictionary dictionaryWithObjectsAndKeys:
             @"Android", @"label", @"ANDROID", @"name", @"21.26.364", @"version", @"3", @"number",
             @"com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip", @"ua",
@@ -741,18 +726,14 @@ static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSStr
 }
 
 + (NSDictionary *)playbackStreamsForID:(NSString *)videoID error:(NSString **)errorText {
-    // Version 2.0 first recreates the original iPhone-era delivery model:
-    // Safari HLS, a single tiny rendition, local HTTP, and real prebuffering.
-    NSDictionary *hls=YTHLSStreamsForID(videoID);
-    if(hls) return hls;
     NSArray *clients=YTPlayerClients();
     NSMutableArray *errors=[NSMutableArray array];
     NSMutableArray *fallbacks=[NSMutableArray array];
     NSMutableArray *nativeNotes=[NSMutableArray array];
-    NSMutableSet *nativeFingerprints=[NSMutableSet set];
 
-    // Phase 1: search every client for a genuinely hardware-compatible
-    // pre-muxed movie. Do not trust MIME/profile hints; probe the bytes.
+    // 2.0 recovery: keep the experimental Safari/HLS bridge out of the
+    // startup path until it has been proven on iPhone OS 3 hardware. The
+    // known-working direct resolver must always remain available.
     for(NSDictionary *client in clients) {
         NSString *failure=nil;
         NSString *player=YTPlayerResponse(videoID,client,&failure);
@@ -761,18 +742,15 @@ static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSStr
             continue;
         }
 
-        // Once a native movie has not yet been proven, keep the software
-        // fallback at the true adaptive 144p representation. Never fall back
-        // to the same 360p itag 18 that just failed the native profile probe.
-        NSMutableDictionary *normal=YTAdaptiveCandidateFromPlayer(player,[client objectForKey:@"ua"]);
+        // Preserve a real software fallback. 2.0 briefly kept only adaptive
+        // 144p here; when YouTube exposed only a progressive movie that left
+        // fallbacks empty and the UI showed a blank YouTube alert.
+        NSMutableDictionary *normal=[[[self streamsFromPlayerResponse:player userAgent:[client objectForKey:@"ua"] error:&failure] mutableCopy] autorelease];
         if(normal) {
             [normal setObject:[client objectForKey:@"label"] forKey:@"clientLabel"];
-            // Preserve Android as the proven software/audio fallback. The web
-            // clients are queried only to find a hardware-decodable format 18.
-            if([[client objectForKey:@"label"] isEqualToString:@"Android"])
-                [fallbacks insertObject:normal atIndex:0];
-            else
-                [fallbacks addObject:normal];
+            [fallbacks addObject:normal];
+        } else if([failure length]) {
+            [errors addObject:[NSString stringWithFormat:@"%@: %@",[client objectForKey:@"label"],failure]];
         }
 
         NSMutableDictionary *candidate=YTCombinedCandidateFromPlayer(player,[client objectForKey:@"ua"]);
@@ -781,15 +759,6 @@ static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSStr
             continue;
         }
         [candidate setObject:[client objectForKey:@"label"] forKey:@"clientLabel"];
-        long long declaredLength=[[candidate objectForKey:@"videoLength"] longLongValue];
-        NSString *fingerprint=declaredLength>0 ?
-            [NSString stringWithFormat:@"%@:%lld",[candidate objectForKey:@"videoItag"],declaredLength] :
-            [[candidate objectForKey:@"videoURL"] absoluteString];
-        if([fingerprint length] && [nativeFingerprints containsObject:fingerprint]) {
-            [nativeNotes addObject:[NSString stringWithFormat:@"%@: same combined rendition",[client objectForKey:@"label"]]];
-            continue;
-        }
-        if([fingerprint length]) [nativeFingerprints addObject:fingerprint];
         NSString *candidateFailure=nil;
         if(!YTPrepareStreams(candidate,&candidateFailure)) {
             [nativeNotes addObject:[NSString stringWithFormat:@"%@: combined unavailable",[client objectForKey:@"label"]]];
@@ -812,8 +781,9 @@ static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSStr
         }
     }
 
-    // Phase 2: no hardware-compatible movie exists. Prepare the first working
-    // software fallback only now, avoiding the old extra 144p/VR detours.
+    // No native movie: return the first direct stream that actually opens.
+    // This restores the 1.1.13 behavior instead of failing before a player is
+    // presented.
     for(NSMutableDictionary *fallback in fallbacks) {
         NSString *failure=nil;
         if(YTPrepareStreams(fallback,&failure)) {
@@ -824,7 +794,10 @@ static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSStr
         [errors addObject:[NSString stringWithFormat:@"%@: %@",[fallback objectForKey:@"clientLabel"],failure ? failure : @"Media URL failed."]];
     }
 
-    if(errorText) *errorText=[errors componentsJoinedByString:@"\n\n"];
+    if(errorText) {
+        *errorText=[errors count] ? [errors componentsJoinedByString:@"\n\n"] :
+            @"YouTube responded, but none of the tested clients exposed a playable direct stream.";
+    }
     return nil;
 }
 
