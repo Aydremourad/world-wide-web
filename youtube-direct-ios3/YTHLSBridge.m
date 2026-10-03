@@ -257,7 +257,7 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
     return data;
 }
 - (NSUInteger)segmentCount { return [_segments count]; }
-- (id)newSequentialReaderAtTime:(double)time actualStart:(double *)actualStart {
+- (id<YTHLSSequentialReading>)newSequentialReaderAtTime:(double)time actualStart:(double *)actualStart {
     double cursor=0; NSUInteger segment=0;
     if(time<0) time=0;
     for(NSUInteger i=0;i<[_durations count];i++) {
