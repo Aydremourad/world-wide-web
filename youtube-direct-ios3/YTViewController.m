@@ -183,21 +183,22 @@
     if (streams) {
         NSDictionary *info=YTNativeStreamInfo(streams);
         if(info) [streams setObject:info forKey:@"nativeInfo"];
-        if(info && ![[info objectForKey:@"eligible"] boolValue] &&
+        // A progressive stream advertised as Baseline/Simple Profile gets an
+        // immediate trial in Apple's player. The FFmpeg metadata probe is useful
+        // evidence, but a failed/partial probe must not veto the hardware path.
+        BOOL nativeHint=[[streams objectForKey:@"nativeCandidate"] boolValue];
+        if(info && ![[info objectForKey:@"eligible"] boolValue] && !nativeHint &&
            [[info objectForKey:@"width"] intValue]*[[info objectForKey:@"height"] intValue]>38400) {
             [self performSelectorOnMainThread:@selector(showLowResolutionStatus) withObject:nil waitUntilDone:NO];
             NSDictionary *lower=[YTYouTube lowResolutionStreamsForID:videoID];
             if(lower) streams=[[lower mutableCopy] autorelease];
-            else {
-                NSDictionary *compatible=[YTYouTube compatibilityStreamsForID:videoID];
-                if(compatible) streams=[[compatible mutableCopy] autorelease];
-            }
         }
     }
     if(streams) {
         [streams setObject:videoID forKey:@"videoID"];
         NSDictionary *info=[streams objectForKey:@"nativeInfo"];
-        NSString *route=[[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue] ? @"Apple player" : @"Software player";
+        BOOL tryNative=[[info objectForKey:@"eligible"] boolValue] || [[streams objectForKey:@"nativeCandidate"] boolValue];
+        NSString *route=tryNative ? @"Apple player" : @"Software player";
         NSString *build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"YTBuildLabel"];
         if(![build length]) build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
         NSString *diagnostic=[NSString stringWithFormat:@"Version %@\nPlayback: %@\nQuality: %@p\n",
@@ -222,7 +223,9 @@
     _searchBar.userInteractionEnabled = YES;
     [UIApplication sharedApplication].networkActivityIndicatorVisible = NO;
     _statusLabel.hidden = YES;
-    if ([[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue]) {
+    BOOL tryNative=[[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue] ||
+                   [[streams objectForKey:@"nativeCandidate"] boolValue];
+    if (tryNative) {
         _nativePlayer=[[YTNativePlayer alloc] initWithStreams:streams delegate:self];
         if([_nativePlayer play]) return;
         [_nativePlayer stop]; [_nativePlayer release]; _nativePlayer=nil;

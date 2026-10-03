@@ -480,13 +480,13 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
 }
 static long long YTCompatibilityLength(NSURL *url, NSString *userAgent, NSString **status, BOOL *native) {
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url
-        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:135.0];
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:3.0];
     [request setHTTPMethod:@"HEAD"];
     [request setValue:userAgent forHTTPHeaderField:@"User-Agent"];
     [request setValue:@"identity" forHTTPHeaderField:@"Accept-Encoding"];
     YTLengthRequest *probe=[[YTLengthRequest alloc] init];
     probe->connection=[[NSURLConnection alloc] initWithRequest:request delegate:probe];
-    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:136.0];
+    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:3.5];
     while(probe->connection && !probe->done && [deadline timeIntervalSinceNow]>0)
         [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:
             [NSDate dateWithTimeIntervalSinceNow:0.05]];
@@ -500,7 +500,7 @@ static BOOL YTCompatibilityStatusReady(NSString *videoID) {
     NSString *address=[NSString stringWithFormat:@"https://aydreyoutube2g.duckdns.org/status/%@",videoID];
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:address]
         cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:6.0];
-    [request setValue:@"YouTubeDirect/1.1.4" forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"YouTubeDirect/1.1.5" forHTTPHeaderField:@"User-Agent"];
     NSURLResponse *response=nil; NSError *error=nil;
     NSData *data=[NSURLConnection sendSynchronousRequest:request returningResponse:&response error:&error];
     if(!data || ![response isKindOfClass:[NSHTTPURLResponse class]] ||
@@ -675,7 +675,7 @@ static BOOL YTCompatibilityStatusReady(NSString *videoID) {
 
 + (NSDictionary *)compatibilityStreamsForID:(NSString *)videoID {
     if(!videoID || [videoID length]!=11) return nil;
-    NSString *userAgent=@"YouTubeDirect/1.1.4";
+    NSString *userAgent=@"YouTubeDirect/1.1.5";
     NSURL *url=[NSURL URLWithString:[NSString stringWithFormat:
         @"https://aydreyoutube2g.duckdns.org/getvideo/%@",videoID]];
     NSString *status=nil; BOOL native=NO;

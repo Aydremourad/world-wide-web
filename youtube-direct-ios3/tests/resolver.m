@@ -114,6 +114,7 @@ int main(void) {
     NSString *baseline=[Combined stringByReplacingOccurrencesOfString:@"avc1.4d401e" withString:@"avc1.42001e"];
     result=Resolve([NSString stringWithFormat:@"%@,%@,%@",baseline,Video,Audio]);
     assert([[result objectForKey:@"combined"] boolValue]); // Prefer native playback over software 144p.
+    assert([[result objectForKey:@"nativeCandidate"] boolValue]); // Apple gets first shot even if the metadata pre-probe is inconclusive.
     result = Resolve([NSString stringWithFormat:@"%@,%@",
         @"{\"itag\":160,\"url\":\"https://media.example/v\",\"contentLength\":4294967301}", Audio]);
     assert([[result objectForKey:@"videoLength"] longLongValue] == 4294967301LL);
