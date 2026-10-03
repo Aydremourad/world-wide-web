@@ -382,7 +382,7 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
     NSString *name=[NSString stringWithFormat:@"YouTube-HLS-%p",self];
     _cacheDir=[[NSTemporaryDirectory() stringByAppendingPathComponent:name] copy];
     [[NSFileManager defaultManager] removeItemAtPath:_cacheDir error:NULL];
-    if(![[NSFileManager defaultManager] createDirectoryAtPath:_cacheDir attributes:nil]) {
+    if(![[NSFileManager defaultManager] createDirectoryAtPath:_cacheDir attributes:[NSDictionary dictionary]]) {
         [self setFailure:@"Could not create the HLS buffer on disk."]; return NO;
     }
     // Deliberately buffer several complete transport-stream segments before
