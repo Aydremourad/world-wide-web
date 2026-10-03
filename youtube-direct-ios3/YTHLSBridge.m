@@ -60,7 +60,7 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
 }
 
 @class YTHLSBridge;
-@interface YTHLSSequentialReader : NSObject {
+@interface YTHLSSequentialReader : NSObject <YTHLSSequentialReading> {
     YTHLSBridge *_bridge;
     NSUInteger _segment;
     NSUInteger _inside;
