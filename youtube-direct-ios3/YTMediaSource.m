@@ -1,5 +1,8 @@
 #import "YTMediaSource.h"
 #include <string.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/stat.h>
 
 #define YT_CHUNK_BYTES (64 * 1024)
 #define YT_CACHE_BYTES (1024 * 1024)
@@ -109,8 +112,13 @@
 @implementation YTMediaSource
 - (id)initWithURL:(NSURL *)url length:(int64_t)length userAgent:(NSString *)userAgent {
     if ((self = [super init])) {
+        _localFD=-1;
         _url = [url retain];
         _length = length;
+        if([url isFileURL]) {
+            _localFD=open([[url path] fileSystemRepresentation],O_RDONLY);
+            struct stat info; if(_localFD>=0 && fstat(_localFD,&info)==0) _length=info.st_size;
+        }
         _userAgent = [userAgent copy];
         _chunks = [[NSMutableDictionary alloc] init];
         _order = [[NSMutableArray alloc] init];
@@ -267,6 +275,12 @@
 - (int)readAtOffset:(int64_t)offset into:(void *)buffer count:(int)count {
     if (_cancelled || offset < 0 || _length <= 0 || count < 0) return -1;
     if (offset >= _length || !count) return 0;
+    if([_url isFileURL]) {
+        if(_localFD<0) return -1;
+        int64_t remaining=_length-offset;
+        if(count>remaining) count=(int)remaining;
+        return (int)pread(_localFD,buffer,(size_t)count,(off_t)offset);
+    }
     int copied = 0;
     while (copied < count && offset < _length && !_cancelled) {
         NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
@@ -293,6 +307,7 @@
     return _cancelled ? -1 : copied;
 }
 - (void)dealloc {
+    if(_localFD>=0) close(_localFD);
     [_url release]; [_userAgent release]; [_chunks release]; [_order release]; [_cacheLock release]; [_inflight release]; [_errorText release];
     [super dealloc];
 }

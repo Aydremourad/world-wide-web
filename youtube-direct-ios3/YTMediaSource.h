@@ -5,6 +5,7 @@
 // It never downloads or converts a complete movie before playback.
 @interface YTMediaSource : NSObject {
     NSURL *_url;
+    int _localFD;
     NSString *_userAgent;
     int64_t _length;
     NSInteger _rangeMode;

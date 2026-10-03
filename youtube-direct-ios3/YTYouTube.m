@@ -2,6 +2,7 @@
 #import "YTYouTube.h"
 #import "YTMediaSource.h"
 #import "YTNativeProbe.h"
+#import "YTSABR.h"
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -479,37 +480,6 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
     [probe release];
     return length;
 }
-static long long YTCompatibilityLength(NSURL *url, NSString *userAgent, NSString **status, BOOL *native) {
-    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url
-        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:3.0];
-    [request setHTTPMethod:@"HEAD"];
-    [request setValue:userAgent forHTTPHeaderField:@"User-Agent"];
-    [request setValue:@"identity" forHTTPHeaderField:@"Accept-Encoding"];
-    YTLengthRequest *probe=[[YTLengthRequest alloc] init];
-    probe->connection=[[NSURLConnection alloc] initWithRequest:request delegate:probe];
-    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:3.5];
-    while(probe->connection && !probe->done && [deadline timeIntervalSinceNow]>0)
-        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode beforeDate:
-            [NSDate dateWithTimeIntervalSinceNow:0.05]];
-    long long length=probe->length;
-    if(status) *status=[[probe->compatStatus copy] autorelease];
-    if(native) *native=probe->compatNative;
-    [probe->connection cancel]; [probe release];
-    return length;
-}
-static BOOL YTCompatibilityStatusReady(NSString *videoID) {
-    NSString *address=[NSString stringWithFormat:@"https://aydreyoutube2g.duckdns.org/status/%@",videoID];
-    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:[NSURL URLWithString:address]
-        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:6.0];
-    [request setValue:@"YouTubeDirect/1.1.5" forHTTPHeaderField:@"User-Agent"];
-    NSURLResponse *response=nil; NSError *error=nil;
-    NSData *data=[NSURLConnection sendSynchronousRequest:request returningResponse:&response error:&error];
-    if(!data || ![response isKindOfClass:[NSHTTPURLResponse class]] ||
-       [(NSHTTPURLResponse *)response statusCode] != 200) return NO;
-    NSString *text=[[[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] autorelease];
-    return [text rangeOfString:@"\"status\":\"ready\""].location!=NSNotFound;
-}
-
 @implementation YTYouTube
 
 + (NSArray *)search:(NSString *)query error:(NSString **)errorText {
@@ -655,6 +625,7 @@ static BOOL YTCompatibilityStatusReady(NSString *videoID) {
                 else if ([audio readAtOffset:0 into:header count:12] != 12) failure = [audio errorText];
                 else {
                     [streams setObject:[client objectForKey:@"label"] forKey:@"clientLabel"];
+                    [streams setObject:player forKey:@"playerResponse"];
                     [streams setObject:video forKey:@"videoSource"];
                     [streams setObject:audio forKey:@"audioSource"];
                     [[NSUserDefaults standardUserDefaults] setObject:[client objectForKey:@"label"] forKey:@"YTWorkingClient"];
@@ -675,96 +646,57 @@ static BOOL YTCompatibilityStatusReady(NSString *videoID) {
     return nil;
 }
 
-+ (NSDictionary *)nativeCompatibleStreamsForID:(NSString *)videoID excludingClient:(NSString *)excluded error:(NSString **)errorText {
-    NSMutableArray *clients=[NSMutableArray arrayWithArray:YTPlayerClients()];
-    [clients insertObject:[NSDictionary dictionaryWithObjectsAndKeys:
-        @"iOS",@"label",@"IOS",@"name",@"21.26.4",@"version",@"5",@"number",
-        @"com.google.ios.youtube/21.26.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",@"ua",
-        @",\"deviceMake\":\"Apple\",\"deviceModel\":\"iPhone16,2\",\"osName\":\"iPhone\",\"osVersion\":\"18.3.2.22D82\"",@"extra",nil] atIndex:0];
-    NSMutableArray *attempts=[NSMutableArray array];
-    for(NSDictionary *base in clients) {
-        if([[base objectForKey:@"label"] isEqualToString:excluded]) continue;
-        NSMutableDictionary *client=[[base mutableCopy] autorelease];
-        [client setObject:[NSNumber numberWithDouble:3] forKey:@"timeout"];
-        NSString *failure=nil;
-        NSString *player=YTPlayerResponse(videoID,client,&failure);
-        NSString *streaming=YTObjectForKey(player,@"streamingData");
-        NSMutableArray *formats=[NSMutableArray array];
-        if(streaming) {
-            [formats addObjectsFromArray:YTJSONObjectStringsInArray(streaming,@"formats")];
-            [formats addObjectsFromArray:YTJSONObjectStringsInArray(streaming,@"adaptiveFormats")];
-        }
-        // Check actual headers of every usable progressive representation.
-        // Neither itag 18 nor an avc1.42 MIME label proves Baseline encoding.
-        for(NSString *format in formats) {
-            if(!YTChooseCombinedMP4([NSArray arrayWithObject:format])) continue;
-            NSString *one=[NSString stringWithFormat:@"{\"streamingData\":{\"formats\":[%@]}}",format];
-            NSMutableDictionary *candidate=[[[self streamsFromPlayerResponse:one userAgent:[client objectForKey:@"ua"] error:NULL] mutableCopy] autorelease];
-            if(!candidate) continue;
-            long long length=[[candidate objectForKey:@"videoLength"] longLongValue];
-            if(length<=0) length=YTRemoteLength([candidate objectForKey:@"videoURL"],[client objectForKey:@"ua"]);
-            if(length<=0) continue;
-            [candidate setObject:[NSNumber numberWithLongLong:length] forKey:@"videoLength"];
-            [candidate setObject:[NSNumber numberWithLongLong:length] forKey:@"audioLength"];
-            YTMediaSource *source=[[[YTMediaSource alloc] initWithURL:[candidate objectForKey:@"videoURL"] length:length userAgent:[client objectForKey:@"ua"]] autorelease];
-            [source setRequestTimeout:3];
-            [candidate setObject:source forKey:@"videoSource"];
-            NSDictionary *info=YTNativeStreamInfo(candidate);
-            if(info && [[info objectForKey:@"eligible"] boolValue]) {
-                [source setRequestTimeout:12];
-                [candidate setObject:info forKey:@"nativeInfo"];
-                [candidate setObject:source forKey:@"audioSource"];
-                [candidate setObject:[client objectForKey:@"label"] forKey:@"clientLabel"];
-                [candidate setObject:[NSNumber numberWithBool:YES] forKey:@"nativeCandidate"];
-                return candidate;
-            }
-            failure=info ? [NSString stringWithFormat:@"H.264 profile %@ is not compatible",[info objectForKey:@"profile"]] : @"Movie headers could not be verified";
-        }
-        [attempts addObject:[NSString stringWithFormat:@"%@: %@",[client objectForKey:@"label"],failure ? failure : @"No verified compatible movie"]];
+static NSDictionary *YTSABRFormat(NSString *format) {
+    NSMutableDictionary *result=[NSMutableDictionary dictionaryWithObjectsAndKeys:
+        [NSNumber numberWithInteger:YTJSONIntForKey(format,@"itag")],@"itag",
+        [NSNumber numberWithInteger:YTJSONIntForKey(format,@"width")],@"width",
+        [NSNumber numberWithInteger:YTJSONIntForKey(format,@"height")],@"height",
+        [NSNumber numberWithLongLong:YTFormatLength(format)],@"length",nil];
+    for(NSString *key in [NSArray arrayWithObjects:@"lastModified",@"xtags",@"approxDurationMs",nil]) {
+        NSString *value=YTJSONStringForKey(format,key,0);
+        if(value) [result setObject:value forKey:[key isEqualToString:@"approxDurationMs"] ? @"duration" : key];
     }
-    // An already converted movie is useful; do not wait minutes then return
-    // the same known-incompatible Main-profile software stream.
-    NSMutableDictionary *converted=[[[self compatibilityStreamsForID:videoID] mutableCopy] autorelease];
-    if(converted) {
-        [converted removeObjectForKey:@"nativeInfo"]; // Do not trust server labels either.
-        NSDictionary *info=YTNativeStreamInfo(converted);
-        if(info && [[info objectForKey:@"eligible"] boolValue]) {
-            [converted setObject:info forKey:@"nativeInfo"]; return converted;
-        }
-    }
-    if(errorText) *errorText=[NSString stringWithFormat:
-        @"This video is encoded in a profile the original iPhone cannot play natively. No verified Baseline or Simple Profile alternative is ready.\n\n%@",[attempts componentsJoinedByString:@"\n"]];
-    return nil;
+    return result;
 }
-
-+ (NSDictionary *)compatibilityStreamsForID:(NSString *)videoID {
-    if(!videoID || [videoID length]!=11) return nil;
-    NSString *userAgent=@"YouTubeDirect/1.1.8";
-    NSURL *url=[NSURL URLWithString:[NSString stringWithFormat:
-        @"https://aydreyoutube2g.duckdns.org/getvideo/%@",videoID]];
-    NSString *status=nil; BOOL native=NO;
-    long long length=YTCompatibilityLength(url,userAgent,&status,&native);
-    if(length<=0) return nil;
-    BOOL ready=native || [status isEqualToString:@"ready"];
-    if(!ready) ready=YTCompatibilityStatusReady(videoID);
-    if(!ready) return nil;
-    NSDictionary *nativeInfo=[NSDictionary dictionaryWithObjectsAndKeys:
-        [NSNumber numberWithBool:YES],@"eligible",
-        [NSNumber numberWithLongLong:length],@"length",
-        [NSNumber numberWithInt:320],@"width",
-        [NSNumber numberWithInt:240],@"height",
-        [NSNumber numberWithInt:24],@"fps",nil];
-    return [NSDictionary dictionaryWithObjectsAndKeys:
-        url,@"videoURL",url,@"audioURL",
-        [NSNumber numberWithLongLong:length],@"videoLength",
-        [NSNumber numberWithLongLong:length],@"audioLength",
-        [NSNumber numberWithBool:YES],@"combined",
-        [NSNumber numberWithBool:YES],@"nativeCandidate",
-        [NSNumber numberWithInt:240],@"height",
-        [NSNumber numberWithInt:24],@"fps",
-        [NSNumber numberWithInt:-1],@"videoItag",
-        userAgent,@"userAgent",nativeInfo,@"nativeInfo",
-        [NSNumber numberWithBool:YES],@"compatibilityServer",nil];
++ (NSDictionary *)phoneOnlyStreamsForID:(NSString *)videoID original:(NSDictionary *)original error:(NSString **)errorText {
+    NSString *player=[original objectForKey:@"playerResponse"],*failure=nil;
+    NSDictionary *client=[YTPlayerClients() objectAtIndex:0];
+    if(!player || ![[original objectForKey:@"clientLabel"] isEqualToString:@"Android"])
+        player=YTPlayerResponse(videoID,client,&failure);
+    NSString *streaming=YTObjectForKey(player,@"streamingData");
+    NSArray *formats=YTJSONObjectStringsInArray(streaming,@"adaptiveFormats");
+    NSString *video=nil,*audio=nil; NSInteger rank=NSIntegerMax;
+    for(NSString *format in formats) {
+        NSInteger r=YTFormatRank(format,YES);
+        if(r>=0 && r<rank && YTFormatLength(format)>0) { video=format; rank=r; }
+        if(!audio && YTFormatRank(format,NO)>=0) audio=format;
+    }
+    NSString *config=YTJSONStringForKey(YTObjectForKey(YTObjectForKey(YTObjectForKey(player,@"playerConfig"),@"mediaCommonConfig"),@"mediaUstreamerRequestConfig"),@"videoPlaybackUstreamerConfig",0);
+    NSURL *url=[NSURL URLWithString:YTJSONStringForKey(streaming,@"serverAbrStreamingUrl",0)];
+    if(!video || !audio || !config || !url || ![original objectForKey:@"audioSource"]) {
+        if(errorText) *errorText=failure ? failure : @"YouTube did not supply a usable phone-only 144p stream.";
+        return nil;
+    }
+    NSDictionary *options=[NSDictionary dictionaryWithObjectsAndKeys:url,@"url",config,@"config",
+        YTSABRFormat(video),@"video",YTSABRFormat(audio),@"audio",videoID,@"videoID",
+        [client objectForKey:@"number"],@"clientNumber",[client objectForKey:@"version"],@"clientVersion",
+        [client objectForKey:@"ua"],@"userAgent",nil];
+    NSString *path=YTDownloadSABRVideo(options,&failure);
+    if(!path) { if(errorText) *errorText=failure; return nil; }
+    NSURL *local=[NSURL fileURLWithPath:path];
+    YTMediaSource *source=[[[YTMediaSource alloc] initWithURL:local length:0 userAgent:nil] autorelease];
+    NSMutableDictionary *chosen=[[original mutableCopy] autorelease];
+    [chosen setObject:local forKey:@"videoURL"]; [chosen setObject:source forKey:@"videoSource"];
+    [chosen setObject:[NSNumber numberWithLongLong:[source length]] forKey:@"videoLength"];
+    [chosen setObject:[NSNumber numberWithBool:NO] forKey:@"combined"];
+    [chosen setObject:[NSNumber numberWithBool:NO] forKey:@"nativeCandidate"];
+    [chosen removeObjectForKey:@"nativeInfo"]; [chosen removeObjectForKey:@"playerResponse"];
+    [chosen setObject:[NSNumber numberWithInteger:YTJSONIntForKey(video,@"height")] forKey:@"height"];
+    [chosen setObject:[NSNumber numberWithInteger:YTJSONIntForKey(video,@"fps")] forKey:@"fps"];
+    [chosen setObject:[NSNumber numberWithInteger:YTJSONIntForKey(video,@"itag")] forKey:@"videoItag"];
+    [chosen setObject:@"Android SABR, prepared on phone" forKey:@"clientLabel"];
+    [chosen setObject:[NSNumber numberWithBool:YES] forKey:@"phonePrepared"];
+    return chosen;
 }
 
 // Try one additional client only when the current combined stream needs

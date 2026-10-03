@@ -9,7 +9,7 @@ APP="$STAGE/Applications/YouTubeDirect.app"
 mkdir -p "$APP" "$STAGE/DEBIAN" packages
 xcrun clang -arch armv6 -isysroot "$SDKROOT" -miphoneos-version-min=3.0 \
     -fno-objc-arc -O3 -mcpu=arm1176jzf-s -marm -fno-math-errno -fno-signed-zeros -Wno-deprecated-declarations -I"$SRC" \
-    main.m YTAppDelegate.m YTViewController.m YTYouTube.m YTMediaSource.m YTVideoSurface.m YTSoftwarePlayer.m YTAudioFile.m YTAudioPump.m YTNativeProbe.m YTLoopbackServer.m YTNativePlayer.m YTVideoDecoder.c \
+    main.m YTAppDelegate.m YTViewController.m YTYouTube.m YTMediaSource.m YTVideoSurface.m YTSoftwarePlayer.m YTAudioFile.m YTAudioPump.m YTNativeProbe.m YTLoopbackServer.m YTNativePlayer.m YTVideoDecoder.c YTSABR.m YTPhoneRemux.c \
     "$SRC/libavformat/libavformat.a" "$SRC/libavcodec/libavcodec.a" \
     "$SRC/libswscale/libswscale.a" "$SRC/libavutil/libavutil.a" \
     -framework UIKit -framework Foundation -framework AudioToolbox -framework QuartzCore \
@@ -32,5 +32,8 @@ fi
 if xcrun otool -L "$APP/YouTubeDirect" | grep -qE 'libav(codec|format|util)|libswscale'; then
     echo "The binary depends on unbundled decoder libraries."; exit 1
 fi
-python3 ./package-deb.py "$STAGE" packages/com.aydre.youtubedirect_1.1.8_iphoneos-arm.deb
-echo "ARMv6, legacy startup, static decoder and gzip package checks passed."
+python3 ./package-deb.py "$STAGE" packages/com.aydre.youtubedirect_1.1.9_iphoneos-arm.deb
+if strings "$APP/YouTubeDirect" | grep -q 'aydreyoutube2g.duckdns.org'; then
+    echo "The application still contains an external conversion endpoint."; exit 1
+fi
+echo "ARMv6, legacy startup, static decoder, phone-only playback and gzip package checks passed."

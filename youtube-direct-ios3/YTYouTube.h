@@ -6,8 +6,7 @@
 + (NSArray *)search:(NSString *)query error:(NSString **)errorText;
 + (NSDictionary *)playbackStreamsForID:(NSString *)videoID error:(NSString **)errorText;
 + (NSDictionary *)lowResolutionStreamsForID:(NSString *)videoID;
-+ (NSDictionary *)compatibilityStreamsForID:(NSString *)videoID;
-+ (NSDictionary *)nativeCompatibleStreamsForID:(NSString *)videoID excludingClient:(NSString *)excluded error:(NSString **)errorText;
++ (NSDictionary *)phoneOnlyStreamsForID:(NSString *)videoID original:(NSDictionary *)original error:(NSString **)errorText;
 + (NSString *)videoIDFromText:(NSString *)text;
 
 @end

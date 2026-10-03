@@ -10,7 +10,7 @@ DEPS="$ROOT/.deps"
 SRC="$DEPS/FFmpeg-2.8.22"
 GASDIR="$DEPS/gas-preprocessor"
 REVFILE="$SRC/.ytdirect-decoder-rev"
-DECODER_REV="6b-arm11-motion-direct"
+DECODER_REV="7-phone-sabr-remux"
 
 test -d "$SDKROOT" || { echo "Missing SDK: $SDKROOT"; exit 1; }
 test -x "$LEGACY_LD" || { echo "Missing ARMv6 linker: $LEGACY_LD"; exit 1; }
@@ -49,7 +49,7 @@ python3 "$ROOT/patch-decoder.py" "$SRC"
     --disable-avdevice --disable-avfilter --disable-postproc --disable-swresample \
     --disable-network --disable-securetransport --disable-iconv --disable-bzlib \
     --disable-lzma --disable-zlib --disable-vda --disable-everything \
-    --enable-demuxer=mov --enable-decoder=h264,mpeg4 --enable-parser=h264,mpeg4video --disable-small --optflags="-O3 -mcpu=arm1176jzf-s -marm -fno-math-errno -fno-signed-zeros" \
+    --enable-muxer=mp4 --enable-protocol=file --enable-demuxer=mov --enable-decoder=h264,mpeg4 --enable-parser=h264,mpeg4video --disable-small --optflags="-O3 -mcpu=arm1176jzf-s -marm -fno-math-errno -fno-signed-zeros" \
     --extra-cflags="-O3 -mcpu=arm1176jzf-s -marm -fno-math-errno -fno-signed-zeros -miphoneos-version-min=3.0" --extra-ldflags="-miphoneos-version-min=3.0"
 # Size optimization selected -Os in prior builds; verify the speed build.
 grep '^CFLAGS=' config.mak

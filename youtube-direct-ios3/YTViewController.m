@@ -188,8 +188,7 @@
             // The actual movie is authoritative. Main profile 77 must not be
             // forced into Apple playback by a misleading Baseline MIME hint.
             NSString *nativeError=nil;
-            NSDictionary *compatible=[YTYouTube nativeCompatibleStreamsForID:videoID
-                excludingClient:[streams objectForKey:@"clientLabel"] error:&nativeError];
+            NSDictionary *compatible=[YTYouTube phoneOnlyStreamsForID:videoID original:streams error:&nativeError];
             if(compatible) streams=[[compatible mutableCopy] autorelease];
             else { streams=nil; error=nativeError; }
         }
@@ -203,6 +202,7 @@
         if(![build length]) build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
         NSString *diagnostic=[NSString stringWithFormat:@"Version %@\nPlayback: %@\nQuality: %@p\n",
             build,route,[streams objectForKey:@"height"]];
+        diagnostic=[diagnostic stringByAppendingFormat:@"Source: %@\nNative probe: %@\n",[streams objectForKey:@"clientLabel"],[streams objectForKey:@"nativeInfo"]];
         YTWritePlaybackLog(diagnostic);
     } else {
         YTWritePlaybackLog([NSString stringWithFormat:@"Version %@\nPlayback source rejected\n%@\n",
@@ -248,23 +248,6 @@
     [self presentModalViewController:player animated:NO];
     [player release];
 }
-- (void)nativeFallbackThread:(NSDictionary *)payload {
-    NSAutoreleasePool *pool=[[NSAutoreleasePool alloc] init];
-    NSString *videoID=[payload objectForKey:@"videoID"];
-    NSDictionary *lower=[YTYouTube lowResolutionStreamsForID:videoID];
-    NSMutableDictionary *chosen=nil;
-    if(lower) {
-        chosen=[[lower mutableCopy] autorelease];
-        [chosen setObject:videoID forKey:@"videoID"];
-    } else chosen=[payload objectForKey:@"original"];
-    [self performSelectorOnMainThread:@selector(nativeFallbackFinished:) withObject:chosen waitUntilDone:YES];
-    [pool release];
-}
-- (void)nativeFallbackFinished:(NSDictionary *)streams {
-    [self setBusy:NO text:nil];
-    [self playSoftwareStreams:streams];
-}
-
 - (void)nativePlayer:(YTNativePlayer *)player finishedWithError:(BOOL)failed {
     NSString *failure=[[player errorText] copy];
     [_nativePlayer release]; _nativePlayer=nil;

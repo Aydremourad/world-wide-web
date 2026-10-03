@@ -63,7 +63,7 @@ jobs:
         id: decoder
         if: always()
         with:
-          key: ios3-armv6-ffmpeg-2.8.22-decoder-v6b-arm11-motion-direct
+          key: ios3-armv6-ffmpeg-2.8.22-decoder-v7-phone-sabr-remux
           path: youtube-direct-ios3/.deps
       - name: Build and check iPhone OS 3 application
         id: app_build
@@ -82,7 +82,7 @@ jobs:
       - uses: actions/cache/save@v4
         if: always() && steps.decoder.outputs.cache-hit != 'true'
         with:
-          key: ios3-armv6-ffmpeg-2.8.22-decoder-v6b-arm11-motion-direct
+          key: ios3-armv6-ffmpeg-2.8.22-decoder-v7-phone-sabr-remux
           path: youtube-direct-ios3/.deps
       - uses: actions/upload-artifact@v4
         if: always() && steps.app_build.outcome == 'success'
