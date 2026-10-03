@@ -34,13 +34,6 @@ static NSURL *YTHLSResolveURL(NSString *text,NSURL *base) {
 static NSString *YTHLSTrim(NSString *text) {
     return [text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
 }
-static NSInteger YTHLSAttributeInt(NSString *line,NSString *name) {
-    NSRange r=[line rangeOfString:[name stringByAppendingString:@"="] options:NSCaseInsensitiveSearch];
-    if(r.location==NSNotFound) return 0;
-    NSString *tail=[line substringFromIndex:r.location+r.length];
-    NSScanner *scan=[NSScanner scannerWithString:tail];
-    NSInteger value=0; [scan scanInteger:&value]; return value;
-}
 static void YTHLSResolution(NSString *line,NSInteger *width,NSInteger *height) {
     *width=*height=0;
     NSRange r=[line rangeOfString:@"RESOLUTION=" options:NSCaseInsensitiveSearch];
@@ -107,14 +100,14 @@ static void YTHLSResolution(NSString *line,NSInteger *width,NSInteger *height) {
         NSString *info=YTHLSTrim([lines objectAtIndex:i]);
         if(![info hasPrefix:@"#EXT-X-STREAM-INF:"]) continue;
         NSString *lower=[info lowercaseString];
-        if([lower rangeOfString:@"avc1."].location==NSNotFound) continue;
+        if([lower rangeOfString:@"avc1."].location==NSNotFound ||
+           [lower rangeOfString:@"mp4a."].location==NSNotFound) continue;
         NSInteger width=0,height=0; YTHLSResolution(info,&width,&height);
         long long pixels=(width>0 && height>0) ? (long long)width*height : 999999;
         // The original iPhone-era target is the smallest H.264 rung. Prefer
         // a muxed rendition (mp4a present), then Baseline, then the 144p Main
         // rendition as a last system-player experiment.
         long long score=pixels;
-        if([lower rangeOfString:@"mp4a."].location==NSNotFound) score+=100000000LL;
         if([lower rangeOfString:@"avc1.42"].location==NSNotFound) score+=10000000LL;
         if(pixels>40000) score+=1000000000LL;
         NSString *address=nil;
