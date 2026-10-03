@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import "YTYouTube.h"
+#import "YTNativeProbe.h"
 #include <assert.h>
 
 static NSString *Player(NSString *formats) {
@@ -23,6 +24,21 @@ static BOOL BlockAndroid;
 static BOOL CombinedOnly;
 static BOOL LighterAvailable, LighterBroken;
 static BOOL CompatReady;
+static BOOL IOSAlternativeAvailable;
+
+// Network-selection tests mock codec probing; native-route.m separately reads
+// actual Main/Baseline MP4 bytes with the production FFmpeg probe.
+NSDictionary *YTNativeStreamInfo(NSDictionary *streams) {
+    NSURL *url=[streams objectForKey:@"videoURL"];
+    BOOL baseline=[[[url path] lastPathComponent] isEqualToString:@"baseline"] ||
+        ([[url host] isEqualToString:@"aydreyoutube2g.duckdns.org"] && CompatReady);
+    return [NSDictionary dictionaryWithObjectsAndKeys:
+        [NSNumber numberWithBool:baseline],@"eligible",
+        [NSNumber numberWithInt:baseline ? 66 : 77],@"profile",
+        [NSNumber numberWithInt:30],@"level",
+        [NSNumber numberWithLongLong:[[streams objectForKey:@"videoLength"] longLongValue]],@"length",nil];
+}
+
 static int AndroidRequests, VisionRequests, HeadRequests, VRRequests, AudioReads;
 @interface YTFixtureProtocol : NSURLProtocol
 @end
@@ -52,6 +68,11 @@ static int AndroidRequests, VisionRequests, HeadRequests, VRRequests, AudioReads
             Player([NSString stringWithFormat:@"%@,%@",
                 @"{\"itag\":160,\"url\":\"https://media.example/video\"}",
                 @"{\"itag\":140,\"url\":\"https://media.example/audio\"}"]);
+        if([clientName isEqualToString:@"5"] && IOSAlternativeAvailable) {
+            NSString *baseline=[Combined stringByReplacingOccurrencesOfString:@"avc1.4d401e" withString:@"avc1.42001e"];
+            baseline=[baseline stringByReplacingOccurrencesOfString:@"https://media.example/combined" withString:@"https://media.example/baseline?clen=80000"];
+            json=Player(baseline);
+        }
         data = [json dataUsingEncoding:NSUTF8StringEncoding];
         [headers setObject:@"application/json" forKey:@"Content-Type"];
         [headers setObject:[NSString stringWithFormat:@"%lu", (unsigned long)[data length]] forKey:@"Content-Length"];
@@ -114,7 +135,7 @@ int main(void) {
     NSString *baseline=[Combined stringByReplacingOccurrencesOfString:@"avc1.4d401e" withString:@"avc1.42001e"];
     result=Resolve([NSString stringWithFormat:@"%@,%@,%@",baseline,Video,Audio]);
     assert([[result objectForKey:@"combined"] boolValue]); // Prefer native playback over software 144p.
-    assert([[result objectForKey:@"nativeCandidate"] boolValue]); // Apple gets first shot even if the metadata pre-probe is inconclusive.
+    assert([[result objectForKey:@"nativeCandidate"] boolValue]); // Candidate label still requires the actual codec probe before playback.
     result = Resolve([NSString stringWithFormat:@"%@,%@",
         @"{\"itag\":160,\"url\":\"https://media.example/v\",\"contentLength\":4294967301}", Audio]);
     assert([[result objectForKey:@"videoLength"] longLongValue] == 4294967301LL);
@@ -187,6 +208,26 @@ int main(void) {
     assert([[result objectForKey:@"videoLength"] longLongValue]==120000);
     CompatReady=NO;
     assert(![YTYouTube compatibilityStreamsForID:@"jNQXAC9IVRw"]);
+    // Reproduce the real-device report: Main profile 77/level 30, misleading
+    // Baseline hint. The actual negative result must override the hint.
+    NSDictionary *rejected=[NSDictionary dictionaryWithObjectsAndKeys:
+        [NSNumber numberWithBool:YES],@"nativeCandidate",
+        [NSDictionary dictionaryWithObjectsAndKeys:[NSNumber numberWithBool:NO],@"eligible",
+            [NSNumber numberWithInt:77],@"profile",nil],@"nativeInfo",nil];
+    assert(!YTShouldUseNativePlayer(rejected));
+    assert(!YTShouldUseNativePlayer([NSDictionary dictionaryWithObject:[NSNumber numberWithBool:YES] forKey:@"nativeCandidate"]));
+    IOSAlternativeAvailable=YES; CompatReady=NO;
+    result=[YTYouTube nativeCompatibleStreamsForID:@"jNQXAC9IVRw" excludingClient:@"Android" error:&error];
+    assert(result && YTShouldUseNativePlayer(result));
+    assert([[[result objectForKey:@"videoURL"] path] isEqualToString:@"/baseline"]);
+    assert([[[result objectForKey:@"nativeInfo"] objectForKey:@"profile"] intValue]==66);
+    IOSAlternativeAvailable=NO; CompatReady=YES;
+    result=[YTYouTube nativeCompatibleStreamsForID:@"jNQXAC9IVRw" excludingClient:@"Android" error:&error];
+    assert(result && [[result objectForKey:@"compatibilityServer"] boolValue] && YTShouldUseNativePlayer(result));
+    CompatReady=NO; error=nil;
+    result=[YTYouTube nativeCompatibleStreamsForID:@"jNQXAC9IVRw" excludingClient:@"Android" error:&error];
+    assert(!result && [error rangeOfString:@"No verified Baseline"].location!=NSNotFound);
+    NSLog(@"Verified native resolver passed: Main bytes override Baseline hints, another client is tried, converted fallback is verified, and no incompatible movie is returned.");
     [NSURLProtocol unregisterClass:[YTFixtureProtocol class]];
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"YTWorkingClient"];
     NSLog(@"Resolver checks passed, including lighter video across clients, unchanged working audio, unavailable lighter fallback, and native/progressive routing.");

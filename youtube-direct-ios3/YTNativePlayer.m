@@ -1,6 +1,7 @@
 #import "YTNativePlayer.h"
 #import "YTLoopbackServer.h"
 #import "YTPlaybackLog.h"
+#import "YTNativeProbe.h"
 #import <MediaPlayer/MediaPlayer.h>
 
 @implementation YTNativePlayer
@@ -23,6 +24,10 @@
 - (BOOL)play {
     _openedAt=[NSDate timeIntervalSinceReferenceDate];
     NSDictionary *info=[_streams objectForKey:@"nativeInfo"];
+    if([info objectForKey:@"eligible"] && ![[info objectForKey:@"eligible"] boolValue]) {
+        _errorText=[@"The actual movie codec is incompatible with the original iPhone." copy];
+        [self recordEvent:@"incompatible codec rejected" info:nil]; return NO;
+    }
     int64_t length=[[info objectForKey:@"length"] longLongValue];
     if(length<=0) length=[[_streams objectForKey:@"videoLength"] longLongValue];
     _server=[[YTLoopbackServer alloc] initWithURL:[_streams objectForKey:@"videoURL"]

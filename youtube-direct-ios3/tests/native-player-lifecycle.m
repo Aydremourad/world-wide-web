@@ -86,6 +86,13 @@ int main(void) {
     // Stop cancels deferred start and callbacks, including a queued failure.
     Mode=2; Plays=0; p=[[Probe alloc] init]; [p open]; [p->player stop]; Pump();
     assert(p->calls==0 && Plays==0); [p release];
+    // The observed profile-77 movie is rejected before opening the bridge.
+    NSDictionary *bad=[NSDictionary dictionaryWithObjectsAndKeys:
+        [NSNumber numberWithBool:YES],@"nativeCandidate",
+        [NSDictionary dictionaryWithObject:[NSNumber numberWithBool:NO] forKey:@"eligible"],@"nativeInfo",nil];
+    YTNativePlayer *unsupported=[[YTNativePlayer alloc] initWithStreams:bad delegate:nil];
+    assert(![unsupported play] && [[unsupported errorText] rangeOfString:@"codec is incompatible"].location!=NSNotFound);
+    [unsupported release];
     BridgeFails=YES;
     YTNativePlayer *failed=[[YTNativePlayer alloc] initWithStreams:[NSDictionary dictionary] delegate:nil];
     assert(![failed play] && [[failed errorText] isEqualToString:@"CDN unavailable"]);

@@ -32,6 +32,11 @@ int main(int argc,char **argv) {
     Movie=[[NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[1]]] retain];
     NSDictionary *info=YTNativeStreamInfo(Streams());
     assert(info && ![[info objectForKey:@"eligible"] boolValue] && [[info objectForKey:@"profile"] intValue]==77);
+    NSMutableDictionary *mislabeled=[[Streams() mutableCopy] autorelease];
+    [mislabeled setObject:[NSNumber numberWithBool:YES] forKey:@"nativeCandidate"];
+    [mislabeled setObject:info forKey:@"nativeInfo"];
+    assert(!YTShouldUseNativePlayer(mislabeled)); // Actual Main MP4 must veto a Baseline hint.
+
     [Movie release]; Movie=[[NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[2]]] retain];
     info=YTNativeStreamInfo(Streams());
     assert(info && [[info objectForKey:@"eligible"] boolValue] && [[info objectForKey:@"profile"] intValue]==66);

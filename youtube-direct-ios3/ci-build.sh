@@ -32,5 +32,5 @@ fi
 if xcrun otool -L "$APP/YouTubeDirect" | grep -qE 'libav(codec|format|util)|libswscale'; then
     echo "The binary depends on unbundled decoder libraries."; exit 1
 fi
-python3 ./package-deb.py "$STAGE" packages/com.aydre.youtubedirect_1.1.7_iphoneos-arm.deb
+python3 ./package-deb.py "$STAGE" packages/com.aydre.youtubedirect_1.1.8_iphoneos-arm.deb
 echo "ARMv6, legacy startup, static decoder and gzip package checks passed."

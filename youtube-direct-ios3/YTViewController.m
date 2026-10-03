@@ -184,27 +184,29 @@
     if (streams) {
         NSDictionary *info=YTNativeStreamInfo(streams);
         if(info) [streams setObject:info forKey:@"nativeInfo"];
-        // A progressive stream advertised as Baseline/Simple Profile gets an
-        // immediate trial in Apple's player. The FFmpeg metadata probe is useful
-        // evidence, but a failed/partial probe must not veto the hardware path.
-        BOOL nativeHint=[[streams objectForKey:@"nativeCandidate"] boolValue];
-        if(info && ![[info objectForKey:@"eligible"] boolValue] && !nativeHint &&
-           [[info objectForKey:@"width"] intValue]*[[info objectForKey:@"height"] intValue]>38400) {
-            [self performSelectorOnMainThread:@selector(showLowResolutionStatus) withObject:nil waitUntilDone:NO];
-            NSDictionary *lower=[YTYouTube lowResolutionStreamsForID:videoID];
-            if(lower) streams=[[lower mutableCopy] autorelease];
+        if([[streams objectForKey:@"combined"] boolValue] && ![[info objectForKey:@"eligible"] boolValue]) {
+            // The actual movie is authoritative. Main profile 77 must not be
+            // forced into Apple playback by a misleading Baseline MIME hint.
+            NSString *nativeError=nil;
+            NSDictionary *compatible=[YTYouTube nativeCompatibleStreamsForID:videoID
+                excludingClient:[streams objectForKey:@"clientLabel"] error:&nativeError];
+            if(compatible) streams=[[compatible mutableCopy] autorelease];
+            else { streams=nil; error=nativeError; }
         }
+
     }
     if(streams) {
         [streams setObject:videoID forKey:@"videoID"];
-        NSDictionary *info=[streams objectForKey:@"nativeInfo"];
-        BOOL tryNative=[[info objectForKey:@"eligible"] boolValue] || [[streams objectForKey:@"nativeCandidate"] boolValue];
+        BOOL tryNative=YTShouldUseNativePlayer(streams);
         NSString *route=tryNative ? @"Apple player" : @"Software player";
         NSString *build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"YTBuildLabel"];
         if(![build length]) build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
         NSString *diagnostic=[NSString stringWithFormat:@"Version %@\nPlayback: %@\nQuality: %@p\n",
             build,route,[streams objectForKey:@"height"]];
         YTWritePlaybackLog(diagnostic);
+    } else {
+        YTWritePlaybackLog([NSString stringWithFormat:@"Version %@\nPlayback source rejected\n%@\n",
+            [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"],error ? error : @"No usable stream"]);
     }
     NSDictionary *payload = [NSDictionary dictionaryWithObjectsAndKeys:
         (streams ? (id)streams : (id)[NSNull null]), @"streams",
@@ -224,8 +226,7 @@
     _searchBar.userInteractionEnabled = YES;
     [UIApplication sharedApplication].networkActivityIndicatorVisible = NO;
     _statusLabel.hidden = YES;
-    BOOL tryNative=[[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue] ||
-                   [[streams objectForKey:@"nativeCandidate"] boolValue];
+    BOOL tryNative=YTShouldUseNativePlayer(streams);
     if (tryNative) {
         _nativePlayer=[[YTNativePlayer alloc] initWithStreams:streams delegate:self];
         if([_nativePlayer play]) return;
