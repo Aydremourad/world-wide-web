@@ -94,7 +94,7 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
     if(_stopped || !url) return nil;
     if(_prepareDeadline>0) {
         NSTimeInterval remaining=_prepareDeadline-[NSDate timeIntervalSinceReferenceDate];
-        if(remaining<=0) { [self setFailure:@"The hardware HLS preparation exceeded 55 seconds."]; return nil; }
+        if(remaining<=0) { [self setFailure:@"The hardware HLS client preflight exceeded 25 seconds."]; return nil; }
         if(timeout>remaining) timeout=remaining;
     }
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url
@@ -250,7 +250,7 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
     if(!_masterURL) return NO;
     // Preparation is allowed to wait for enough network headroom, but it must
     // never trap the user in a multi-minute experiment.
-    _prepareDeadline=[NSDate timeIntervalSinceReferenceDate]+55.0;
+    _prepareDeadline=[NSDate timeIntervalSinceReferenceDate]+25.0;
     NSString *master=[self fetchText:_masterURL];
     if(!master) return NO;
     NSURL *mediaURL=[self mediaURLFromMaster:master];
