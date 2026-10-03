@@ -749,6 +749,7 @@ static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSStr
     NSMutableArray *errors=[NSMutableArray array];
     NSMutableArray *fallbacks=[NSMutableArray array];
     NSMutableArray *nativeNotes=[NSMutableArray array];
+    NSMutableSet *nativeFingerprints=[NSMutableSet set];
 
     // Phase 1: search every client for a genuinely hardware-compatible
     // pre-muxed movie. Do not trust MIME/profile hints; probe the bytes.
@@ -780,6 +781,15 @@ static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSStr
             continue;
         }
         [candidate setObject:[client objectForKey:@"label"] forKey:@"clientLabel"];
+        long long declaredLength=[[candidate objectForKey:@"videoLength"] longLongValue];
+        NSString *fingerprint=declaredLength>0 ?
+            [NSString stringWithFormat:@"%@:%lld",[candidate objectForKey:@"videoItag"],declaredLength] :
+            [[[candidate objectForKey:@"videoURL"] absoluteString] stringByReplacingOccurrencesOfString:@"&sig=" withString:@"&sig="];
+        if([fingerprint length] && [nativeFingerprints containsObject:fingerprint]) {
+            [nativeNotes addObject:[NSString stringWithFormat:@"%@: same combined rendition",[client objectForKey:@"label"]]];
+            continue;
+        }
+        if([fingerprint length]) [nativeFingerprints addObject:fingerprint];
         NSString *candidateFailure=nil;
         if(!YTPrepareStreams(candidate,&candidateFailure)) {
             [nativeNotes addObject:[NSString stringWithFormat:@"%@: combined unavailable",[client objectForKey:@"label"]]];
