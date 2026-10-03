@@ -183,15 +183,8 @@
     if (streams) {
         NSDictionary *info=YTNativeStreamInfo(streams);
         if(info) [streams setObject:info forKey:@"nativeInfo"];
-        if(info && ![[info objectForKey:@"eligible"] boolValue] &&
-           [[info objectForKey:@"width"] intValue]*[[info objectForKey:@"height"] intValue]>38400) {
-            // Keep the quick direct low-resolution probe from the known-good
-            // build, but do not block startup downloading/preparing a whole
-            // replacement movie on the phone.
-            [self performSelectorOnMainThread:@selector(showLowResolutionStatus) withObject:nil waitUntilDone:NO];
-            NSDictionary *lower=[YTYouTube lowResolutionStreamsForID:videoID];
-            if(lower) streams=[[lower mutableCopy] autorelease];
-        }
+        // Do not detour through another H.264 client here. The only preferred
+        // alternate path is legacy itag 17, selected earlier from Android.
         // The raw player response is needed only while choosing a stream and is
         // much too large to retain during playback on a 128 MB device.
         [streams removeObjectForKey:@"playerResponse"];
