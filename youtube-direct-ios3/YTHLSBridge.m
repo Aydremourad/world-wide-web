@@ -8,6 +8,7 @@
 #include <math.h>
 #include <limits.h>
 #include <string.h>
+#include <stdint.h>
 
 static BOOL YTHLSSendBytes(int fd,const void *bytes,size_t count) {
     const char *p=bytes;
