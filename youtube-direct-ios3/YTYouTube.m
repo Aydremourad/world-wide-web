@@ -299,8 +299,9 @@ static NSDictionary *YTHLSStreamsForID(NSString *videoID) {
 
         NSInteger height=[bridge selectedHeight];
         double fps=[bridge selectedFPS];
+        BOOL baseline=[bridge selectedBaseline];
         NSDictionary *info=[NSDictionary dictionaryWithObjectsAndKeys:
-            [NSNumber numberWithBool:YES],@"eligible",
+            [NSNumber numberWithBool:baseline],@"eligible",
             [NSNumber numberWithInt:66],@"profile",[NSNumber numberWithInt:30],@"level",
             [NSNumber numberWithDouble:fps],@"fps",[NSNumber numberWithInt:256],@"width",
             [NSNumber numberWithInteger:height>0 ? height : 144],@"height",
@@ -308,8 +309,9 @@ static NSDictionary *YTHLSStreamsForID(NSString *videoID) {
         NSMutableDictionary *ready=[NSMutableDictionary dictionaryWithObjectsAndKeys:
             [NSURL URLWithString:hls],@"hlsURL",
             bridge,@"hlsBridge",
-            [NSNumber numberWithBool:YES],@"nativeHLS",
-            [NSNumber numberWithBool:YES],@"nativeCandidate",
+            [NSNumber numberWithBool:baseline],@"nativeHLS",
+            [NSNumber numberWithBool:baseline],@"nativeCandidate",
+            [NSNumber numberWithBool:!baseline],@"softwareHLS",
             [NSNumber numberWithBool:YES],@"combined",
             info,@"nativeInfo",
             [NSNumber numberWithInteger:height>0 ? height : 144],@"height",
@@ -813,7 +815,27 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
     // validation and initial buffering here on the resolver thread; if any
     // requirement fails, the known software path below is left untouched.
     NSDictionary *hlsCandidate=YTHLSStreamsForID(videoID);
-    if(hlsCandidate) return hlsCandidate;
+    if(hlsCandidate) {
+        if([[[hlsCandidate objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue])
+            return hlsCandidate;
+
+        // Modern YouTube often labels itag 91 Main Profile. Apple's decoder
+        // cannot take that, but FFmpeg decoding 256x144 is radically cheaper
+        // than the old 640x360 fallback. Reuse the proven AAC source and swap
+        // only the video input to the prebuffered 144p HLS stream.
+        NSDictionary *audioBase=[self softwareFallbackForID:videoID error:NULL];
+        if(audioBase) {
+            NSMutableDictionary *ready=[[[audioBase mutableCopy] autorelease] retain];
+            [ready setObject:[hlsCandidate objectForKey:@"hlsBridge"] forKey:@"hlsBridge"];
+            [ready setObject:[NSNumber numberWithBool:YES] forKey:@"softwareHLS"];
+            [ready setObject:[NSNumber numberWithInteger:[[hlsCandidate objectForKey:@"height"] integerValue]] forKey:@"height"];
+            [ready setObject:[hlsCandidate objectForKey:@"fps"] forKey:@"fps"];
+            [ready setObject:[hlsCandidate objectForKey:@"nativeInfo"] forKey:@"nativeInfo"];
+            [ready setObject:[hlsCandidate objectForKey:@"clientLabel"] forKey:@"clientLabel"];
+            [ready setObject:[hlsCandidate objectForKey:@"nativeSearch"] forKey:@"nativeSearch"];
+            return [ready autorelease];
+        }
+    }
 
     NSMutableDictionary *lowFPS=YTLowFPSStreamsForID(videoID);
     if(lowFPS) return lowFPS;
