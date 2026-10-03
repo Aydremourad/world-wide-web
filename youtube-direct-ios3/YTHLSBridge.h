@@ -1,5 +1,11 @@
 #import <Foundation/Foundation.h>
 
+@protocol YTHLSSequentialReading <NSObject>
+- (int)readInto:(void *)buffer count:(int)count;
+- (void)cancel;
+- (NSString *)errorText;
+@end
+
 @interface YTHLSBridge : NSObject {
     NSURL *_masterURL;
     NSString *_userAgent;
@@ -28,5 +34,5 @@
 - (NSString *)selectedDescription;
 - (BOOL)selectedBaseline;
 - (double)totalDuration;
-- (id)newSequentialReaderAtTime:(double)time actualStart:(double *)actualStart;
+- (id<YTHLSSequentialReading>)newSequentialReaderAtTime:(double)time actualStart:(double *)actualStart;
 @end
