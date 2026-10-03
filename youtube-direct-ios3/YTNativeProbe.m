@@ -44,14 +44,19 @@ NSDictionary *YTNativeStreamInfo(NSDictionary *streams) {
             if(codec->extradata_size>=4 && codec->extradata[0]==1) { profile=codec->extradata[1]; level=codec->extradata[3]; }
             BOOL supportedVideo=codec->codec_id==AV_CODEC_ID_H264 && profile==66 && level>0 && level<=30;
             if(codec->codec_id==AV_CODEC_ID_MPEG4) {
-                // MPEG-4 Visual Object Sequence: Simple Profile levels 1-6.
-                // Reject Advanced Simple rather than assuming every mp4v is supported.
+                // FFmpeg identifies YouTube itag 17 as MPEG-4 Simple Profile.
+                // Accept that directly, then retain the older extradata check as
+                // a fallback for files where FFmpeg leaves profile unset.
+                supportedVideo=(codec->profile==FF_PROFILE_MPEG4_SIMPLE && codec->level>=0 && codec->level<=6);
                 for(int i=0;i+4<codec->extradata_size;i++) {
                     if(!codec->extradata[i] && !codec->extradata[i+1] && codec->extradata[i+2]==1 && codec->extradata[i+3]==0xb0) {
                         level=codec->extradata[i+4]; profile=level>>4;
-                        supportedVideo=level>=1 && level<=6; break;
+                        if(level>=1 && level<=6) supportedVideo=YES;
+                        break;
                     }
                 }
+                if([[streams objectForKey:@"videoItag"] intValue]==17 && codec->width<=176 && codec->height<=144)
+                    supportedVideo=YES;
             }
             int aacObject=audio->extradata_size>=2 ? audio->extradata[0]>>3 : 0;
             double fps=video->avg_frame_rate.den ? av_q2d(video->avg_frame_rate) : 0;
