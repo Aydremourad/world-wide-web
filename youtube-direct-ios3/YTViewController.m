@@ -192,7 +192,6 @@
     }
     if(streams) {
         [streams setObject:videoID forKey:@"videoID"];
-        NSDictionary *info=[streams objectForKey:@"nativeInfo"];
         NSString *route=[[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue] ? @"Apple player" : @"Software player";
         NSString *build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"YTBuildLabel"];
         if(![build length]) build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
