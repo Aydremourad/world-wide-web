@@ -691,7 +691,12 @@ static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSStr
         NSMutableDictionary *normal=[[[self streamsFromPlayerResponse:player userAgent:[client objectForKey:@"ua"] error:&failure] mutableCopy] autorelease];
         if(normal) {
             [normal setObject:[client objectForKey:@"label"] forKey:@"clientLabel"];
-            [fallbacks addObject:normal];
+            // Preserve Android as the proven software/audio fallback. The web
+            // clients are queried only to find a hardware-decodable format 18.
+            if([[client objectForKey:@"label"] isEqualToString:@"Android"])
+                [fallbacks insertObject:normal atIndex:0];
+            else
+                [fallbacks addObject:normal];
         }
 
         NSMutableDictionary *candidate=YTCombinedCandidateFromPlayer(player,[client objectForKey:@"ua"]);
