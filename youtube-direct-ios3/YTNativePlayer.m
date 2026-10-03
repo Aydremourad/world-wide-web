@@ -16,6 +16,11 @@
     if(!_movie) { [_server stop]; return NO; }
     _movie.scalingMode=MPMovieScalingModeAspectFit;
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(movieFinished:) name:MPMoviePlayerPlaybackDidFinishNotification object:nil];
+    // Apple's documentation separates initialization from preparation. On
+    // legacy MediaPlayer builds this also gives the local range server a clean
+    // preload phase before playback starts.
+    if([_movie respondsToSelector:@selector(prepareToPlay)])
+        [_movie performSelector:@selector(prepareToPlay)];
     [_movie play]; // iPhone OS 3 presents Apple's own full-screen controller.
     return YES;
 }
@@ -24,7 +29,20 @@
     [self retain];
     NSDictionary *info=[notification userInfo];
     NSNumber *reason=[info objectForKey:@"MPMoviePlayerPlaybackDidFinishReasonUserInfoKey"];
-    BOOL failed=[[_server errorText] length]>0 || (reason && [reason intValue]==2) || [[info objectForKey:@"error"] isKindOfClass:[NSError class]];
+    NSError *movieError=[[info objectForKey:@"error"] isKindOfClass:[NSError class]] ? [info objectForKey:@"error"] : nil;
+    BOOL failed=[[_server errorText] length]>0 || (reason && [reason intValue]==2) || movieError!=nil;
+    if(failed) {
+        NSString *path=[NSTemporaryDirectory() stringByAppendingPathComponent:@"YouTube-playback.txt"];
+        NSString *old=[NSString stringWithContentsOfFile:path encoding:NSUTF8StringEncoding error:NULL];
+        NSDictionary *nativeInfo=[_streams objectForKey:@"nativeInfo"];
+        NSString *detail=[NSString stringWithFormat:
+            @"%@\nApple player failure\nreason=%@\nerror=%@ (%@/%ld)\nbridge=%@\nnativeInfo=%@\n",
+            old ? old : @"", reason ? reason : @"missing",
+            movieError ? [movieError localizedDescription] : @"none",
+            movieError ? [movieError domain] : @"none",(long)(movieError ? [movieError code] : 0),
+            [_server diagnosticText],nativeInfo ? nativeInfo : [NSDictionary dictionary]];
+        [detail writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+    }
     [self stop]; [_delegate nativePlayer:self finishedWithError:failed];
     [self release];
 }

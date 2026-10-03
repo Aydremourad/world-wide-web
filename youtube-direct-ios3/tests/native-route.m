@@ -48,10 +48,16 @@ int main(int argc,char **argv) {
     info=YTNativeStreamInfo(Streams());
     assert(info && ![[info objectForKey:@"eligible"] boolValue]);
     [Movie release]; Movie=[[NSData dataWithContentsOfFile:[NSString stringWithUTF8String:argv[3]]] retain];
-    YTLoopbackServer *server=[[YTLoopbackServer alloc] initWithURL:[Streams() objectForKey:@"videoURL"] length:[Movie length] userAgent:@"fixture"];
-    assert([server start]); NSURL *url=[server movieURL];
+    // Simulate a stale YouTube contentLength/clen. start must use the first
+    // bounded CDN read to correct it before Apple sees Content-Length/ranges.
+    long long staleLength=(long long)[Movie length]+12345;
+    int requestsBeforeStart=Requests;
+    YTLoopbackServer *server=[[YTLoopbackServer alloc] initWithURL:[Streams() objectForKey:@"videoURL"] length:staleLength userAgent:@"fixture"];
+    assert([server start] && Requests==requestsBeforeStart+1); NSURL *url=[server movieURL];
     assert([Fetch(url,@"HEAD",nil,200) length]==0);
     assert([Fetch(url,@"GET",@"bytes=0-1",206) isEqualToData:[Movie subdataWithRange:NSMakeRange(0,2)]]);
+    // The bootstrap 64 KiB chunk already contains this tiny Apple probe.
+    assert(Requests==requestsBeforeStart+1);
     int beforeRequests=Requests;
     assert([Fetch(url,@"GET",@"bytes=0-1",206) isEqualToData:[Movie subdataWithRange:NSMakeRange(0,2)]]);
     assert(Requests==beforeRequests); // Apple's repeated probes reuse downloaded bytes.
@@ -74,6 +80,6 @@ int main(int argc,char **argv) {
     assert([NSDate timeIntervalSinceReferenceDate]-before<0.5);
     [NSThread sleepForTimeInterval:0.25];
     assert(![[server errorText] length]); [server release];
-    NSLog(@"Native route passed: Baseline accepted, Main rejected, complete 36-second MP4 bridged byte-for-byte, HEAD/ranges/suffix/EOF, concurrent shared cache and stop.");
+    NSLog(@"Native route passed: Baseline accepted, Main rejected, stale CDN length corrected before Apple playback, tiny bootstrap range served from 64 KiB cache, complete 36-second MP4 bridged byte-for-byte, HEAD/ranges/suffix/EOF, concurrent shared cache and stop.");
     [NSURLProtocol unregisterClass:[YTMovieProtocol class]]; [Movie release]; [pool release]; return 0;
 }
