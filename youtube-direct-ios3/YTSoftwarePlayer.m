@@ -609,8 +609,12 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     if (frameRate.num > 0 && frameRate.den > 0) playback.frameDuration = av_q2d(av_inv_q(frameRate));
     _sourceFPS=1.0/playback.frameDuration;
     playback.preferReferenceFrames=YTPreferReferenceFrames(codec->width,codec->height,_sourceFPS);
+    // A 15 fps 256x144 stream is already the CPU-saving rendition. Dropping
+    // its B pictures again turns useful motion into the ~4-5 fps slideshow we
+    // are trying to avoid. Reserve B-picture discard for 24/30 fps or larger
+    // Main-profile sources.
     playback.aggressiveFrameDrop=(codec->codec_id==AV_CODEC_ID_H264 &&
-        codec->profile>66 && (_sourceFPS>12.0 || codec->width*codec->height>38400));
+        codec->profile>66 && (_sourceFPS>18.0 || codec->width*codec->height>38400));
     if(codec->codec_id==AV_CODEC_ID_H264) {
         if(playback.aggressiveFrameDrop) {
             // Main-profile YouTube video uses expensive B pictures. On ARM11,
