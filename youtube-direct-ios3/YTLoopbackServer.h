@@ -10,6 +10,7 @@
     int _listener;
     unsigned short _port;
     volatile BOOL _stopped;
+    BOOL _threeGP;
 }
 - (id)initWithURL:(NSURL *)url length:(int64_t)length userAgent:(NSString *)userAgent;
 - (BOOL)start;
