@@ -59,6 +59,60 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
     return NO;
 }
 
+@class YTHLSBridge;
+@interface YTHLSSequentialReader : NSObject {
+    YTHLSBridge *_bridge;
+    NSUInteger _segment;
+    NSUInteger _inside;
+    NSData *_data;
+    BOOL _cancelled;
+    NSString *_errorText;
+}
+- (id)initWithBridge:(YTHLSBridge *)bridge segment:(NSUInteger)segment;
+- (int)readInto:(void *)buffer count:(int)count;
+- (void)cancel;
+- (NSString *)errorText;
+@end
+
+@interface YTHLSBridge (ReaderPrivate)
+- (NSData *)dataForSegment:(NSUInteger)index;
+- (NSUInteger)segmentCount;
+@end
+
+@implementation YTHLSSequentialReader
+- (id)initWithBridge:(YTHLSBridge *)bridge segment:(NSUInteger)segment {
+    if((self=[super init])) { _bridge=[bridge retain]; _segment=segment; }
+    return self;
+}
+- (int)readInto:(void *)buffer count:(int)count {
+    if(_cancelled || count<0) return -1;
+    int copied=0;
+    while(copied<count && !_cancelled) {
+        if(!_data) {
+            if(_segment>=[_bridge segmentCount]) break;
+            _data=[[_bridge dataForSegment:_segment] retain];
+            _inside=0;
+            if(!_data) {
+                [_errorText release]; _errorText=[[_bridge errorText] copy];
+                return copied ? copied : -1;
+            }
+        }
+        NSUInteger available=[_data length]-_inside;
+        if(!available) {
+            [_data release]; _data=nil; _segment++; _inside=0; continue;
+        }
+        NSUInteger wanted=(NSUInteger)(count-copied);
+        NSUInteger take=available<wanted ? available : wanted;
+        memcpy((uint8_t *)buffer+copied,(const uint8_t *)[_data bytes]+_inside,take);
+        _inside+=take; copied+=(int)take;
+    }
+    return _cancelled ? -1 : copied;
+}
+- (void)cancel { _cancelled=YES; }
+- (NSString *)errorText { return _errorText; }
+- (void)dealloc { [_bridge release]; [_data release]; [_errorText release]; [super dealloc]; }
+@end
+
 @implementation YTHLSBridge
 
 - (id)initWithURL:(NSURL *)url userAgent:(NSString *)userAgent {
@@ -84,6 +138,7 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
 }
 - (NSInteger)selectedHeight { return _selectedHeight; }
 - (double)selectedFPS { return _selectedFPS; }
+- (BOOL)selectedBaseline { return _selectedBaseline; }
 - (NSString *)selectedDescription {
     if(_selectedWidth<=0 || _selectedHeight<=0) return nil;
     return [NSString stringWithFormat:@"Hardware HLS: %dx%d%@, H.264 Baseline + AAC, 3-segment prebuffer",
@@ -123,16 +178,15 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
 - (NSURL *)mediaURLFromMaster:(NSString *)master {
     NSArray *lines=[master componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
     NSURL *best=nil; long long bestScore=LLONG_MAX;
-    NSInteger bestWidth=0,bestHeight=0; double bestFPS=0;
+    NSInteger bestWidth=0,bestHeight=0; double bestFPS=0; BOOL bestBaseline=NO;
     for(NSUInteger i=0;i<[lines count];i++) {
         NSString *info=YTHLSTrim([lines objectAtIndex:i]);
         if(![info hasPrefix:@"#EXT-X-STREAM-INF:"]) continue;
         NSString *lower=[info lowercaseString];
-        // The original iPhone hardware path is the point of this route.
-        // Reject Main-profile AVC and reject larger renditions even when they
-        // happen to be Baseline. YouTube's compatible target is HLS itag 91:
-        // 256x144 Baseline AVC with AAC in MPEG-TS.
-        if([lower rangeOfString:@"avc1.42"].location==NSNotFound ||
+        // Always target the smallest 144p AVC/AAC rendition. Baseline can
+        // go to Apple's hardware decoder; Main-profile 144p is still valuable
+        // because it is ~6x fewer pixels than the 640x360 software fallback.
+        if([lower rangeOfString:@"avc1."].location==NSNotFound ||
            [lower rangeOfString:@"mp4a."].location==NSNotFound) continue;
         NSInteger width=0,height=0; YTHLSResolution(info,&width,&height);
         if(width<=0 || height<=0 || width>256 || height>144) continue;
@@ -148,9 +202,10 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
         if(address && score<bestScore) {
             best=YTHLSResolveURL(address,_masterURL);
             bestScore=score; bestWidth=width; bestHeight=height; bestFPS=fps;
+            bestBaseline=([lower rangeOfString:@"avc1.42"].location!=NSNotFound);
         }
     }
-    if(best) { _selectedWidth=bestWidth; _selectedHeight=bestHeight; _selectedFPS=bestFPS; }
+    if(best) { _selectedWidth=bestWidth; _selectedHeight=bestHeight; _selectedFPS=bestFPS; _selectedBaseline=bestBaseline; }
     return best;
 }
 - (BOOL)parseMediaPlaylist:(NSString *)media baseURL:(NSURL *)base {
@@ -197,6 +252,23 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
     NSData *data=[self fetchURL:[_segments objectAtIndex:index] timeout:20.0];
     if(data && !_stopped) [data writeToFile:path atomically:YES];
     return data;
+}
+- (NSUInteger)segmentCount { return [_segments count]; }
+- (id)newSequentialReaderAtTime:(double)time actualStart:(double *)actualStart {
+    double cursor=0; NSUInteger segment=0;
+    if(time<0) time=0;
+    for(NSUInteger i=0;i<[_durations count];i++) {
+        double next=cursor+[[_durations objectAtIndex:i] doubleValue];
+        if(time<next) { segment=i; break; }
+        cursor=next; segment=i+1;
+    }
+    if(segment>=[_segments count] && [_segments count]) {
+        segment=[_segments count]-1;
+        cursor=0;
+        for(NSUInteger i=0;i<segment;i++) cursor+=[[_durations objectAtIndex:i] doubleValue];
+    }
+    if(actualStart) *actualStart=cursor;
+    return [[[YTHLSSequentialReader alloc] initWithBridge:self segment:segment] autorelease];
 }
 - (BOOL)prebuffer {
     NSUInteger count=[_segments count]<3 ? [_segments count] : 3;
@@ -248,6 +320,9 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
 }
 - (BOOL)start {
     if(!_masterURL) return NO;
+    _stopped=NO;
+    [_errorText release]; _errorText=nil;
+    _selectedWidth=_selectedHeight=0; _selectedFPS=0; _selectedBaseline=NO;
     // Preparation is allowed to wait for enough network headroom, but it must
     // never trap the user in a multi-minute experiment.
     _prepareDeadline=[NSDate timeIntervalSinceReferenceDate]+25.0;
