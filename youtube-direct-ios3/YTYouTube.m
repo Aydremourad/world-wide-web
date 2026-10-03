@@ -1,6 +1,7 @@
 #include <limits.h>
 #import "YTYouTube.h"
 #import "YTMediaSource.h"
+#import "YTSABR.h"
 #include <stdlib.h>
 #include <unistd.h>
 
@@ -613,6 +614,8 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
                 if ([video readAtOffset:0 into:header count:12] != 12) failure = [video errorText];
                 else if ([audio readAtOffset:0 into:header count:12] != 12) failure = [audio errorText];
                 else {
+                    [streams setObject:[client objectForKey:@"label"] forKey:@"clientLabel"];
+                    [streams setObject:player forKey:@"playerResponse"];
                     [streams setObject:video forKey:@"videoSource"];
                     [streams setObject:audio forKey:@"audioSource"];
                     [[NSUserDefaults standardUserDefaults] setObject:[client objectForKey:@"label"] forKey:@"YTWorkingClient"];
@@ -631,6 +634,59 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
     }
     if (errorText) *errorText = [errors componentsJoinedByString:@"\n\n"];
     return nil;
+}
+
+static NSDictionary *YTSABRFormat(NSString *format) {
+    NSMutableDictionary *result=[NSMutableDictionary dictionaryWithObjectsAndKeys:
+        [NSNumber numberWithInteger:YTJSONIntForKey(format,@"itag")],@"itag",
+        [NSNumber numberWithInteger:YTJSONIntForKey(format,@"width")],@"width",
+        [NSNumber numberWithInteger:YTJSONIntForKey(format,@"height")],@"height",
+        [NSNumber numberWithLongLong:YTFormatLength(format)],@"length",nil];
+    for(NSString *key in [NSArray arrayWithObjects:@"lastModified",@"xtags",@"approxDurationMs",nil]) {
+        NSString *value=YTJSONStringForKey(format,key,0);
+        if(value) [result setObject:value forKey:[key isEqualToString:@"approxDurationMs"] ? @"duration" : key];
+    }
+    return result;
+}
++ (NSDictionary *)phoneOnlyStreamsForID:(NSString *)videoID original:(NSDictionary *)original error:(NSString **)errorText {
+    NSString *player=[original objectForKey:@"playerResponse"],*failure=nil;
+    NSDictionary *client=[YTPlayerClients() objectAtIndex:0];
+    if(!player || ![[original objectForKey:@"clientLabel"] isEqualToString:@"Android"])
+        player=YTPlayerResponse(videoID,client,&failure);
+    NSString *streaming=YTObjectForKey(player,@"streamingData");
+    NSArray *formats=YTJSONObjectStringsInArray(streaming,@"adaptiveFormats");
+    NSString *video=nil,*audio=nil; NSInteger rank=NSIntegerMax;
+    for(NSString *format in formats) {
+        NSInteger r=YTFormatRank(format,YES);
+        if(r>=0 && r<rank && YTFormatLength(format)>0) { video=format; rank=r; }
+        if(!audio && YTFormatRank(format,NO)>=0) audio=format;
+    }
+    NSString *config=YTJSONStringForKey(YTObjectForKey(YTObjectForKey(YTObjectForKey(player,@"playerConfig"),@"mediaCommonConfig"),@"mediaUstreamerRequestConfig"),@"videoPlaybackUstreamerConfig",0);
+    NSURL *url=[NSURL URLWithString:YTJSONStringForKey(streaming,@"serverAbrStreamingUrl",0)];
+    if(!video || !audio || !config || !url || ![original objectForKey:@"audioSource"]) {
+        if(errorText) *errorText=failure ? failure : @"YouTube did not supply a usable phone-only 144p stream.";
+        return nil;
+    }
+    NSDictionary *options=[NSDictionary dictionaryWithObjectsAndKeys:url,@"url",config,@"config",
+        YTSABRFormat(video),@"video",YTSABRFormat(audio),@"audio",videoID,@"videoID",
+        [client objectForKey:@"number"],@"clientNumber",[client objectForKey:@"version"],@"clientVersion",
+        [client objectForKey:@"ua"],@"userAgent",nil];
+    NSString *path=YTDownloadSABRVideo(options,&failure);
+    if(!path) { if(errorText) *errorText=failure; return nil; }
+    NSURL *local=[NSURL fileURLWithPath:path];
+    YTMediaSource *source=[[[YTMediaSource alloc] initWithURL:local length:0 userAgent:nil] autorelease];
+    NSMutableDictionary *chosen=[[original mutableCopy] autorelease];
+    [chosen setObject:local forKey:@"videoURL"]; [chosen setObject:source forKey:@"videoSource"];
+    [chosen setObject:[NSNumber numberWithLongLong:[source length]] forKey:@"videoLength"];
+    [chosen setObject:[NSNumber numberWithBool:NO] forKey:@"combined"];
+    [chosen setObject:[NSNumber numberWithBool:NO] forKey:@"nativeCandidate"];
+    [chosen removeObjectForKey:@"nativeInfo"]; [chosen removeObjectForKey:@"playerResponse"];
+    [chosen setObject:[NSNumber numberWithInteger:YTJSONIntForKey(video,@"height")] forKey:@"height"];
+    [chosen setObject:[NSNumber numberWithInteger:YTJSONIntForKey(video,@"fps")] forKey:@"fps"];
+    [chosen setObject:[NSNumber numberWithInteger:YTJSONIntForKey(video,@"itag")] forKey:@"videoItag"];
+    [chosen setObject:@"Android SABR, prepared on phone" forKey:@"clientLabel"];
+    [chosen setObject:[NSNumber numberWithBool:YES] forKey:@"phonePrepared"];
+    return chosen;
 }
 
 // Try one additional client only when the current combined stream needs
