@@ -122,11 +122,16 @@ static int YTHLSAudioInterrupt(void *opaque) {
         _inside+=header.frameBytes; _nextTime+=1024.0/_rate;
     }
     if(got<=0) return kAudioFileUnsupportedDataFormatError;
-    _cookie=[[NSData alloc] initWithBytes:header.cookie length:2];
+    uint8_t cookie[YT_AAC_MAGIC_COOKIE_BYTES]; YTMakeAACMagicCookie(cookie,header.cookie);
+    _cookie=[[NSData alloc] initWithBytes:cookie length:sizeof(cookie)];
     memset(description,0,sizeof(*description));
     description->mFormatID=kAudioFormatMPEG4AAC;
     description->mSampleRate=_rate; description->mChannelsPerFrame=_channels;
     description->mFramesPerPacket=1024;
+    UInt32 descriptionSize=sizeof(*description);
+    OSStatus info=AudioFormatGetProperty(kAudioFormatProperty_FormatInfo,
+        (UInt32)[_cookie length],[_cookie bytes],&descriptionSize,description);
+    if(info!=noErr) { [self setFailure:@"Apple's audio decoder rejected the AAC stream header."]; return info; }
     if(actualStart) *actualStart=_nextTime;
     if(discardFrames) *discardFrames=(UInt32)llround(fmax(0,time-_nextTime)*_rate);
     return noErr;

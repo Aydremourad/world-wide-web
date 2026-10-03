@@ -2,6 +2,20 @@
 #define YT_ADTS_H
 #include <stdint.h>
 #include <stddef.h>
+#include <string.h>
+
+#define YT_AAC_MAGIC_COOKIE_BYTES 33
+
+/* Core Audio expects an MPEG-4 ES descriptor containing AudioSpecificConfig,
+ * rather than the two raw AudioSpecificConfig bytes from an ADTS header. */
+static void YTMakeAACMagicCookie(uint8_t cookie[YT_AAC_MAGIC_COOKIE_BYTES],const uint8_t config[2]) {
+    memset(cookie,0,YT_AAC_MAGIC_COOKIE_BYTES);
+    cookie[0]=3; cookie[1]=cookie[2]=cookie[3]=0x80; cookie[4]=28;
+    cookie[8]=4; cookie[9]=cookie[10]=cookie[11]=0x80; cookie[12]=20;
+    cookie[13]=0x40; cookie[14]=0x15; // MPEG-4 audio, audio stream, upstream=0.
+    cookie[26]=5; cookie[27]=cookie[28]=cookie[29]=0x80; cookie[30]=2;
+    cookie[31]=config[0]; cookie[32]=config[1];
+}
 
 typedef struct {
     unsigned rate, channels, headerBytes, frameBytes;

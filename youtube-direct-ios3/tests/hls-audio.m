@@ -1,6 +1,7 @@
 #import "YTHLSAudioSource.h"
 #import "YTHLSBridge.h"
 #import "YTAudioPump.h"
+#include "YTADTS.h"
 #include <assert.h>
 #include <math.h>
 #include <stdlib.h>
@@ -63,7 +64,7 @@ static UInt64 DecodeFixture(YTHLSBridge *bridge,double start) {
     if(opened!=noErr) NSLog(@"HLS AAC open failed: %d %@",(int)opened,[source errorText]);
     assert(opened==noErr && audio.inputFormat.mSampleRate==44100 && audio.inputFormat.mChannelsPerFrame==2);
     assert(audio.startTime<=start+0.000001 && start-audio.startTime<1024.0/44100);
-    assert([[source magicCookie] length]==2);
+    assert([[source magicCookie] length]==YT_AAC_MAGIC_COOKIE_BYTES);
     YTInput input; memset(&input,0,sizeof(input)); input.source=source;
     UInt64 total=0; double energy=0;
     while(1) {
