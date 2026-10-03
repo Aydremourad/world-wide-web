@@ -288,23 +288,40 @@ static NSDictionary *YTHLSStreamsForID(NSString *videoID) {
         NSString *player=YTPlayerResponse(videoID,client,NULL);
         NSString *hls=YTJSONStringForKey(player,@"hlsManifestUrl",0);
         if(![hls hasPrefix:@"https://"]) continue;
+
+        // Do not stop at the first manifest URL. A client can expose HLS but
+        // omit the old Baseline rendition or return an unusable playlist.
+        // Preflight each independent client until one proves it can serve
+        // 144p Baseline MPEG-TS and has three complete segments buffered.
+        YTHLSBridge *bridge=[[[YTHLSBridge alloc] initWithURL:[NSURL URLWithString:hls]
+            userAgent:[client objectForKey:@"ua"]] autorelease];
+        if(![bridge start]) continue;
+
+        NSInteger height=[bridge selectedHeight];
+        double fps=[bridge selectedFPS];
         NSDictionary *info=[NSDictionary dictionaryWithObjectsAndKeys:
             [NSNumber numberWithBool:YES],@"eligible",
             [NSNumber numberWithInt:66],@"profile",[NSNumber numberWithInt:30],@"level",
-            [NSNumber numberWithDouble:0],@"fps",[NSNumber numberWithInt:256],@"width",
-            [NSNumber numberWithInt:144],@"height",[NSNumber numberWithLongLong:0],@"length",nil];
-        return [NSDictionary dictionaryWithObjectsAndKeys:
+            [NSNumber numberWithDouble:fps],@"fps",[NSNumber numberWithInt:256],@"width",
+            [NSNumber numberWithInteger:height>0 ? height : 144],@"height",
+            [NSNumber numberWithLongLong:0],@"length",nil];
+        NSMutableDictionary *ready=[NSMutableDictionary dictionaryWithObjectsAndKeys:
             [NSURL URLWithString:hls],@"hlsURL",
+            bridge,@"hlsBridge",
             [NSNumber numberWithBool:YES],@"nativeHLS",
             [NSNumber numberWithBool:YES],@"nativeCandidate",
             [NSNumber numberWithBool:YES],@"combined",
             info,@"nativeInfo",
-            [NSNumber numberWithInteger:144],@"height",
+            [NSNumber numberWithInteger:height>0 ? height : 144],@"height",
             [NSNumber numberWithInteger:91],@"videoItag",
-            [NSNumber numberWithInteger:0],@"fps",
+            [NSNumber numberWithDouble:fps],@"fps",
             [client objectForKey:@"ua"],@"userAgent",
-            [client objectForKey:@"label"],@"clientLabel",
-            @"HLS candidate; Baseline 144p must pass the on-phone bridge preflight",@"nativeSearch",nil];
+            [client objectForKey:@"label"],@"clientLabel",nil];
+        NSString *description=[bridge selectedDescription];
+        if([description length])
+            [ready setObject:[NSString stringWithFormat:@"%@ via %@",description,[client objectForKey:@"label"]]
+                forKey:@"nativeSearch"];
+        return ready;
     }
     return nil;
 }
@@ -796,21 +813,7 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
     // validation and initial buffering here on the resolver thread; if any
     // requirement fails, the known software path below is left untouched.
     NSDictionary *hlsCandidate=YTHLSStreamsForID(videoID);
-    if(hlsCandidate) {
-        YTHLSBridge *bridge=[[[YTHLSBridge alloc] initWithURL:[hlsCandidate objectForKey:@"hlsURL"]
-            userAgent:[hlsCandidate objectForKey:@"userAgent"]] autorelease];
-        if([bridge start]) {
-            NSMutableDictionary *ready=[[[hlsCandidate mutableCopy] autorelease] retain];
-            [ready setObject:bridge forKey:@"hlsBridge"];
-            NSInteger height=[bridge selectedHeight];
-            double fps=[bridge selectedFPS];
-            if(height>0) [ready setObject:[NSNumber numberWithInteger:height] forKey:@"height"];
-            if(fps>0) [ready setObject:[NSNumber numberWithDouble:fps] forKey:@"fps"];
-            NSString *description=[bridge selectedDescription];
-            if([description length]) [ready setObject:description forKey:@"nativeSearch"];
-            return [ready autorelease];
-        }
-    }
+    if(hlsCandidate) return hlsCandidate;
 
     NSMutableDictionary *lowFPS=YTLowFPSStreamsForID(videoID);
     if(lowFPS) return lowFPS;
