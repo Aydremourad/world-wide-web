@@ -1,5 +1,6 @@
 #import "YTSoftwarePlayer.h"
 #import "YTMediaSource.h"
+#import "YTHLSBridge.h"
 #import "YTVideoSurface.h"
 #import "YTAudioFile.h"
 #import "YTAudioPump.h"
@@ -18,8 +19,9 @@
 #include <string.h>
 
 typedef struct {
-    YTMediaSource *source;
+    id source;
     int64_t position;
+    BOOL sequential;
     volatile BOOL *stop;
 } YTVideoIO;
 
@@ -64,6 +66,7 @@ typedef struct {
     double firstPTS;
     double nextPTS;
     double frameDuration;
+    double videoTimeOffset;
     YTVideoImage image;
 } YTPlayback;
 
@@ -95,7 +98,8 @@ static double YTPlayerWallTime(void) {
 static int YTReadVideo(void *opaque, uint8_t *bytes, int count) {
     YTVideoIO *io = opaque;
     if (*io->stop) return AVERROR_EXIT;
-    int result = [io->source readAtOffset:io->position into:bytes count:count];
+    int result = io->sequential ? [io->source readInto:bytes count:count] :
+        [io->source readAtOffset:io->position into:bytes count:count];
     if (result < 0) return AVERROR(EIO);
     if (!result) return AVERROR_EOF;
     io->position += result;
@@ -146,6 +150,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     double pts = timestamp == AV_NOPTS_VALUE ? playback->nextPTS : timestamp * av_q2d(timeBase);
     if (isnan(playback->firstPTS)) playback->firstPTS = pts;
     pts -= playback->firstPTS;
+    pts += playback->videoTimeOffset;
     playback->nextPTS = pts + playback->firstPTS + playback->frameDuration;
     if(pts < playback->startTime-0.025) return !*playback->stop;
     if(*playback->paused && !playback->audioStarted && !playback->previewShown) {
@@ -204,10 +209,12 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
         _oldStatusHidden = [UIApplication sharedApplication].statusBarHidden;
         self.wantsFullScreenLayout = YES;
         _streams = [streams retain]; _seekCondition=[[NSCondition alloc] init];
+        _hlsBridge=[[_streams objectForKey:@"hlsBridge"] retain];
         _videoCache=[[_streams objectForKey:@"videoSource"] retain];
         _audioCache=[[_streams objectForKey:@"audioSource"] retain];
-        if(!_videoCache) _videoCache=[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"videoURL"]
-            length:[[streams objectForKey:@"videoLength"] longLongValue] userAgent:[streams objectForKey:@"userAgent"]];
+        if(!_videoCache && ![[_streams objectForKey:@"softwareHLS"] boolValue])
+            _videoCache=[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"videoURL"]
+                length:[[streams objectForKey:@"videoLength"] longLongValue] userAgent:[streams objectForKey:@"userAgent"]];
         if(!_audioCache) _audioCache=[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"audioURL"]
             length:[[streams objectForKey:@"audioLength"] longLongValue] userAgent:[streams objectForKey:@"userAgent"]];
         [_videoCache enableStreamingReadAhead]; [_audioCache enableStreamingReadAhead];
@@ -567,18 +574,25 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     playback.controller = self; playback.audio = &audio;
     playback.stop = &_sessionStop; playback.paused = &_paused; playback.serial=serial; playback.startTime=time;
     playback.firstPTS = NAN; playback.frameDuration = 1.0 / 15.0;
+    BOOL softwareHLS=[[_streams objectForKey:@"softwareHLS"] boolValue] && _hlsBridge;
+    double hlsStart=0;
     [_seekCondition lock];
-    _videoSource=[_videoCache newReader]; _audioSource=[_audioCache newReader];
+    if(softwareHLS) {
+        _videoSource=[[_hlsBridge newSequentialReaderAtTime:time actualStart:&hlsStart] retain];
+        playback.videoTimeOffset=hlsStart;
+    } else _videoSource=[_videoCache newReader];
+    _audioSource=[_audioCache newReader];
     if(_sessionStop) { [_videoSource cancel]; [_audioSource cancel]; }
     [_seekCondition unlock];
-    io.source = _videoSource; audio.source = _audioSource;
+    io.source = _videoSource; io.sequential=softwareHLS; audio.source = _audioSource;
     [NSThread setThreadPriority:0.85];
     if (_sessionStop) goto finished;
     av_register_all();
     format = avformat_alloc_context();
     uint8_t *readBuffer = av_malloc(65536);
     if (!format || !readBuffer) { av_free(readBuffer); failure = @"Not enough memory for the player."; goto finished; }
-    ioContext = avio_alloc_context(readBuffer, 65536, 0, &io, YTReadVideo, NULL, YTSeekVideo);
+    ioContext = avio_alloc_context(readBuffer, 65536, 0, &io, YTReadVideo, NULL,
+        softwareHLS ? NULL : YTSeekVideo);
     if (!ioContext) { av_free(readBuffer); failure = @"Could not create the video reader."; goto finished; }
     format->pb = ioContext;
     format->flags |= AVFMT_FLAG_CUSTOM_IO;
@@ -626,7 +640,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     }
     playback.firstPTS=YTVideoTimeOrigin(format->streams[videoStream]);
     playback.nextPTS=playback.firstPTS+time;
-    if(time>0 && YTSeekVideoToTime(format,videoStream,codec,time)<0) {
+    if(time>0 && !softwareHLS && YTSeekVideoToTime(format,videoStream,codec,time)<0) {
         failure=@"Could not seek to this part of the video."; goto finished;
     }
     OSStatus audioResult = YTPrepareAudio(&audio);
@@ -638,7 +652,8 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
         [NSValue valueWithPointer:&audio], @"audio",
         [NSNumber numberWithDouble:audio.format.mSampleRate], @"rate",
         [NSNumber numberWithBool:audio.directAAC], @"directAAC",
-        [NSNumber numberWithDouble:format->duration > 0 ? (double)format->duration / AV_TIME_BASE : 0], @"duration",
+        [NSNumber numberWithDouble:softwareHLS ? [_hlsBridge totalDuration] :
+            (format->duration > 0 ? (double)format->duration / AV_TIME_BASE : 0)], @"duration",
         [NSNumber numberWithUnsignedInt:serial],@"serial", nil];
     [self performSelectorOnMainThread:@selector(attachAudioQueue:) withObject:queueInfo waitUntilDone:YES];
     AVPacket packet;
@@ -753,7 +768,7 @@ finished:
 }
 - (void)dealloc {
     [_controlsTimer invalidate]; [_controlsTimer release];
-    [_streams release]; [_surface release]; [_message release]; [_spinner release];
+    [_streams release]; [_hlsBridge release]; [_surface release]; [_message release]; [_spinner release];
     [_elapsedLabel release]; [_durationLabel release]; [_qualityLabel release]; [_topBar release]; [_transportBar release];
     [_playItem release]; [_fitItem release]; [_backItem release]; [_forwardItem release];
     [_bottomControls release]; [_progress release]; [_volume release];
