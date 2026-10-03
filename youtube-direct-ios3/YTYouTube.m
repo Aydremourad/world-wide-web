@@ -784,7 +784,7 @@ static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSStr
         long long declaredLength=[[candidate objectForKey:@"videoLength"] longLongValue];
         NSString *fingerprint=declaredLength>0 ?
             [NSString stringWithFormat:@"%@:%lld",[candidate objectForKey:@"videoItag"],declaredLength] :
-            [[[candidate objectForKey:@"videoURL"] absoluteString] stringByReplacingOccurrencesOfString:@"&sig=" withString:@"&sig="];
+            [[candidate objectForKey:@"videoURL"] absoluteString];
         if([fingerprint length] && [nativeFingerprints containsObject:fingerprint]) {
             [nativeNotes addObject:[NSString stringWithFormat:@"%@: same combined rendition",[client objectForKey:@"label"]]];
             continue;
