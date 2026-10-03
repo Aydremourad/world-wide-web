@@ -44,6 +44,19 @@ static void YTHLSResolution(NSString *line,NSInteger *width,NSInteger *height) {
         *width=w; *height=h;
     }
 }
+static double YTHLSFrameRate(NSString *line) {
+    NSRange r=[line rangeOfString:@"FRAME-RATE=" options:NSCaseInsensitiveSearch];
+    if(r.location==NSNotFound) return 0;
+    NSScanner *scan=[NSScanner scannerWithString:[line substringFromIndex:r.location+r.length]];
+    double fps=0; return [scan scanDouble:&fps] ? fps : 0;
+}
+static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
+    if([data length]<188*3) return NO;
+    const uint8_t *p=[data bytes]; NSUInteger n=[data length];
+    for(NSUInteger offset=0;offset<188 && offset+188*2<n;offset++)
+        if(p[offset]==0x47 && p[offset+188]==0x47 && p[offset+376]==0x47) return YES;
+    return NO;
+}
 
 @implementation YTHLSBridge
 
@@ -68,8 +81,21 @@ static void YTHLSResolution(NSString *line,NSInteger *width,NSInteger *height) {
     [_lock unlock];
     return text;
 }
+- (NSInteger)selectedHeight { return _selectedHeight; }
+- (double)selectedFPS { return _selectedFPS; }
+- (NSString *)selectedDescription {
+    if(_selectedWidth<=0 || _selectedHeight<=0) return nil;
+    return [NSString stringWithFormat:@"Hardware HLS: %dx%d%@, H.264 Baseline + AAC, 3-segment prebuffer",
+        (int)_selectedWidth,(int)_selectedHeight,_selectedFPS>0 ?
+        [NSString stringWithFormat:@", %.1f fps",_selectedFPS] : @""];
+}
 - (NSData *)fetchURL:(NSURL *)url timeout:(NSTimeInterval)timeout {
     if(_stopped || !url) return nil;
+    if(_prepareDeadline>0) {
+        NSTimeInterval remaining=_prepareDeadline-[NSDate timeIntervalSinceReferenceDate];
+        if(remaining<=0) { [self setFailure:@"The hardware HLS preparation exceeded 55 seconds."]; return nil; }
+        if(timeout>remaining) timeout=remaining;
+    }
     NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url
         cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:timeout];
     [request setHTTPMethod:@"GET"];
@@ -96,19 +122,21 @@ static void YTHLSResolution(NSString *line,NSInteger *width,NSInteger *height) {
 - (NSURL *)mediaURLFromMaster:(NSString *)master {
     NSArray *lines=[master componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
     NSURL *best=nil; long long bestScore=LLONG_MAX;
+    NSInteger bestWidth=0,bestHeight=0; double bestFPS=0;
     for(NSUInteger i=0;i<[lines count];i++) {
         NSString *info=YTHLSTrim([lines objectAtIndex:i]);
         if(![info hasPrefix:@"#EXT-X-STREAM-INF:"]) continue;
         NSString *lower=[info lowercaseString];
-        // iPhone1,1 native playback needs a genuinely Baseline H.264
-        // rendition. A Main-profile 144p stream is still the wrong codec even
-        // if it is small, so do not waste time buffering it for Apple playback.
+        // The original iPhone hardware path is the point of this route.
+        // Reject Main-profile AVC and reject larger renditions even when they
+        // happen to be Baseline. YouTube's compatible target is HLS itag 91:
+        // 256x144 Baseline AVC with AAC in MPEG-TS.
         if([lower rangeOfString:@"avc1.42"].location==NSNotFound ||
            [lower rangeOfString:@"mp4a."].location==NSNotFound) continue;
         NSInteger width=0,height=0; YTHLSResolution(info,&width,&height);
-        long long pixels=(width>0 && height>0) ? (long long)width*height : 999999;
-        if(pixels>307200) continue;
-        long long score=pixels;
+        if(width<=0 || height<=0 || width>256 || height>144) continue;
+        double fps=YTHLSFrameRate(info);
+        long long score=(long long)width*height;
         NSString *address=nil;
         for(NSUInteger j=i+1;j<[lines count];j++) {
             NSString *candidate=YTHLSTrim([lines objectAtIndex:j]);
@@ -118,9 +146,10 @@ static void YTHLSResolution(NSString *line,NSInteger *width,NSInteger *height) {
         }
         if(address && score<bestScore) {
             best=YTHLSResolveURL(address,_masterURL);
-            bestScore=score;
+            bestScore=score; bestWidth=width; bestHeight=height; bestFPS=fps;
         }
     }
+    if(best) { _selectedWidth=bestWidth; _selectedHeight=bestHeight; _selectedFPS=bestFPS; }
     return best;
 }
 - (BOOL)parseMediaPlaylist:(NSString *)media baseURL:(NSURL *)base {
@@ -170,7 +199,14 @@ static void YTHLSResolution(NSString *line,NSInteger *width,NSInteger *height) {
 }
 - (BOOL)prebuffer {
     NSUInteger count=[_segments count]<3 ? [_segments count] : 3;
-    for(NSUInteger i=0;i<count;i++) if(![self dataForSegment:i]) return NO;
+    for(NSUInteger i=0;i<count;i++) {
+        NSData *data=[self dataForSegment:i];
+        if(!data) return NO;
+        if(i==0 && !YTHLSLooksLikeTransportStream(data)) {
+            [self setFailure:@"The 144p HLS rendition was not MPEG-TS, so iPhone OS 3 cannot use it."];
+            return NO;
+        }
+    }
     return YES;
 }
 - (void)prefetchThread:(id)unused {
@@ -211,6 +247,9 @@ static void YTHLSResolution(NSString *line,NSInteger *width,NSInteger *height) {
 }
 - (BOOL)start {
     if(!_masterURL) return NO;
+    // Preparation is allowed to wait for enough network headroom, but it must
+    // never trap the user in a multi-minute experiment.
+    _prepareDeadline=[NSDate timeIntervalSinceReferenceDate]+55.0;
     NSString *master=[self fetchText:_masterURL];
     if(!master) return NO;
     NSURL *mediaURL=[self mediaURLFromMaster:master];
@@ -232,6 +271,7 @@ static void YTHLSResolution(NSString *line,NSInteger *width,NSInteger *height) {
     if(![self prebuffer]) return NO;
     if(![self startListener]) { [self setFailure:@"Could not start the local HLS bridge."]; return NO; }
     [self buildLocalPlaylist];
+    _prepareDeadline=0;
     [NSThread detachNewThreadSelector:@selector(prefetchThread:) toTarget:self withObject:nil];
     return YES;
 }
