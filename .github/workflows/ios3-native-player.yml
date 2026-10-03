@@ -50,6 +50,9 @@ jobs:
           path: |
             ${{ runner.temp }}/cctools-armv6
             ${{ runner.temp }}/ios3
+      - name: Check iPhone OS 3 native player lifecycle
+        working-directory: youtube-direct-ios3
+        run: sh tests/run-native-lifecycle-test.sh
       - name: Check bounded streaming and cancellation
         working-directory: youtube-direct-ios3
         run: sh tests/run-range-test.sh

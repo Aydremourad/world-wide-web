@@ -2,6 +2,7 @@
 #import "YTYouTube.h"
 #import "YTSoftwarePlayer.h"
 #import "YTNativeProbe.h"
+#import "YTPlaybackLog.h"
 
 @implementation YTViewController
 
@@ -73,7 +74,7 @@
 - (void)showBuildInfo {
     NSString *version=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"YTBuildLabel"];
     if(![version length]) version=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
-    NSString *details=[NSString stringWithContentsOfFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"YouTube-playback.txt"] encoding:NSUTF8StringEncoding error:NULL];
+    NSString *details=YTReadPlaybackLog();
     NSString *message=[NSString stringWithFormat:@"Version %@\n\n%@",version,details ? details : @"No video opened yet."];
     UIAlertView *alert=[[[UIAlertView alloc] initWithTitle:@"YouTube" message:message delegate:nil cancelButtonTitle:@"OK" otherButtonTitles:nil] autorelease];
     [alert show];
@@ -203,7 +204,7 @@
         if(![build length]) build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
         NSString *diagnostic=[NSString stringWithFormat:@"Version %@\nPlayback: %@\nQuality: %@p\n",
             build,route,[streams objectForKey:@"height"]];
-        [diagnostic writeToFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"YouTube-playback.txt"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
+        YTWritePlaybackLog(diagnostic);
     }
     NSDictionary *payload = [NSDictionary dictionaryWithObjectsAndKeys:
         (streams ? (id)streams : (id)[NSNull null]), @"streams",
@@ -228,7 +229,9 @@
     if (tryNative) {
         _nativePlayer=[[YTNativePlayer alloc] initWithStreams:streams delegate:self];
         if([_nativePlayer play]) return;
+        NSString *failure=[[_nativePlayer errorText] copy];
         [_nativePlayer stop]; [_nativePlayer release]; _nativePlayer=nil;
+        [self showError:failure]; [failure release]; return;
     }
     [self playSoftwareStreams:streams];
 }
@@ -262,17 +265,13 @@
 }
 
 - (void)nativePlayer:(YTNativePlayer *)player finishedWithError:(BOOL)failed {
-    NSDictionary *streams=[[player streams] retain];
+    NSString *failure=[[player errorText] copy];
     [_nativePlayer release]; _nativePlayer=nil;
-    if(failed) {
-        NSString *videoID=[streams objectForKey:@"videoID"];
-        if([videoID length]) {
-            [self setBusy:YES text:@"Apple playback failed. Getting the 144p stream..."];
-            NSDictionary *payload=[NSDictionary dictionaryWithObjectsAndKeys:videoID,@"videoID",streams,@"original",nil];
-            [NSThread detachNewThreadSelector:@selector(nativeFallbackThread:) toTarget:self withObject:payload];
-        } else [self playSoftwareStreams:streams];
-    }
-    [streams release];
+    // Do not hide native startup failures behind another known-slow 360p
+    // software attempt. Use the existing error alert; the existing Info button
+    // retains the full preload/bridge report, even on legacy empty finishes.
+    if(failed) [self showError:failure];
+    [failure release];
 }
 - (void)dealloc {
     [UIApplication sharedApplication].networkActivityIndicatorVisible = NO;

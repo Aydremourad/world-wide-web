@@ -84,8 +84,10 @@ static BOOL YTSendText(int fd,NSString *text) {
         int one=1; setsockopt(fd,SOL_SOCKET,SO_NOSIGPIPE,&one,sizeof(one));
 #endif
         NSAutoreleasePool *clientPool=[[NSAutoreleasePool alloc] init];
-        YTMediaSource *source=[[[YTMediaSource alloc] initWithURL:_upstream length:_length userAgent:_userAgent] autorelease];
-        [source shareCacheWithSource:_sharedSource];
+        // Preserve the successful header-versus-query range selector discovered
+        // by bootstrap. Sharing only the cache reset every reader to header
+        // ranges, forcing another failed HTTPS exchange on query-only CDNs.
+        YTMediaSource *source=[[_sharedSource newReader] autorelease];
         NSNumber *key=[NSNumber numberWithInt:fd];
         [_lock lock]; BOOL full=[_clients count]>=4 || _stopped;
         if(!full) [_clients setObject:source forKey:key]; [_lock unlock];
