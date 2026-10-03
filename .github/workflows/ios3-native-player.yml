@@ -71,9 +71,11 @@ jobs:
           LEGACY_LD: ${{ runner.temp }}/cctools-armv6/bin/arm-apple-darwin11-ld
         run: sh ./ci-build.sh
       - name: Inspect current player availability
+        if: steps.app_build.outcome == 'success'
         working-directory: youtube-direct-ios3
         run: python3 tests/live-player-probe.py
       - name: Check combined Main-profile MP4 and native AAC reader
+        if: always() && steps.app_build.outcome == 'success'
         working-directory: youtube-direct-ios3
         run: sh tests/run-combined-test.sh
       - uses: actions/cache/save@v4

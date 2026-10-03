@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import "YTYouTube.h"
+#import "YTHLSBridge.h"
 #include <assert.h>
 
 static NSString *Player(NSString *formats) {
@@ -83,7 +84,7 @@ static int AndroidRequests, VisionRequests, HeadRequests, VRRequests, AudioReads
             NSScanner *scan = [NSScanner scannerWithString:[request valueForHTTPHeaderField:@"Range"]];
             assert([scan scanString:@"bytes=" intoString:NULL] && [scan scanLongLong:&start] &&
                    [scan scanString:@"-" intoString:NULL] && [scan scanLongLong:&end]);
-            assert(end - start + 1 <= 65536);
+            assert(start>=0 && end>=start && end<length && end - start + 1 <= 262144);
             status = 206;
             if([[url path] isEqualToString:@"/half"] && LighterBroken) status=403;
             if([[url path] isEqualToString:@"/audio"]) AudioReads++;
