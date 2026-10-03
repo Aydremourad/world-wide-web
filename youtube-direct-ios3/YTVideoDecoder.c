@@ -136,6 +136,30 @@ static int YTConvert420ToRGB565(YTVideoImage *image,const AVFrame *frame) {
     image->width=width; image->height=height;
     return 0;
 }
+static int YTScale420ToRGB565(YTVideoImage *image,const AVFrame *frame,int width,int height) {
+    // Fuse downsampling and color conversion. swscale's general pipeline
+    // consumed 36 ms per 360p picture on the device. Only visit output samples;
+    // a 2x2 luma box reduces aliasing when downsampling by at least two.
+    int columns[256];
+    for(int col=0;col<width;col++) columns[col]=col*frame->width/width;
+    int box=frame->width>=2*width && frame->height>=2*height;
+    if(YTSelectVideoBuffer(image,width*height*2)<0) return AVERROR(ENOMEM);
+    uint16_t *output=(uint16_t *)image->pixels;
+    for(int row=0;row<height;row++) {
+        int sourceRow=row*frame->height/height;
+        const uint8_t *y=frame->data[0]+sourceRow*frame->linesize[0];
+        const uint8_t *next=box ? y+frame->linesize[0] : y;
+        const uint8_t *u=frame->data[1]+(sourceRow/2)*frame->linesize[1];
+        const uint8_t *v=frame->data[2]+(sourceRow/2)*frame->linesize[2];
+        for(int col=0;col<width;col++) {
+            int sourceCol=columns[col];
+            int luma=box ? (y[sourceCol]+y[sourceCol+1]+next[sourceCol]+next[sourceCol+1]+2)>>2 : y[sourceCol];
+            int uu=u[sourceCol/2]-128,vv=v[sourceCol/2]-128;
+            output[row*width+col]=YTPackRGB565(298*(luma-16),409*vv,-100*uu-208*vv,516*uu);
+        }
+    }
+    image->width=width; image->height=height; return 0;
+}
 int YTConvertVideoFrame(YTVideoImage *image, const AVFrame *frame) {
     if (!YTAllowedVideoSize(frame->width, frame->height)) return AVERROR(EINVAL);
     if(frame->format==AV_PIX_FMT_YUV420P && frame->width<=256 && frame->height<=144)
@@ -145,6 +169,8 @@ int YTConvertVideoFrame(YTVideoImage *image, const AVFrame *frame) {
     if (frame->height * scale > 144) scale = 144.0 / frame->height;
     int width = (int)(frame->width * scale), height = (int)(frame->height * scale);
     if (width < 1 || height < 1) return AVERROR(EINVAL);
+    if(frame->format==AV_PIX_FMT_YUV420P)
+        return YTScale420ToRGB565(image,frame,width,height);
     int needed = width * height * 2;
     if (YTSelectVideoBuffer(image,needed) < 0) return AVERROR(ENOMEM);
     image->scaler = sws_getCachedContext(image->scaler, frame->width, frame->height,

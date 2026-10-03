@@ -24,6 +24,7 @@ static BOOL BlockAndroid;
 static BOOL CombinedOnly;
 static BOOL LighterAvailable, LighterBroken;
 static BOOL HLSOnly, HLSBaseline;
+static BOOL CPUCombined, EmbeddedSmall, LaterSmall, SmallBlocked;
 static int AndroidRequests, VisionRequests, HeadRequests, VRRequests, AudioReads;
 @interface YTFixtureProtocol : NSURLProtocol
 @end
@@ -53,6 +54,29 @@ static int AndroidRequests, VisionRequests, HeadRequests, VRRequests, AudioReads
             Player([NSString stringWithFormat:@"%@,%@",
                 @"{\"itag\":160,\"url\":\"https://media.example/video\"}",
                 @"{\"itag\":140,\"url\":\"https://media.example/audio\"}"]);
+        if(CPUCombined) {
+            NSString *combined=[Combined stringByReplacingOccurrencesOfString:@"/combined" withString:@"/cpu-combined"];
+            json=Player(combined);
+            if(LaterSmall && [clientName isEqualToString:@"101"])
+                json=Player([NSString stringWithFormat:@"%@,%@",Video,Audio]);
+            if(EmbeddedSmall && [clientName isEqualToString:@"56"]) json=Player(HalfRateVideo);
+        }
+        if([[url path] hasPrefix:@"/embed/"])
+            json=@"<html><script>ytcfg.set({\"VISITOR_DATA\":\"fixture-visitor\",\"encryptedHostFlags\":\"fixture-flags\"});</script></html>";
+        if([clientName isEqualToString:@"56"]) {
+            NSData *body=[request HTTPBody];
+            if(!body && [request HTTPBodyStream]) {
+                NSInputStream *stream=[request HTTPBodyStream]; [stream open];
+                NSMutableData *bytes=[NSMutableData data]; uint8_t chunk[512]; NSInteger n;
+                while((n=[stream read:chunk maxLength:sizeof(chunk)])>0) { [bytes appendBytes:chunk length:(NSUInteger)n]; assert([bytes length]<8192); }
+                [stream close]; body=bytes;
+            }
+            NSString *text=[[[NSString alloc] initWithData:body encoding:NSUTF8StringEncoding] autorelease];
+            assert([text length]>0);
+            assert([text rangeOfString:@"https://aydremourad.github.io/world-wide-web/"].location!=NSNotFound);
+            assert([text rangeOfString:@"fixture-flags"].location!=NSNotFound);
+            assert([[request valueForHTTPHeaderField:@"X-Goog-Visitor-Id"] isEqualToString:@"fixture-visitor"]);
+        }
         data = [json dataUsingEncoding:NSUTF8StringEncoding];
         [headers setObject:@"application/json" forKey:@"Content-Type"];
         [headers setObject:[NSString stringWithFormat:@"%lu", (unsigned long)[data length]] forKey:@"Content-Length"];
@@ -86,7 +110,7 @@ static int AndroidRequests, VisionRequests, HeadRequests, VRRequests, AudioReads
                    [scan scanString:@"-" intoString:NULL] && [scan scanLongLong:&end]);
             assert(start>=0 && end>=start && end<length && end - start + 1 <= 262144);
             status = 206;
-            if([[url path] isEqualToString:@"/half"] && LighterBroken) status=403;
+            if([[url path] isEqualToString:@"/half"] && (LighterBroken || SmallBlocked)) status=403;
             if([[url path] isEqualToString:@"/audio"]) AudioReads++;
             data = [NSMutableData dataWithLength:(NSUInteger)(end - start + 1)];
             [headers setObject:[NSString stringWithFormat:@"%lld", end - start + 1] forKey:@"Content-Length"];
@@ -183,6 +207,23 @@ int main(void) {
     assert([result objectForKey:@"videoSource"] != [result objectForKey:@"audioSource"]);
     result=[YTYouTube lowResolutionStreamsForID:@"jNQXAC9IVRw"];
     assert(result && ![[result objectForKey:@"combined"] boolValue] && [[result objectForKey:@"videoLength"] longLongValue]==70000);
+    CPUCombined=LaterSmall=YES;
+    result=[YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
+    assert(result && [[result objectForKey:@"height"] intValue]==144);
+    assert([[result objectForKey:@"clientLabel"] isEqualToString:@"VisionOS"]);
+    assert([[[result objectForKey:@"videoURL"] path] isEqualToString:@"/video"]);
+    LaterSmall=NO; EmbeddedSmall=YES;
+    result=[YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
+    assert(result && [[result objectForKey:@"height"] intValue]==144 && [[result objectForKey:@"fps"] intValue]==15);
+    assert(![[result objectForKey:@"combined"] boolValue] && [result objectForKey:@"audioSource"]);
+    assert([[[result objectForKey:@"videoURL"] path] isEqualToString:@"/half"]);
+    assert([[[result objectForKey:@"audioURL"] path] isEqualToString:@"/cpu-combined"]);
+    SmallBlocked=YES;
+    result=[YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
+    assert(result && [[result objectForKey:@"height"] intValue]==360 && [[result objectForKey:@"combined"] boolValue]);
+    assert([[result objectForKey:@"nativeSearch"] rangeOfString:@"itag 597 unreadable"].location!=NSNotFound);
+    assert([[result objectForKey:@"nativeSearch"] rangeOfString:@"no HLS manifest"].location!=NSNotFound);
+    CPUCombined=EmbeddedSmall=SmallBlocked=NO;
     HLSOnly=YES; AndroidRequests=VisionRequests=HeadRequests=0;
     result=[YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
     assert(result && [[result objectForKey:@"softwareHLS"] boolValue] && [[result objectForKey:@"hlsAudio"] boolValue]);

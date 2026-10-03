@@ -174,6 +174,17 @@ static NSString *YTQueryEscape(NSString *value) {
     return escaped;
 }
 
+static NSString *YTJSONQuote(NSString *value) {
+    NSMutableString *out=[NSMutableString stringWithString:@"\""];
+    for(NSUInteger i=0;i<[value length];i++) {
+        unichar c=[value characterAtIndex:i];
+        if(c=='"' || c=='\\') [out appendFormat:@"\\%C",c];
+        else if(c<32) [out appendFormat:@"\\u%04x",(unsigned)c];
+        else [out appendFormat:@"%C",c];
+    }
+    [out appendString:@"\""]; return out;
+}
+
 static NSData *YTGETWithUserAgent(NSString *urlString, NSString *userAgent, NSTimeInterval timeout, NSString **errorText) {
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlString]
                                                        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
@@ -229,12 +240,14 @@ static NSArray *YTPlayerClients(void) {
 static NSString *YTPlayerResponse(NSString *videoID, NSDictionary *client, NSString **errorText) {
     NSString *contextExtra=[client objectForKey:@"contextExtra"];
     if(!contextExtra) contextExtra=@"";
+    NSString *requestExtra=[client objectForKey:@"requestExtra"];
+    if(!requestExtra) requestExtra=@"";
     NSString *body = [NSString stringWithFormat:
         @"{\"context\":{\"client\":{\"clientName\":\"%@\",\"clientVersion\":\"%@\","
         @"\"userAgent\":\"%@\",\"hl\":\"en\",\"gl\":\"US\"%@}%@},"
-        @"\"videoId\":\"%@\",\"contentCheckOk\":true,\"racyCheckOk\":true}",
+        @"\"videoId\":\"%@\",\"contentCheckOk\":true,\"racyCheckOk\":true%@}",
         [client objectForKey:@"name"], [client objectForKey:@"version"],
-        [client objectForKey:@"ua"], [client objectForKey:@"extra"], contextExtra, videoID];
+        [client objectForKey:@"ua"], [client objectForKey:@"extra"], contextExtra, videoID, requestExtra];
     NSNumber *timeout=[client objectForKey:@"timeout"];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:
         [NSURL URLWithString:@"https://www.youtube.com/youtubei/v1/player?prettyPrint=false"]
@@ -246,6 +259,11 @@ static NSString *YTPlayerResponse(NSString *videoID, NSDictionary *client, NSStr
     [request setValue:[client objectForKey:@"version"] forHTTPHeaderField:@"X-YouTube-Client-Version"];
     [request setValue:[client objectForKey:@"ua"] forHTTPHeaderField:@"User-Agent"];
     [request setValue:@"en-US,en;q=0.9" forHTTPHeaderField:@"Accept-Language"];
+    [request setValue:@"https://www.youtube.com" forHTTPHeaderField:@"Origin"];
+    if([client objectForKey:@"visitorData"])
+        [request setValue:[client objectForKey:@"visitorData"] forHTTPHeaderField:@"X-Goog-Visitor-Id"];
+    if([client objectForKey:@"referer"])
+        [request setValue:[client objectForKey:@"referer"] forHTTPHeaderField:@"Referer"];
     NSURLResponse *response = nil;
     NSError *failure = nil;
     NSData *data = [NSURLConnection sendSynchronousRequest:request returningResponse:&response error:&failure];
@@ -271,7 +289,7 @@ static NSDictionary *YTEmbeddedHLSClient(void) {
     return [NSDictionary dictionaryWithObjectsAndKeys:
         @"Web embedded HLS",@"label",@"WEB_EMBEDDED_PLAYER",@"name",@"2.20260708.00.00",@"version",@"56",@"number",
         @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)",@"ua",
-        @"",@"extra",@",\"thirdParty\":{\"embedUrl\":\"https://www.youtube.com/\"}",@"contextExtra",
+        @"",@"extra",@",\"thirdParty\":{\"embedUrl\":\"https://aydremourad.github.io/world-wide-web/\"}",@"contextExtra",
         [NSNumber numberWithDouble:4.0],@"timeout",nil];
 }
 
@@ -282,12 +300,33 @@ static NSDictionary *YTSafariHLSClient(void) {
         @"",@"extra",[NSNumber numberWithDouble:4.0],@"timeout",nil];
 }
 
-static NSDictionary *YTHLSStreamsForID(NSString *videoID) {
-    NSArray *clients=[NSArray arrayWithObjects:YTEmbeddedHLSClient(),YTSafariHLSClient(),nil];
+static NSDictionary *YTHLSStreamsForID(NSString *videoID,NSMutableArray *responses,NSMutableArray *notes) {
+    NSMutableDictionary *embedded=[[YTEmbeddedHLSClient() mutableCopy] autorelease];
+    NSString *embedPage=[NSString stringWithFormat:@"https://www.youtube.com/embed/%@?hl=en",videoID];
+    NSData *pageData=YTGETWithUserAgent(embedPage,[embedded objectForKey:@"ua"],3.0,NULL);
+    NSString *page=pageData ? [[[NSString alloc] initWithData:pageData encoding:NSUTF8StringEncoding] autorelease] : nil;
+    NSString *visitor=YTJSONStringForKey(page,@"VISITOR_DATA",0);
+    if(![visitor length]) visitor=YTJSONStringForKey(page,@"visitorData",0);
+    if([visitor length]) {
+        [embedded setObject:visitor forKey:@"visitorData"];
+        [embedded setObject:[NSString stringWithFormat:@",\"visitorData\":%@",YTJSONQuote(visitor)] forKey:@"extra"];
+    }
+    NSString *flags=YTJSONStringForKey(page,@"encryptedHostFlags",0);
+    if([flags length]) [embedded setObject:[NSString stringWithFormat:
+        @",\"playbackContext\":{\"contentPlaybackContext\":{\"html5Preference\":\"HTML5_PREF_WANTS\",\"encryptedHostFlags\":%@}}",YTJSONQuote(flags)] forKey:@"requestExtra"];
+    [embedded setObject:embedPage forKey:@"referer"];
+    NSArray *clients=[NSArray arrayWithObjects:embedded,YTSafariHLSClient(),nil];
     for(NSDictionary *client in clients) {
-        NSString *player=YTPlayerResponse(videoID,client,NULL);
+        NSString *failure=nil;
+        NSString *player=YTPlayerResponse(videoID,client,&failure);
+        if(player) [responses addObject:[NSDictionary dictionaryWithObjectsAndKeys:player,@"player",client,@"client",nil]];
         NSString *hls=YTJSONStringForKey(player,@"hlsManifestUrl",0);
-        if(![hls hasPrefix:@"https://"]) continue;
+        if(![hls hasPrefix:@"https://"]) {
+            NSString *status=YTJSONStringForKey(player,@"status",0);
+            [notes addObject:[NSString stringWithFormat:@"%@: %@",[client objectForKey:@"label"],
+                failure ? failure : status && ![status isEqualToString:@"OK"] ? status : @"no HLS manifest"]];
+            continue;
+        }
 
         // Do not stop at the first manifest URL. A client can expose HLS but
         // omit the old Baseline rendition or return an unusable playlist.
@@ -295,7 +334,11 @@ static NSDictionary *YTHLSStreamsForID(NSString *videoID) {
         // 144p Baseline MPEG-TS and has three complete segments buffered.
         YTHLSBridge *bridge=[[[YTHLSBridge alloc] initWithURL:[NSURL URLWithString:hls]
             userAgent:[client objectForKey:@"ua"]] autorelease];
-        if(![bridge start]) continue;
+        if(![bridge start]) {
+            [notes addObject:[NSString stringWithFormat:@"%@: %@",[client objectForKey:@"label"],
+                [bridge errorText] ? [bridge errorText] : @"HLS preflight failed"]];
+            [bridge stop]; continue;
+        }
 
         NSInteger height=[bridge selectedHeight];
         double fps=[bridge selectedFPS];
@@ -611,6 +654,7 @@ static NSMutableDictionary *YTAdaptiveCandidateFromPlayer(NSString *player, NSSt
 }
 
 static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSString **failure) {
+    if([streams objectForKey:@"videoSource"] && [streams objectForKey:@"audioSource"]) return streams;
     long long videoLength=[[streams objectForKey:@"videoLength"] longLongValue];
     long long audioLength=[[streams objectForKey:@"audioLength"] longLongValue];
     NSString *ua=[streams objectForKey:@"userAgent"];
@@ -649,6 +693,73 @@ static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSStr
     [streams setObject:video forKey:@"videoSource"];
     [streams setObject:audio forKey:@"audioSource"];
     return streams;
+}
+
+static NSInteger YTSmallVideoOrder(id left,id right,void *context) {
+    (void)context;
+    return [[left objectForKey:@"rank"] compare:[right objectForKey:@"rank"]];
+}
+static NSInteger YTSoftwareFallbackOrder(id left,id right,void *context) {
+    (void)context;
+    NSInteger lh=[[left objectForKey:@"height"] integerValue],rh=[[right objectForKey:@"height"] integerValue];
+    if(lh<=0) lh=[[left objectForKey:@"videoItag"] integerValue]==18 ? 360 : 144;
+    if(rh<=0) rh=[[right objectForKey:@"videoItag"] integerValue]==18 ? 360 : 144;
+    NSInteger lr=(lh>144 ? 10000 : 0)+lh*10+[[left objectForKey:@"fps"] integerValue];
+    NSInteger rr=(rh>144 ? 10000 : 0)+rh*10+[[right objectForKey:@"fps"] integerValue];
+    return lr<rr ? NSOrderedAscending : lr>rr ? NSOrderedDescending : NSOrderedSame;
+}
+static NSMutableDictionary *YTSmallVideoWithExistingAudio(NSDictionary *original,NSArray *responses,NSMutableArray *notes) {
+    if(![original objectForKey:@"audioSource"]) return nil;
+    NSMutableArray *candidates=[NSMutableArray array];
+    for(NSDictionary *response in responses) {
+        NSString *streaming=YTObjectForKey([response objectForKey:@"player"],@"streamingData");
+        for(NSString *format in YTJSONObjectStringsInArray(streaming,@"adaptiveFormats")) {
+            NSInteger rank=YTFormatRank(format,YES);
+            if(rank<0 || !YTFormatURL(format)) continue;
+            NSInteger width=YTJSONIntForKey(format,@"width"),height=YTJSONIntForKey(format,@"height");
+            if(width>256 || height>144) continue;
+            [candidates addObject:[NSDictionary dictionaryWithObjectsAndKeys:format,@"format",
+                [response objectForKey:@"client"],@"client",[NSNumber numberWithInteger:rank],@"rank",nil]];
+        }
+    }
+    NSMutableSet *attempted=[NSMutableSet set]; unsigned attempts=0;
+    for(NSDictionary *candidate in [candidates sortedArrayUsingFunction:YTSmallVideoOrder context:NULL]) {
+        NSString *format=[candidate objectForKey:@"format"];
+        NSDictionary *client=[candidate objectForKey:@"client"];
+        NSURL *url=YTFormatURL(format);
+        if([attempted containsObject:url]) continue;
+        [attempted addObject:url];
+        if(++attempts>3) break;
+        long long length=YTFormatLength(format);
+        if(length<=0) length=YTRemoteLength(url,[client objectForKey:@"ua"]);
+        if(length<=0) continue;
+        YTMediaSource *source=[[[YTMediaSource alloc] initWithURL:url length:length userAgent:[client objectForKey:@"ua"]] autorelease];
+        [source enableStreamingReadAhead];
+        [source setRequestTimeout:3];
+        uint8_t header[12];
+        if([source readAtOffset:0 into:header count:sizeof(header)]!=sizeof(header)) {
+            [notes addObject:[NSString stringWithFormat:@"%@: 144p itag %ld unreadable",[client objectForKey:@"label"],(long)YTJSONIntForKey(format,@"itag")]];
+            continue;
+        }
+        [source setRequestTimeout:12];
+        NSMutableDictionary *result=[[original mutableCopy] autorelease];
+        [result setObject:url forKey:@"videoURL"]; [result setObject:source forKey:@"videoSource"];
+        [result setObject:[NSNumber numberWithLongLong:[source length]] forKey:@"videoLength"];
+        [result setObject:[NSNumber numberWithBool:NO] forKey:@"combined"];
+        [result setObject:[NSNumber numberWithBool:NO] forKey:@"nativeCandidate"];
+        [result removeObjectForKey:@"nativeInfo"];
+        NSInteger itag=YTJSONIntForKey(format,@"itag"),fps=YTJSONIntForKey(format,@"fps");
+        if(fps<=0) fps=itag==597 ? 15 : 30;
+        NSInteger height=YTJSONIntForKey(format,@"height");
+        [result setObject:[NSNumber numberWithInteger:height>0 ? height : 144] forKey:@"height"];
+        [result setObject:[NSNumber numberWithInteger:fps] forKey:@"fps"];
+        [result setObject:[NSNumber numberWithInteger:itag] forKey:@"videoItag"];
+        [result setObject:[NSString stringWithFormat:@"%@ video + %@ AAC",[client objectForKey:@"label"],
+            [original objectForKey:@"clientLabel"] ? [original objectForKey:@"clientLabel"] : @"existing"] forKey:@"clientLabel"];
+        [notes addObject:@"Readable small video paired with the existing native AAC source"];
+        return result;
+    }
+    return nil;
 }
 
 static NSDictionary *YTLowFPSWebClient(void) {
@@ -814,7 +925,8 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
     // and let iPhone OS 3's hardware H.264 path do the decoding. Do all HLS
     // validation and initial buffering here on the resolver thread; if any
     // requirement fails, the known software path below is left untouched.
-    NSDictionary *hlsCandidate=YTHLSStreamsForID(videoID);
+    NSMutableArray *responses=[NSMutableArray array],*streamNotes=[NSMutableArray array];
+    NSDictionary *hlsCandidate=YTHLSStreamsForID(videoID,responses,streamNotes);
     if(hlsCandidate) {
         if([[[hlsCandidate objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue])
             return hlsCandidate;
@@ -846,6 +958,7 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
             [errors addObject:[NSString stringWithFormat:@"%@: %@",[client objectForKey:@"label"],failure ? failure : @"No player response."]];
             continue;
         }
+        [responses addObject:[NSDictionary dictionaryWithObjectsAndKeys:player,@"player",client,@"client",nil]];
 
         // Always preserve a real software fallback; a format experiment
         // must never be allowed to prevent the player from opening.
@@ -870,6 +983,8 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
         }
         NSDictionary *info=YTNativeStreamInfo(candidate);
         if(info) [candidate setObject:info forKey:@"nativeInfo"];
+        if(info && [[info objectForKey:@"height"] integerValue]>0)
+            [candidate setObject:[info objectForKey:@"height"] forKey:@"height"];
         [nativeNotes addObject:[NSString stringWithFormat:@"%@: itag %@ p%@ L%@ %@x%@ %@",
             [client objectForKey:@"label"],
             [candidate objectForKey:@"videoItag"] ? [candidate objectForKey:@"videoItag"] : @"?",
@@ -883,15 +998,27 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
             [[NSUserDefaults standardUserDefaults] setObject:[client objectForKey:@"label"] forKey:@"YTWorkingClient"];
             return candidate;
         }
+        // A readable combined movie is also the reliable AAC source for a
+        // smaller video-only response from another client.
+        if(normal && [[normal objectForKey:@"videoURL"] isEqual:[candidate objectForKey:@"videoURL"]])
+            [fallbacks replaceObjectAtIndex:[fallbacks indexOfObjectIdenticalTo:normal] withObject:candidate];
+        else [fallbacks addObject:candidate];
     }
 
-    // No native movie: return the first direct stream that actually opens.
-    // This restores the 1.1.13 behavior instead of failing before a player is
-    // presented.
-    for(NSMutableDictionary *fallback in fallbacks) {
+    // A working Android 360p response must not outrank a readable 144p
+    // response from a later client merely because it arrived first.
+    for(NSMutableDictionary *fallback in [fallbacks sortedArrayUsingFunction:YTSoftwareFallbackOrder context:NULL]) {
         NSString *failure=nil;
         if(YTPrepareStreams(fallback,&failure)) {
-            if([nativeNotes count]) [fallback setObject:[nativeNotes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
+            BOOL large=[[fallback objectForKey:@"height"] integerValue]>144 ||
+                ([[fallback objectForKey:@"combined"] boolValue] && [[fallback objectForKey:@"videoItag"] integerValue]==18);
+            if(large) {
+                NSMutableDictionary *small=YTSmallVideoWithExistingAudio(fallback,responses,streamNotes);
+                if(small) fallback=small;
+                else [streamNotes addObject:@"No readable small video; using the 360p CPU fallback"];
+            }
+            NSMutableArray *allNotes=[NSMutableArray arrayWithArray:streamNotes]; [allNotes addObjectsFromArray:nativeNotes];
+            if([allNotes count]) [fallback setObject:[allNotes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
             [[NSUserDefaults standardUserDefaults] setObject:[fallback objectForKey:@"clientLabel"] forKey:@"YTWorkingClient"];
             return fallback;
         }

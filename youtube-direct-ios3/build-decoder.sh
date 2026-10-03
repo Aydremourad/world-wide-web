@@ -10,7 +10,7 @@ DEPS="$ROOT/.deps"
 SRC="$DEPS/FFmpeg-2.8.22"
 GASDIR="$DEPS/gas-preprocessor"
 REVFILE="$SRC/.ytdirect-decoder-rev"
-DECODER_REV="8-arm11-hls-mpegts"
+DECODER_REV="9-arm11-window-hls"
 
 test -d "$SDKROOT" || { echo "Missing SDK: $SDKROOT"; exit 1; }
 test -x "$LEGACY_LD" || { echo "Missing ARMv6 linker: $LEGACY_LD"; exit 1; }

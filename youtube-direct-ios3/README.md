@@ -1,6 +1,20 @@
 # YouTube for iPhone OS 3
 
-Version 1.2.0 keeps the prepared 144p HLS video and its embedded AAC together.
+Version 1.2.1 ranks software fallbacks by size before client order. A readable
+360p response from Android can no longer outrank a later readable 144p response.
+Video-only 144p responses can reuse AAC from the working combined movie, so
+an unavailable separate audio URL does not throw away readable small video.
+Embedded requests load their playback context, visitor data and encrypted host
+flags from the embed page and use the project's non-YouTube embedding URL.
+Diagnostics retain stream-selection failures after playback, including a real
+360p fallback, instead of overwriting that information with timing alone.
+
+The 360p fallback fuses downsampling with RGB565 conversion and applies a small
+luma box filter. It avoids the general scaler but still pays the H.264 cost at
+360p. ARM11 motion filtering reuses overlapping samples without changing
+decoded pixels. Device FPS is unverified; 360p CPU decoding can remain too slow.
+
+The player keeps the prepared 144p HLS video and its embedded AAC together.
 An unavailable adaptive URL can no longer force this route back to 360p CPU
 decoding. AAC access units go through the existing native AudioQueue pump,
 including its PCM fallback, buffering recovery, pause and seek handling.
@@ -46,11 +60,11 @@ sync still require a physical iPhone 2G test.
 ## Installation
 
 The [Actions build](https://github.com/Aydremourad/world-wide-web/actions/workflows/ios3-native-player.yml)
-produces `com.aydre.youtubedirect_1.2.0_iphoneos-arm.deb` in the
+produces `com.aydre.youtubedirect_1.2.1_iphoneos-arm.deb` in the
 `YouTubeDirect-iOS3-armv6` artifact. Install with iFile, or from a phone terminal:
 
 ```sh
-dpkg -i com.aydre.youtubedirect_1.2.0_iphoneos-arm.deb
+dpkg -i com.aydre.youtubedirect_1.2.1_iphoneos-arm.deb
 killall SpringBoard
 ```
 

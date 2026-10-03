@@ -63,12 +63,14 @@ static av_always_inline void yt_store_pair(uint8_t *dst,uint32_t value,int avera
 static av_always_inline void yt_horizontal(uint8_t *out,const uint8_t *src,int stride,int size,
                                             int outStride,int quarter,int average) {
     for(int y=0;y<size;y++) {
+        const uint8_t *p=src;
+        uint32_t a=yt_pair(p-2),b=yt_pair(p-1),c=yt_pair(p);
+        uint32_t d=yt_pair(p+1),e=yt_pair(p+2),f=yt_pair(p+3);
         for(int x=0;x<size;x+=2) {
-            const uint8_t *p=src+x;
-            uint32_t value=yt_filter_pixels(yt_filter(yt_pair(p-2),yt_pair(p-1),yt_pair(p),
-                yt_pair(p+1),yt_pair(p+2),yt_pair(p+3)));
-            if(quarter>=0) value=yt_average(value,yt_pair(p+quarter));
+            uint32_t value=yt_filter_pixels(yt_filter(a,b,c,d,e,f));
+            if(quarter>=0) value=yt_average(value,quarter ? d : c);
             yt_store_pair(out+x,value,average);
+            if(x+2<size) { p+=2; a=c; b=d; c=e; d=f; e=yt_pair(p+2); f=yt_pair(p+3); }
         }
         src+=stride; out+=outStride;
     }
@@ -93,11 +95,13 @@ static av_always_inline void yt_diagonal(uint8_t *out,const uint8_t *src,int str
     int16_t tmp[21*16];
     for(int y=0;y<size+5;y++) {
         const uint8_t *row=src+(y-2)*stride;
+        const uint8_t *p=row;
+        uint32_t a=yt_pair(p-2),b=yt_pair(p-1),c=yt_pair(p);
+        uint32_t d=yt_pair(p+1),e=yt_pair(p+2),f=yt_pair(p+3);
         for(int x=0;x<size;x+=2) {
-            const uint8_t *p=row+x;
-            uint32_t v=yt_filter(yt_pair(p-2),yt_pair(p-1),yt_pair(p),
-                yt_pair(p+1),yt_pair(p+2),yt_pair(p+3));
+            uint32_t v=yt_filter(a,b,c,d,e,f);
             tmp[y*size+x]=(int16_t)v; tmp[y*size+x+1]=(int16_t)(v>>16);
+            if(x+2<size) { p+=2; a=c; b=d; c=e; d=f; e=yt_pair(p+2); f=yt_pair(p+3); }
         }
     }
     for(int x=0;x<size;x++) {

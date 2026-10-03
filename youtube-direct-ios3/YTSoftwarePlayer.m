@@ -516,11 +516,14 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     [_seekCondition lock];
     double frames=_decodedFrames ? _decodedFrames : 1;
     double duration=_performanceSeconds;
-    NSString *details=[NSString stringWithFormat:@"Quality: %dp\nSource: %.1f fps\nDecoded: %.1f fps\nDisplayed: %.1f fps\n\nTiming per decoded frame\nDecode: %.1f ms\nConversion: %.1f ms\nRead: %.1f ms\nDisplay: %.1f ms\n",
-        _qualityHeight,_sourceFPS,duration>0 ? _decodedFrames/duration : 0,
+    NSString *build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
+    NSString *details=[NSString stringWithFormat:@"Version %@\nQuality: %dp\nSource: %.1f fps\nDecoded: %.1f fps\nDisplayed: %.1f fps\n\nTiming per decoded frame\nDecode: %.1f ms\nConversion: %.1f ms\nRead: %.1f ms\nDisplay: %.1f ms\n\nPlayback: %@\nStream selection: %@\n",
+        build ? build : @"unknown",_qualityHeight,_sourceFPS,duration>0 ? _decodedFrames/duration : 0,
         duration>0 ? _presentedFrames/duration : 0,1000*_decodeSeconds/frames,
         1000*_convertSeconds/frames,1000*_readSeconds/frames,
-        _presentedFrames ? 1000*_renderSeconds/_presentedFrames : 0];
+        _presentedFrames ? 1000*_renderSeconds/_presentedFrames : 0,
+        [_streams objectForKey:@"clientLabel"] ? [_streams objectForKey:@"clientLabel"] : @"direct",
+        [_streams objectForKey:@"nativeSearch"] ? [_streams objectForKey:@"nativeSearch"] : @"direct stream"];
     [_seekCondition unlock];
     [details writeToFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"YouTube-playback.txt"]
         atomically:YES encoding:NSUTF8StringEncoding error:NULL];

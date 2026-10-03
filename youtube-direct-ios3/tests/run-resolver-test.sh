@@ -10,9 +10,10 @@ NSString *YTDownloadSABRVideo(NSDictionary *options, NSString **errorText) {
 }
 NSDictionary *YTNativeStreamInfo(NSDictionary *streams) {
     if(![[streams objectForKey:@"combined"] boolValue]) return nil;
+    BOOL software=[[[streams objectForKey:@"videoURL"] path] isEqualToString:@"/cpu-combined"];
     return [NSDictionary dictionaryWithObjectsAndKeys:
-        [NSNumber numberWithBool:YES],@"eligible",
-        [NSNumber numberWithInt:66],@"profile",
+        [NSNumber numberWithBool:!software],@"eligible",
+        [NSNumber numberWithInt:software ? 77 : 66],@"profile",
         [NSNumber numberWithInt:30],@"level",
         [NSNumber numberWithInt:640],@"width",
         [NSNumber numberWithInt:360],@"height",nil];
