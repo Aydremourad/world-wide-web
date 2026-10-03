@@ -1,7 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <AudioToolbox/AudioToolbox.h>
 #include "YTFrameQueue.h"
-@class YTMediaSource, YTVideoSurface;
+@class YTMediaSource, YTVideoSurface, YTHLSBridge;
 @class CADisplayLink;
 @interface YTSoftwarePlayer : UIViewController {
     NSDictionary *_streams;
@@ -14,7 +14,9 @@
     UISlider *_progress;
     UISlider *_volume;
     NSTimer *_controlsTimer;
-    YTMediaSource *_videoSource, *_audioSource, *_videoCache, *_audioCache;
+    id _videoSource;
+    YTMediaSource *_audioSource, *_videoCache, *_audioCache;
+    YTHLSBridge *_hlsBridge;
     NSCondition *_seekCondition;
     YTFrameQueue _frameQueue;
     CADisplayLink *_displayLink;
