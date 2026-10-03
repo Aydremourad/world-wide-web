@@ -1,6 +1,5 @@
 #import "YTNativePlayer.h"
 #import "YTLoopbackServer.h"
-#import "YTHLSBridge.h"
 #import <MediaPlayer/MediaPlayer.h>
 @implementation YTNativePlayer
 - (id)initWithStreams:(NSDictionary *)streams delegate:(id<YTNativePlayerDelegate>)delegate {
@@ -9,24 +8,16 @@
 }
 - (NSDictionary *)streams { return _streams; }
 - (BOOL)play {
-    NSURL *contentURL=nil;
-    if([[_streams objectForKey:@"nativeHLS"] boolValue]) {
-        _hlsBridge=[[YTHLSBridge alloc] initWithURL:[_streams objectForKey:@"hlsURL"]
-            userAgent:[_streams objectForKey:@"userAgent"]];
-        if(![_hlsBridge start]) return NO;
-        contentURL=[_hlsBridge movieURL];
-    } else {
-        NSDictionary *info=[_streams objectForKey:@"nativeInfo"];
-        _server=[[YTLoopbackServer alloc] initWithURL:[_streams objectForKey:@"videoURL"]
-            length:[[info objectForKey:@"length"] longLongValue] userAgent:[_streams objectForKey:@"userAgent"]];
-        if(![_server start]) return NO;
-        contentURL=[_server movieURL];
-    }
-    _movie=[[MPMoviePlayerController alloc] initWithContentURL:contentURL];
-    if(!_movie) { [_server stop]; [_hlsBridge stop]; return NO; }
+    NSDictionary *info=[_streams objectForKey:@"nativeInfo"];
+    _server=[[YTLoopbackServer alloc] initWithURL:[_streams objectForKey:@"videoURL"]
+        length:[[info objectForKey:@"length"] longLongValue] userAgent:[_streams objectForKey:@"userAgent"]];
+    if(![_server start]) return NO;
+    _movie=[[MPMoviePlayerController alloc] initWithContentURL:[_server movieURL]];
+    if(!_movie) { [_server stop]; return NO; }
     _movie.scalingMode=MPMovieScalingModeAspectFit;
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(movieFinished:) name:MPMoviePlayerPlaybackDidFinishNotification object:nil];
-    [_movie play]; // iPhone OS 3 presents Apple's own full-screen controller.
+    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(movieFinished:)
+        name:MPMoviePlayerPlaybackDidFinishNotification object:nil];
+    [_movie play];
     return YES;
 }
 - (void)movieFinished:(NSNotification *)notification {
@@ -34,18 +25,18 @@
     [self retain];
     NSDictionary *info=[notification userInfo];
     NSNumber *reason=[info objectForKey:@"MPMoviePlayerPlaybackDidFinishReasonUserInfoKey"];
-    BOOL failed=[[_server errorText] length]>0 || [[_hlsBridge errorText] length]>0 ||
-        (reason && [reason intValue]==2) || [[info objectForKey:@"error"] isKindOfClass:[NSError class]];
+    BOOL failed=[[_server errorText] length]>0 || (reason && [reason intValue]==2) ||
+        [[info objectForKey:@"error"] isKindOfClass:[NSError class]];
     [self stop]; [_delegate nativePlayer:self finishedWithError:failed];
     [self release];
 }
 - (void)stop {
     _finished=YES; [[NSNotificationCenter defaultCenter] removeObserver:self];
-    [_movie stop]; [_server stop]; [_hlsBridge stop];
+    [_movie stop]; [_server stop];
 }
 - (void)dealloc {
     [self stop];
-    [_movie release]; [_server release]; [_hlsBridge release]; [_streams release];
+    [_movie release]; [_server release]; [_streams release];
     [super dealloc];
 }
 @end
