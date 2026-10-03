@@ -137,7 +137,7 @@ int main(void) {
     assert(result && HeadRequests == 2 && AndroidRequests == 1);
     assert([[result objectForKey:@"videoLength"] longLongValue] == 70000);
     assert([result objectForKey:@"videoSource"] && [result objectForKey:@"audioSource"]);
-    assert(VRRequests==1 && [[[result objectForKey:@"videoURL"] path] isEqualToString:@"/video"]);
+    assert(VRRequests==0 && [[[result objectForKey:@"videoURL"] path] isEqualToString:@"/video"]);
     LighterAvailable=YES; VRRequests=AudioReads=0;
     result=[YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
     assert(result && VRRequests==0);
