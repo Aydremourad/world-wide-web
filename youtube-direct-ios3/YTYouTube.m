@@ -280,14 +280,14 @@ static NSDictionary *YTSafariHLSClient(void) {
     return [NSDictionary dictionaryWithObjectsAndKeys:
         @"Web Safari HLS",@"label",@"WEB",@"name",@"2.20260708.00.00",@"version",@"1",@"number",
         @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)",@"ua",
-        @"",@"extra",[NSNumber numberWithDouble:4.0],@"timeout",nil];
+        @"",@"extra",[NSNumber numberWithDouble:3.0],@"timeout",nil];
 }
 
 static NSDictionary *YTHLSStreamsForID(NSString *videoID) {
     NSDictionary *client=YTSafariHLSClient();
     NSString *ua=[client objectForKey:@"ua"];
     NSString *watchURL=[NSString stringWithFormat:@"https://www.youtube.com/watch?v=%@&hl=en&gl=US",videoID];
-    NSData *watchData=YTGETWithUserAgent(watchURL,ua,4.0,NULL);
+    NSData *watchData=YTGETWithUserAgent(watchURL,ua,3.0,NULL);
     NSString *watch=watchData ? [[[NSString alloc] initWithData:watchData encoding:NSUTF8StringEncoding] autorelease] : nil;
     // A normal Safari page establishes the short-lived logged-out session
     // YouTube currently expects before exposing its Apple HLS ladder.
