@@ -255,8 +255,10 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
     NSURL *mediaURL=[self mediaURLFromMaster:master];
     NSString *media=nil;
     if(mediaURL) media=[self fetchText:mediaURL];
-    else if([master rangeOfString:@"#EXTINF:"].location!=NSNotFound) { mediaURL=_masterURL; media=master; }
-    if(!mediaURL || !media) { [self setFailure:@"YouTube did not expose a usable HLS media playlist."]; return NO; }
+    // A direct media playlist does not declare CODECS/RESOLUTION, so it cannot
+    // prove that the bytes are Baseline AVC before we hand them to hardware.
+    // Reject it instead of repeating the old Main-profile native failure.
+    if(!mediaURL || !media) { [self setFailure:@"YouTube did not expose a verified 144p Baseline HLS rendition."]; return NO; }
     if(![self parseMediaPlaylist:media baseURL:mediaURL]) return NO;
 
     NSString *name=[NSString stringWithFormat:@"YouTube-HLS-%p",self];
