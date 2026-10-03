@@ -669,7 +669,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
             double now=[NSDate timeIntervalSinceReferenceDate];
             double audioTime=YTPlaybackClock(&playback);
             if(playback.audioStarted && !_paused && stamp!=AV_NOPTS_VALUE && codec->codec_id==AV_CODEC_ID_H264) {
-                double packetTime=stamp*av_q2d(format->streams[videoStream]->time_base)-playback.firstPTS;
+                double packetTime=stamp*av_q2d(format->streams[videoStream]->time_base)-playback.firstPTS+playback.videoTimeOffset;
                 double behind=audioTime-packetTime;
                 playback.droppingNonRef=playback.preferReferenceFrames || YTShouldDropNonRef(playback.droppingNonRef,behind);
                 if(playback.aggressiveFrameDrop) {
@@ -680,7 +680,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
                     codec->skip_idct=AVDISCARD_DEFAULT;
                 }
             }
-            if(playback.audioStarted && !_paused && stamp!=AV_NOPTS_VALUE &&
+            if(!softwareHLS && playback.audioStarted && !_paused && stamp!=AV_NOPTS_VALUE &&
                 YTNeedsVideoResync(stamp*av_q2d(format->streams[videoStream]->time_base)-playback.firstPTS,
                     audioTime,now,playback.lastResync)) {
                 // Catch up at a future keyframe, never at a keyframe behind
