@@ -157,7 +157,8 @@ int main(void) {
     BlockAndroid = NO; CombinedOnly = YES; AndroidRequests = VisionRequests = HeadRequests = 0;
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"YTWorkingClient"];
     result = [YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
-    assert(result && AndroidRequests == 1 && VisionRequests == 0 && HeadRequests == 1);
+    assert(result && AndroidRequests == 0 && VisionRequests == 0 && HeadRequests == 1);
+    assert([[result objectForKey:@"clientLabel"] isEqualToString:@"MWeb"]);
     assert([[result objectForKey:@"combined"] boolValue]);
     assert([[result objectForKey:@"videoLength"] longLongValue] == [[result objectForKey:@"audioLength"] longLongValue]);
     assert([result objectForKey:@"videoSource"] != [result objectForKey:@"audioSource"]);
