@@ -100,16 +100,15 @@ static void YTHLSResolution(NSString *line,NSInteger *width,NSInteger *height) {
         NSString *info=YTHLSTrim([lines objectAtIndex:i]);
         if(![info hasPrefix:@"#EXT-X-STREAM-INF:"]) continue;
         NSString *lower=[info lowercaseString];
-        if([lower rangeOfString:@"avc1."].location==NSNotFound ||
+        // iPhone1,1 native playback needs a genuinely Baseline H.264
+        // rendition. A Main-profile 144p stream is still the wrong codec even
+        // if it is small, so do not waste time buffering it for Apple playback.
+        if([lower rangeOfString:@"avc1.42"].location==NSNotFound ||
            [lower rangeOfString:@"mp4a."].location==NSNotFound) continue;
         NSInteger width=0,height=0; YTHLSResolution(info,&width,&height);
         long long pixels=(width>0 && height>0) ? (long long)width*height : 999999;
-        // The original iPhone-era target is the smallest H.264 rung. Prefer
-        // a muxed rendition (mp4a present), then Baseline, then the 144p Main
-        // rendition as a last system-player experiment.
+        if(pixels>307200) continue;
         long long score=pixels;
-        if([lower rangeOfString:@"avc1.42"].location==NSNotFound) score+=10000000LL;
-        if(pixels>40000) score+=1000000000LL;
         NSString *address=nil;
         for(NSUInteger j=i+1;j<[lines count];j++) {
             NSString *candidate=YTHLSTrim([lines objectAtIndex:j]);
