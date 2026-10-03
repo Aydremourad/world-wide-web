@@ -27,5 +27,6 @@
 - (double)selectedFPS;
 - (NSString *)selectedDescription;
 - (BOOL)selectedBaseline;
+- (double)totalDuration;
 - (id)newSequentialReaderAtTime:(double)time actualStart:(double *)actualStart;
 @end
