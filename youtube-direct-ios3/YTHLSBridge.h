@@ -12,10 +12,17 @@
     int _listener;
     unsigned short _port;
     volatile BOOL _stopped;
+    NSInteger _selectedWidth;
+    NSInteger _selectedHeight;
+    double _selectedFPS;
+    NSTimeInterval _prepareDeadline;
 }
 - (id)initWithURL:(NSURL *)url userAgent:(NSString *)userAgent;
 - (BOOL)start;
 - (NSURL *)movieURL;
 - (void)stop;
 - (NSString *)errorText;
+- (NSInteger)selectedHeight;
+- (double)selectedFPS;
+- (NSString *)selectedDescription;
 @end
