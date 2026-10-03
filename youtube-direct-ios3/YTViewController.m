@@ -183,20 +183,42 @@
     if (streams) {
         NSDictionary *info=YTNativeStreamInfo(streams);
         if(info) [streams setObject:info forKey:@"nativeInfo"];
-        if(info && ![[info objectForKey:@"eligible"] boolValue] &&
-           [[info objectForKey:@"width"] intValue]*[[info objectForKey:@"height"] intValue]>38400) {
+        NSInteger pixels=info ? [[info objectForKey:@"width"] intValue]*[[info objectForKey:@"height"] intValue] : 0;
+        NSInteger height=[[streams objectForKey:@"height"] intValue];
+        double fps=[[streams objectForKey:@"fps"] doubleValue];
+        BOOL nativeEligible=info && [[info objectForKey:@"eligible"] boolValue];
+        BOOL needsSmaller=!nativeEligible && (pixels>38400 || height>144 || fps>18.0);
+        if(needsSmaller) {
             [self performSelectorOnMainThread:@selector(showLowResolutionStatus) withObject:nil waitUntilDone:NO];
+
+            // First prefer a normal direct 144p URL when YouTube still exposes one.
             NSDictionary *lower=[YTYouTube lowResolutionStreamsForID:videoID];
-            if(lower) streams=[[lower mutableCopy] autorelease];
+            if(lower) {
+                streams=[[lower mutableCopy] autorelease];
+            } else {
+                // Modern YouTube often exposes the lightweight 144p rendition
+                // only through SABR. Prepare that video entirely on the phone,
+                // while retaining the already-working AAC source. Failure here
+                // is deliberately non-fatal: the proven software stream remains.
+                NSString *smallError=nil;
+                NSDictionary *phone=[YTYouTube phoneOnlyStreamsForID:videoID original:streams error:&smallError];
+                if(phone) streams=[[phone mutableCopy] autorelease];
+            }
         }
+        // The raw player response is needed only while choosing a stream and is
+        // much too large to retain during playback on a 128 MB device.
+        [streams removeObjectForKey:@"playerResponse"];
     }
     if(streams) {
         [streams setObject:videoID forKey:@"videoID"];
         NSString *route=[[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue] ? @"Apple player" : @"Software player";
         NSString *build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"YTBuildLabel"];
         if(![build length]) build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
-        NSString *diagnostic=[NSString stringWithFormat:@"Version %@\nPlayback: %@\nQuality: %@p\n",
-            build,route,[streams objectForKey:@"height"]];
+        NSString *diagnostic=[NSString stringWithFormat:@"Version %@\nPlayback: %@\nQuality: %@p\nSource: %@\nItag: %@\nSource fps: %@\n",
+            build,route,[streams objectForKey:@"height"],
+            [streams objectForKey:@"clientLabel"] ? [streams objectForKey:@"clientLabel"] : @"direct",
+            [streams objectForKey:@"videoItag"] ? [streams objectForKey:@"videoItag"] : @"?",
+            [streams objectForKey:@"fps"] ? [streams objectForKey:@"fps"] : @"?"];
         [diagnostic writeToFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"YouTube-playback.txt"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
     }
     NSDictionary *payload = [NSDictionary dictionaryWithObjectsAndKeys:
