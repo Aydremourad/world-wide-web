@@ -11,6 +11,7 @@ import pytest
 spec = importlib.util.spec_from_file_location('server', Path(__file__).parents[1] / 'app.py')
 s = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(s)
+DIRECT_DOWNLOAD = s.download_direct_source
 VID='abcdefghijk'
 
 def test_private_cookie_copy_cleanup(client, monkeypatch, tmp_path):
@@ -51,6 +52,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv('PLAYBACK_WAIT_SECONDS', '0')
     monkeypatch.setattr(s, 'MEDIA', tmp_path)
     monkeypatch.setattr(s, 'STATE', tmp_path)
+    monkeypatch.setattr(s, 'download_direct_source', lambda *a: (_ for _ in ()).throw(s.DownloadError('no mobile source')))
     s.jobs.clear()
     s.job_errors.clear()
     s.metadata_cache.clear()
@@ -69,7 +71,7 @@ def test_mobile_client_uses_local_token_provider(client, monkeypatch, tmp_path):
     monkeypatch.setenv('YOUTUBE_COOKIES_FILE', str(tmp_path / 'secret'))
     (tmp_path / 'secret').write_text('# Netscape HTTP Cookie File\n')
     def run(cmd, **kwargs):
-        assert 'youtube:player_client=mweb,web_embedded' in cmd
+        assert 'youtube:player_client=mweb' in cmd
         assert 'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416' in cmd
         assert '--cookies' in cmd
         return subprocess.CompletedProcess(cmd, 0, '{}', '')
@@ -256,8 +258,11 @@ def test_synthetic_transcode_and_ffprobe(client, tmp_path):
     subprocess.run(['ffmpeg','-nostdin','-hide_banner','-loglevel','error','-y',
                     '-f','lavfi','-i','testsrc2=size=640x360:rate=30',
                     '-f','lavfi','-i','sine=frequency=440:sample_rate=48000',
-                    '-t','2','-c:v','libx264','-threads','1','-pix_fmt','yuv420p','-c:a','aac',str(source)],check=True)
+                    '-t','2','-c:v','libx264','-profile:v','main','-level:v','3.0','-threads','1','-pix_fmt','yuv420p','-c:a','aac',str(source)],check=True)
+    original=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-of','json',str(source)]))
+    assert original['streams'][0]['profile']=='Main' and original['streams'][0]['level']==30
     subprocess.run(s.ffmpeg_args(source,output),check=True,capture_output=True)
+    s.verify_converted_movie(output)
     probe=json.loads(subprocess.check_output(['ffprobe','-v','error','-show_streams','-of','json',str(output)]))
     video,audio=probe['streams']
     assert video['codec_name']=='h264' and video['profile']=='Constrained Baseline'
@@ -284,3 +289,78 @@ def test_render_https_urls_behind_http_proxy(client, monkeypatch):
     assert plistlib.loads(r.data)=={'ConfiguredServiceHost':'youtube-2g-example.onrender.com'}
     monkeypatch.setenv('PUBLIC_BASE_URL', 'https://custom.example/')
     assert b'https://custom.example' in client.get('/feeds/api/videos?q=test').data
+
+
+def test_mobile_source_bypasses_blocked_metadata(client, monkeypatch):
+    def mobile(vid, path):
+        path.write_bytes((s.ROOT / 'static/test.mp4').read_bytes())
+    monkeypatch.setattr(s, 'download_direct_source', mobile)
+    monkeypatch.setattr(s, 'info', lambda *a: pytest.fail('unnecessary metadata request'))
+    monkeypatch.setattr(s, 'run_ytdlp', lambda *a, **k: pytest.fail('unnecessary yt-dlp request'))
+    s.convert(VID)
+    assert s.jobs[VID][0] == 'ready'
+    s.verify_converted_movie(s.MEDIA / (VID + '.mp4'))
+
+
+def test_failed_mobile_download_is_removed_before_fallback(client, monkeypatch):
+    def mobile(vid, path):
+        path.write_bytes(b'partial download')
+        raise s.DownloadError('incomplete')
+    def fallback(args, **kwargs):
+        path = Path(args[args.index('-o') + 1])
+        assert not path.exists()
+        path.write_bytes((s.ROOT / 'static/test.mp4').read_bytes())
+    monkeypatch.setattr(s, 'download_direct_source', mobile)
+    monkeypatch.setattr(s, 'info', lambda *a: ITEM)
+    monkeypatch.setattr(s, 'run_ytdlp', fallback)
+    s.convert(VID)
+    assert s.jobs[VID][0] == 'ready'
+
+
+def test_invalid_converted_codec_is_not_published(client, monkeypatch):
+    monkeypatch.setattr(s, 'download_direct_source', lambda vid, path:
+        path.write_bytes((s.ROOT / 'static/test.mp4').read_bytes()))
+    monkeypatch.setattr(s, 'verify_converted_movie', lambda *a:
+        (_ for _ in ()).throw(RuntimeError('invalid Baseline movie')))
+    s.convert(VID)
+    assert s.jobs[VID][0] == 'failed'
+    assert not (s.MEDIA / (VID + '.mp4')).exists()
+
+
+@pytest.mark.parametrize('case', ['ok', 'html', 'partial', 'too-long', 'wrong-host'])
+def test_direct_mobile_source_validation(client, monkeypatch, tmp_path, case):
+    import io
+    from email.message import Message
+    body = b'0000ftyp' + b'x' * 2000
+    url = 'https://rr1---sn-test.googlevideo.com/videoplayback?private=secret'
+    player = {'playabilityStatus': {'status': 'OK'},
+              'videoDetails': {'lengthSeconds': str(s.MAX_SECONDS + 1 if case == 'too-long' else 12)},
+              'streamingData': {'formats': [{'itag': 18, 'height': 360,
+                'mimeType': 'video/mp4; codecs="avc1.4d401e, mp4a.40.2"',
+                'contentLength': str(len(body)),
+                'url': 'https://googlevideo.com.evil.invalid/movie' if case == 'wrong-host' else url}]}}
+    class Response(io.BytesIO):
+        status = 200
+        def __init__(self, raw, mime, location):
+            super().__init__(raw)
+            self.headers = Message(); self.headers['Content-Type'] = mime
+            self.location = location
+        def geturl(self): return self.location
+    calls = []
+    def urlopen(req, timeout):
+        calls.append(req)
+        if req.data:
+            assert req.get_header('X-youtube-client-name') == '3'
+            assert json.loads(req.data)['videoId'] == VID
+            return Response(json.dumps(player).encode(), 'application/json', req.full_url)
+        return Response(body[:-10] if case == 'partial' else body,
+                        'text/html' if case == 'html' else 'video/mp4', url)
+    monkeypatch.setattr(s.urllib.request, 'urlopen', urlopen)
+    path = tmp_path / 'direct.mp4'
+    if case == 'ok':
+        DIRECT_DOWNLOAD(VID, path)
+        assert path.read_bytes() == body and len(calls) == 2
+    else:
+        with pytest.raises((s.DownloadError, ValueError)):
+            DIRECT_DOWNLOAD(VID, path)
+        assert len(calls) == (1 if case in ('too-long', 'wrong-host') else 2)

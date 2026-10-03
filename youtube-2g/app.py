@@ -46,7 +46,7 @@ LOCAL_TEST_IDS = {PLAYBACK_TEST_ID, STREAM_TEST_ID}
 PLAYBACK_TEST_ITEM = dict(videoId=PLAYBACK_TEST_ID, title='Playback test',
     author='YouTube 2G', authorId='unknown', description='A local playback test.',
     published=0, lengthSeconds=8, viewCount=0)
-VERSION = '2g-1.8'
+VERSION = '2g-1.9'
 
 
 def media_ready(vid):
@@ -407,26 +407,112 @@ def prune_cache():
         total -= sizes[path]
 
 
+def download_direct_source(vid, destination):
+    """Try the same mobile player endpoint as the app before yt-dlp metadata."""
+    ua = 'com.google.android.youtube/21.26.364 (Linux; U; Android 11) gzip'
+    payload = {'context': {'client': {'clientName': 'ANDROID',
+        'clientVersion': '21.26.364', 'userAgent': ua, 'hl': 'en', 'gl': 'US',
+        'androidSdkVersion': 30, 'osName': 'Android', 'osVersion': '11'}},
+        'videoId': vid, 'contentCheckOk': True, 'racyCheckOk': True}
+    req = urllib.request.Request('https://www.youtube.com/youtubei/v1/player?prettyPrint=false',
+        data=json.dumps(payload).encode(), headers={'Content-Type': 'application/json',
+        'User-Agent': ua, 'X-YouTube-Client-Name': '3',
+        'X-YouTube-Client-Version': '21.26.364'})
+    with urllib.request.urlopen(req, timeout=15) as response:
+        raw = response.read(2 * 1024 * 1024 + 1)
+    if len(raw) > 2 * 1024 * 1024:
+        raise DownloadError('Player response exceeds limit')
+    player = json.loads(raw)
+    if player.get('playabilityStatus', {}).get('status') != 'OK':
+        raise DownloadError('Mobile player has no playable source')
+    details = player.get('videoDetails', {})
+    duration = int(details.get('lengthSeconds') or 0)
+    if details.get('isLiveContent') or duration <= 0:
+        raise DownloadError('Mobile source has no finite duration')
+    if duration > MAX_SECONDS:
+        raise ValueError('too-long')
+    limit = 200 * 1024 * 1024
+    formats = player.get('streamingData', {}).get('formats', [])
+    candidates = [f for f in formats if f.get('itag') == 18 and f.get('url')
+                  and f.get('height', 0) <= 360
+                  and 'video/mp4' in f.get('mimeType', '')
+                  and 'mp4a' in f.get('mimeType', '')]
+    if not candidates:
+        raise DownloadError('Mobile player has no direct progressive MP4')
+    source = candidates[0]
+    url = source['url']
+    def allowed(value):
+        parts = urlsplit(value)
+        return parts.scheme == 'https' and (parts.hostname or '').endswith('.googlevideo.com')
+    if not allowed(url):
+        raise DownloadError('Unexpected mobile source host')
+    expected = int(source.get('contentLength') or 0)
+    if expected > limit:
+        raise DownloadError('Mobile source exceeds size limit')
+    started = time.monotonic()
+    with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': ua}), timeout=15) as response:
+        if not allowed(response.geturl()) or response.status != 200:
+            raise DownloadError('Mobile source is not a complete movie')
+        if response.headers.get_content_type() not in ('video/mp4', 'application/octet-stream'):
+            raise DownloadError('Mobile source is not an MP4 response')
+        total = 0
+        with destination.open('wb') as output:
+            while True:
+                chunk = response.read(256 * 1024)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > limit or time.monotonic() - started > 180:
+                    raise DownloadError('Mobile source exceeds download limit')
+                output.write(chunk)
+    if total < 1000 or (expected and total != expected):
+        raise DownloadError('Mobile source is incomplete')
+
+
+def verify_converted_movie(path):
+    probe = json.loads(subprocess.check_output(['ffprobe', '-v', 'error',
+        '-show_streams', '-of', 'json', str(path)], timeout=30))
+    video = next((v for v in probe['streams'] if v.get('codec_type') == 'video'), {})
+    audio = next((v for v in probe['streams'] if v.get('codec_type') == 'audio'), None)
+    if not (video.get('codec_name') == 'h264' and
+            video.get('profile') in ('Baseline', 'Constrained Baseline') and
+            video.get('level', 999) <= 30 and video.get('width') == 320 and
+            video.get('height') == 240 and video.get('pix_fmt') == 'yuv420p'):
+        raise RuntimeError('Converted movie is not original-iPhone Baseline')
+    if audio and not (audio.get('codec_name') == 'aac' and audio.get('profile') == 'LC' and
+                      audio.get('sample_rate') == '44100' and audio.get('channels') == 2):
+        raise RuntimeError('Converted audio is not original-iPhone AAC')
+
+
 def convert(vid, hint=None):
     import tempfile
     try:
-        item = hint or info(vid)
-        if item['lengthSeconds'] > MAX_SECONDS:
+        if hint and hint['lengthSeconds'] > MAX_SECONDS:
             raise ValueError('too-long')
         with tempfile.TemporaryDirectory(prefix='source-', dir=STATE) as work:
             source = Path(work) / 'source.mp4'
-            # Prefer YouTube's progressive H.264/AAC 360p file (normally format
-            # 18). On an original iPhone this can often be remuxed instead of
-            # re-encoded, cutting preparation time dramatically.
-            selector = ('18/'
-                        'best[ext=mp4][height<=360][vcodec^=avc1][acodec^=mp4a]/'
-                        'best[height<=360]/'
-                        'bestvideo[height<=360]+bestaudio/'
-                        'best[height<=480]')
-            run_ytdlp(['-f', selector, '--merge-output-format', 'mp4',
-                       '--max-filesize', '200M',
-                       '--match-filters', f'!is_live & duration <= {MAX_SECONDS}',
-                       '-o', str(source), 'https://www.youtube.com/watch?v=' + vid], timeout=600)
+            try:
+                download_direct_source(vid, source)
+                log.info('Downloaded mobile source for %s', vid)
+            except ValueError as exc:
+                if str(exc) == 'too-long':
+                    raise
+                source.unlink(missing_ok=True)
+            except Exception:
+                # Do not log signed media URLs from transport exceptions.
+                source.unlink(missing_ok=True)
+            if not source.exists():
+                item = hint or info(vid)
+                if item['lengthSeconds'] > MAX_SECONDS:
+                    raise ValueError('too-long')
+                selector = ('18/'
+                            'best[ext=mp4][height<=360][vcodec^=avc1][acodec^=mp4a]/'
+                            'best[height<=360]/bestvideo[height<=360]+bestaudio/'
+                            'best[height<=480]')
+                run_ytdlp(['-f', selector, '--merge-output-format', 'mp4',
+                           '--max-filesize', '200M',
+                           '--match-filters', f'!is_live & duration <= {MAX_SECONDS}',
+                           '-o', str(source), 'https://www.youtube.com/watch?v=' + vid], timeout=600)
             if not source.exists():
                 raise RuntimeError('Video exceeds source limit or is unavailable')
             prune_cache()
@@ -440,6 +526,7 @@ def convert(vid, hint=None):
                            capture_output=True, timeout=600)
             if not output.exists() or output.stat().st_size < 1000:
                 raise RuntimeError('Empty converted video')
+            verify_converted_movie(output)
             output.replace(MEDIA / (vid + '.mp4'))
         with jobs_lock:
             jobs[vid] = ('ready', time.monotonic())
