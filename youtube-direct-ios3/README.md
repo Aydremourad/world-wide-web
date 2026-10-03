@@ -1,20 +1,33 @@
 # YouTube for iPhone OS 3
 
-Playback uses the phone's Wi-Fi connection. There is no Render service or Mac
-conversion dependency in this branch.
+This experimental branch replaces full download and conversion with a native
+player for the original iPhone / iPhone 2G on iPhone OS 3.1.3. Once installed,
+playback uses only the phone's Wi-Fi connection.
 
-A verified Baseline/Simple Profile combined movie uses Apple's built-in player.
-For YouTube's Main-profile progressive movies, the app fetches the 144p video
-through YouTube's SABR protocol, rebuilds an ordinary MP4 sample table locally
-without re-encoding, and preserves the original working AAC audio source.
-The smaller video is played by the bundled ARMv6 decoder. Preparing the video
-requires downloading the low-resolution video track before playback; a second
-play reuses that verified file. Preparation is bounded to two minutes, 64 MiB,
-and a 20-minute video. Transport/token failures are reported explicitly.
+## Playback
 
-The CPU workload is substantially smaller than decoding a 360p source, but real
-frame rates still require measurement on the physical iPhone. Simulator/emulator
-checks validate decoding correctness and cannot establish device speed.
+The phone requests YouTube's Android player response using the previous app's
+client identity. It prefers tiny H.264 format 597 or 160, plus AAC audio format
+140. When those tracks have no usable URL, it selects direct combined MP4
+format 18 instead. Both readers use bounded 64 KiB HTTP ranges; each reader
+shares at most sixteen chunks for a combined movie. MP4 metadata can be read from either end of a file.
+
+FFmpeg's static ARMv6 decoder decodes H.264 directly. OpenGL ES 1 displays
+RGB565 frames; AudioQueue plays AAC audio. Audio is the playback clock. Late
+video displays are dropped while H.264 reference frames are preserved. Format
+18 is decoded directly at its source resolution and displayed at up to
+256x144. Non-reference pictures and loop filtering are skipped for larger
+sources to reduce decoder work. AAC is read from the combined MP4 through
+Audio File Services with automatic container detection.
+
+Audio packet reads and HTTP requests run on a background producer. The audio
+callback only returns used buffers; it never fetches data. Six buffers provide
+a bounded cushion, and the producer restarts a starved queue after refilling.
+
+The app has Done, Pause/Resume and rotation. It does not encode videos or wait
+for a complete download. Performance and sync still require a physical iPhone
+2G test. A successful build does not establish smooth playback on that CPU.
+The stock YouTube player's hardware decoder cannot provide this software path.
 
 ## Installation
 

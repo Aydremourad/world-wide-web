@@ -1,7 +1,5 @@
 #import <Foundation/Foundation.h>
 #import "YTYouTube.h"
-#import "YTNativeProbe.h"
-#import "YTSABR.h"
 #include <assert.h>
 
 static NSString *Player(NSString *formats) {
@@ -24,38 +22,13 @@ static NSString *Combined = @"{\"itag\":18,\"mimeType\":\"video/mp4; codecs=\\\"
 static BOOL BlockAndroid;
 static BOOL CombinedOnly;
 static BOOL LighterAvailable, LighterBroken;
-static BOOL CompatReady;
-static BOOL SABRAvailable,SABRDownloadFails;
-static NSDictionary *LastSABROptions;
-NSString *YTDownloadSABRVideo(NSDictionary *options,NSString **error) {
-    LastSABROptions=options;
-    if(SABRDownloadFails) { if(error) *error=@"Direct SABR blocked"; return nil; }
-    NSString *path=[NSTemporaryDirectory() stringByAppendingPathComponent:@"YTResolver144.mp4"];
-    [[NSMutableData dataWithLength:1024] writeToFile:path atomically:YES]; return path;
-}
-static BOOL IOSAlternativeAvailable;
-
-// Network-selection tests mock codec probing; native-route.m separately reads
-// actual Main/Baseline MP4 bytes with the production FFmpeg probe.
-NSDictionary *YTNativeStreamInfo(NSDictionary *streams) {
-    NSURL *url=[streams objectForKey:@"videoURL"];
-    BOOL baseline=[[[url path] lastPathComponent] isEqualToString:@"baseline"] ||
-        ([[url host] isEqualToString:@"aydreyoutube2g.duckdns.org"] && CompatReady);
-    return [NSDictionary dictionaryWithObjectsAndKeys:
-        [NSNumber numberWithBool:baseline],@"eligible",
-        [NSNumber numberWithInt:baseline ? 66 : 77],@"profile",
-        [NSNumber numberWithInt:30],@"level",
-        [NSNumber numberWithLongLong:[[streams objectForKey:@"videoLength"] longLongValue]],@"length",nil];
-}
-
 static int AndroidRequests, VisionRequests, HeadRequests, VRRequests, AudioReads;
 @interface YTFixtureProtocol : NSURLProtocol
 @end
 @implementation YTFixtureProtocol
 + (BOOL)canInitWithRequest:(NSURLRequest *)request {
     NSString *host = [[request URL] host];
-    return [host isEqualToString:@"www.youtube.com"] || [host isEqualToString:@"media.example"] ||
-           [host isEqualToString:@"aydreyoutube2g.duckdns.org"];
+    return [host isEqualToString:@"www.youtube.com"] || [host isEqualToString:@"media.example"];
 }
 + (NSURLRequest *)canonicalRequestForRequest:(NSURLRequest *)request { return request; }
 - (void)startLoading {
@@ -77,31 +50,9 @@ static int AndroidRequests, VisionRequests, HeadRequests, VRRequests, AudioReads
             Player([NSString stringWithFormat:@"%@,%@",
                 @"{\"itag\":160,\"url\":\"https://media.example/video\"}",
                 @"{\"itag\":140,\"url\":\"https://media.example/audio\"}"]);
-        if([clientName isEqualToString:@"5"] && IOSAlternativeAvailable) {
-            NSString *baseline=[Combined stringByReplacingOccurrencesOfString:@"avc1.4d401e" withString:@"avc1.42001e"];
-            baseline=[baseline stringByReplacingOccurrencesOfString:@"https://media.example/combined" withString:@"https://media.example/baseline?clen=80000"];
-            json=Player(baseline);
-        }
-        if(android && SABRAvailable) {
-            NSString *adaptive=@"{\"itag\":160,\"mimeType\":\"video/mp4; codecs=\\\"avc1.4d400c\\\"\",\"width\":256,\"height\":144,\"fps\":30,\"contentLength\":\"70000\",\"lastModified\":\"1700000000000000\",\"approxDurationMs\":\"8000\"}";
-            json=[NSString stringWithFormat:@"{\"playabilityStatus\":{\"status\":\"OK\"},\"streamingData\":{\"formats\":[%@],\"adaptiveFormats\":[%@,%@],\"serverAbrStreamingUrl\":\"https://media.googlevideo.com/videoplayback?sabr=1\"},\"playerConfig\":{\"mediaCommonConfig\":{\"mediaUstreamerRequestConfig\":{\"videoPlaybackUstreamerConfig\":\"AAABAA==\"}}}}",Combined,adaptive,Audio];
-        }
         data = [json dataUsingEncoding:NSUTF8StringEncoding];
         [headers setObject:@"application/json" forKey:@"Content-Type"];
         [headers setObject:[NSString stringWithFormat:@"%lu", (unsigned long)[data length]] forKey:@"Content-Length"];
-    } else if ([[url host] isEqualToString:@"aydreyoutube2g.duckdns.org"]) {
-        if ([[url path] hasPrefix:@"/status/"]) {
-            NSString *json=CompatReady ? @"{\"status\":\"ready\"}" : @"{\"status\":\"failed\"}";
-            data=[json dataUsingEncoding:NSUTF8StringEncoding];
-            [headers setObject:@"application/json" forKey:@"Content-Type"];
-            [headers setObject:[NSString stringWithFormat:@"%lu",(unsigned long)[data length]] forKey:@"Content-Length"];
-        } else {
-            [headers setObject:@"video/mp4" forKey:@"Content-Type"];
-            [headers setObject:@"120000" forKey:@"Content-Length"];
-            [headers setObject:(CompatReady ? @"ready" : @"failed") forKey:@"X-YouTube2G-Status"];
-            [headers setObject:(CompatReady ? @"1" : @"0") forKey:@"X-YouTube2G-Native"];
-            data=[NSData data];
-        }
     } else {
         long long length = [[url path] isEqualToString:@"/video"] ? 70000 : [[url path] isEqualToString:@"/half"] ? 35000 : 80000;
         [headers setObject:@"video/mp4" forKey:@"Content-Type"];
@@ -148,7 +99,6 @@ int main(void) {
     NSString *baseline=[Combined stringByReplacingOccurrencesOfString:@"avc1.4d401e" withString:@"avc1.42001e"];
     result=Resolve([NSString stringWithFormat:@"%@,%@,%@",baseline,Video,Audio]);
     assert([[result objectForKey:@"combined"] boolValue]); // Prefer native playback over software 144p.
-    assert([[result objectForKey:@"nativeCandidate"] boolValue]); // Candidate label still requires the actual codec probe before playback.
     result = Resolve([NSString stringWithFormat:@"%@,%@",
         @"{\"itag\":160,\"url\":\"https://media.example/v\",\"contentLength\":4294967301}", Audio]);
     assert([[result objectForKey:@"videoLength"] longLongValue] == 4294967301LL);
@@ -213,22 +163,6 @@ int main(void) {
     assert([result objectForKey:@"videoSource"] != [result objectForKey:@"audioSource"]);
     result=[YTYouTube lowResolutionStreamsForID:@"jNQXAC9IVRw"];
     assert(result && ![[result objectForKey:@"combined"] boolValue] && [[result objectForKey:@"videoLength"] longLongValue]==70000);
-    NSDictionary *rejected=[NSDictionary dictionaryWithObjectsAndKeys:
-        [NSNumber numberWithBool:YES],@"nativeCandidate",
-        [NSDictionary dictionaryWithObject:[NSNumber numberWithBool:NO] forKey:@"eligible"],@"nativeInfo",nil];
-    assert(!YTShouldUseNativePlayer(rejected));
-    SABRAvailable=YES; SABRDownloadFails=NO;
-    result=[YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
-    YTMediaSource *workingAudio=[result objectForKey:@"audioSource"];
-    NSDictionary *smaller=[YTYouTube phoneOnlyStreamsForID:@"jNQXAC9IVRw" original:result error:&error];
-    assert(smaller && [[smaller objectForKey:@"videoURL"] isFileURL]);
-    assert([[smaller objectForKey:@"height"] intValue]==144 && ![[smaller objectForKey:@"combined"] boolValue]);
-    assert([smaller objectForKey:@"audioSource"]==workingAudio && !YTShouldUseNativePlayer(smaller));
-    assert([[[LastSABROptions objectForKey:@"video"] objectForKey:@"itag"] intValue]==160);
-    assert([[[LastSABROptions objectForKey:@"video"] objectForKey:@"lastModified"] isEqualToString:@"1700000000000000"]);
-    SABRDownloadFails=YES; error=nil;
-    assert(![YTYouTube phoneOnlyStreamsForID:@"jNQXAC9IVRw" original:result error:&error] && [error isEqualToString:@"Direct SABR blocked"]);
-    NSLog(@"Phone-only resolver passed: no-URL 144p format uses SABR, original working audio is preserved, Main hint is vetoed, and direct failures remain visible.");
     [NSURLProtocol unregisterClass:[YTFixtureProtocol class]];
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"YTWorkingClient"];
     NSLog(@"Resolver checks passed, including lighter video across clients, unchanged working audio, unavailable lighter fallback, and native/progressive routing.");

@@ -17,7 +17,7 @@ cd "$TESTDIR/decoder"
     --disable-avdevice --disable-avfilter --disable-postproc --disable-swresample \
     --disable-network --disable-securetransport --disable-iconv --disable-bzlib \
     --disable-lzma --disable-zlib --disable-vda --disable-everything \
-    --enable-muxer=mp4 --enable-protocol=file --enable-demuxer=mov --enable-decoder=h264,mpeg4 --enable-parser=h264,mpeg4video --disable-small --optflags="-O3" > "$TESTDIR/config.log" 2>&1
+    --enable-demuxer=mov --enable-decoder=h264,mpeg4 --enable-parser=h264,mpeg4video --disable-small --optflags="-O3" > "$TESTDIR/config.log" 2>&1
 make -j3 libavformat/libavformat.a libavcodec/libavcodec.a libswscale/libswscale.a libavutil/libavutil.a > "$TESTDIR/build.log" 2>&1
 cd "$ROOT"
 xcrun clang -O3 -I. -I"$TESTDIR/decoder" YTVideoDecoder.c tests/pixels.c \
@@ -60,15 +60,3 @@ xcrun clang -fno-objc-arc -Wno-deprecated-declarations -I. -I"$TESTDIR/decoder" 
     "$TESTDIR/decoder/libswscale/libswscale.a" "$TESTDIR/decoder/libavutil/libavutil.a" \
     -lm -o "$TESTDIR/video-catchup-test"
 "$TESTDIR/video-catchup-test" tests/fixtures/audio-pump-main-aac.mp4
-
-xcrun clang -std=c99 -I"$TESTDIR/decoder" tests/make-sabr-fixture.c \
-    "$TESTDIR/decoder/libavformat/libavformat.a" "$TESTDIR/decoder/libavcodec/libavcodec.a" \
-    "$TESTDIR/decoder/libavutil/libavutil.a" -lm -o "$TESTDIR/make-sabr-fixture"
-"$TESTDIR/make-sabr-fixture" tests/fixtures/video-motion-30.mp4 "$TESTDIR/sabr-fragmented.mp4"
-python3 tests/sabr-fixtures.py "$TESTDIR/sabr-fragmented.mp4" "$TESTDIR/sabr-responses"
-xcrun clang -fno-objc-arc -Wno-deprecated-declarations -I. -I"$TESTDIR/decoder" -framework Foundation \
-    tests/sabr-player.m YTMediaSource.m YTPhoneRemux.c YTVideoDecoder.c \
-    "$TESTDIR/decoder/libavformat/libavformat.a" "$TESTDIR/decoder/libavcodec/libavcodec.a" \
-    "$TESTDIR/decoder/libswscale/libswscale.a" "$TESTDIR/decoder/libavutil/libavutil.a" \
-    -lm -o "$TESTDIR/sabr-test"
-"$TESTDIR/sabr-test" "$TESTDIR/sabr-responses" tests/fixtures/video-motion-30.mp4 tests/fixtures/combined-main-aac.mp4

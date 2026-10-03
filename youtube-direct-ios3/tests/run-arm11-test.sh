@@ -13,7 +13,8 @@ cd "$TESTDIR/decoder"
     --disable-avdevice --disable-avfilter --disable-postproc --disable-swresample \
     --disable-network --disable-iconv --disable-bzlib --disable-lzma --disable-zlib \
     --enable-demuxer=mov --enable-decoder=h264,mpeg4 --enable-parser=h264,mpeg4video \
-    --optflags="-O3 -mcpu=arm1176jzf-s -marm" > "$TESTDIR/config.log" 2>&1
+    --disable-safe-bitstream-reader --optflags="-O3 -mcpu=arm1176jzf-s -marm" > "$TESTDIR/config.log" 2>&1
+grep -q '^#define CONFIG_SAFE_BITSTREAM_READER 0' config.h
 grep -q '^#define HAVE_ARMV6_INLINE 1' config.h
 grep -q '^#define HAVE_ARMV6T2_INLINE 0' config.h
 make -j3 libavformat/libavformat.a libavcodec/libavcodec.a libswscale/libswscale.a libavutil/libavutil.a > "$TESTDIR/build.log" 2>&1 || { tail -80 "$TESTDIR/build.log"; exit 1; }

@@ -2,7 +2,6 @@
 #import "YTYouTube.h"
 #import "YTSoftwarePlayer.h"
 #import "YTNativeProbe.h"
-#import "YTPlaybackLog.h"
 
 @implementation YTViewController
 
@@ -74,7 +73,7 @@
 - (void)showBuildInfo {
     NSString *version=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"YTBuildLabel"];
     if(![version length]) version=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
-    NSString *details=YTReadPlaybackLog();
+    NSString *details=[NSString stringWithContentsOfFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"YouTube-playback.txt"] encoding:NSUTF8StringEncoding error:NULL];
     NSString *message=[NSString stringWithFormat:@"Version %@\n\n%@",version,details ? details : @"No video opened yet."];
     UIAlertView *alert=[[[UIAlertView alloc] initWithTitle:@"YouTube" message:message delegate:nil cancelButtonTitle:@"OK" otherButtonTitles:nil] autorelease];
     [alert show];
@@ -184,29 +183,22 @@
     if (streams) {
         NSDictionary *info=YTNativeStreamInfo(streams);
         if(info) [streams setObject:info forKey:@"nativeInfo"];
-        if([[streams objectForKey:@"combined"] boolValue] && ![[info objectForKey:@"eligible"] boolValue]) {
-            // The actual movie is authoritative. Main profile 77 must not be
-            // forced into Apple playback by a misleading Baseline MIME hint.
-            NSString *nativeError=nil;
-            NSDictionary *compatible=[YTYouTube phoneOnlyStreamsForID:videoID original:streams error:&nativeError];
-            if(compatible) streams=[[compatible mutableCopy] autorelease];
-            else { streams=nil; error=nativeError; }
+        if(info && ![[info objectForKey:@"eligible"] boolValue] &&
+           [[info objectForKey:@"width"] intValue]*[[info objectForKey:@"height"] intValue]>38400) {
+            [self performSelectorOnMainThread:@selector(showLowResolutionStatus) withObject:nil waitUntilDone:NO];
+            NSDictionary *lower=[YTYouTube lowResolutionStreamsForID:videoID];
+            if(lower) streams=[[lower mutableCopy] autorelease];
         }
-
     }
     if(streams) {
         [streams setObject:videoID forKey:@"videoID"];
-        BOOL tryNative=YTShouldUseNativePlayer(streams);
-        NSString *route=tryNative ? @"Apple player" : @"Software player";
+        NSDictionary *info=[streams objectForKey:@"nativeInfo"];
+        NSString *route=[[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue] ? @"Apple player" : @"Software player";
         NSString *build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"YTBuildLabel"];
         if(![build length]) build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
         NSString *diagnostic=[NSString stringWithFormat:@"Version %@\nPlayback: %@\nQuality: %@p\n",
             build,route,[streams objectForKey:@"height"]];
-        diagnostic=[diagnostic stringByAppendingFormat:@"Source: %@\nNative probe: %@\n",[streams objectForKey:@"clientLabel"],[streams objectForKey:@"nativeInfo"]];
-        YTWritePlaybackLog(diagnostic);
-    } else {
-        YTWritePlaybackLog([NSString stringWithFormat:@"Version %@\nPlayback source rejected\n%@\n",
-            [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"],error ? error : @"No usable stream"]);
+        [diagnostic writeToFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"YouTube-playback.txt"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
     }
     NSDictionary *payload = [NSDictionary dictionaryWithObjectsAndKeys:
         (streams ? (id)streams : (id)[NSNull null]), @"streams",
@@ -226,13 +218,10 @@
     _searchBar.userInteractionEnabled = YES;
     [UIApplication sharedApplication].networkActivityIndicatorVisible = NO;
     _statusLabel.hidden = YES;
-    BOOL tryNative=YTShouldUseNativePlayer(streams);
-    if (tryNative) {
+    if ([[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue]) {
         _nativePlayer=[[YTNativePlayer alloc] initWithStreams:streams delegate:self];
         if([_nativePlayer play]) return;
-        NSString *failure=[[_nativePlayer errorText] copy];
         [_nativePlayer stop]; [_nativePlayer release]; _nativePlayer=nil;
-        [self showError:failure]; [failure release]; return;
     }
     [self playSoftwareStreams:streams];
 }
@@ -248,14 +237,35 @@
     [self presentModalViewController:player animated:NO];
     [player release];
 }
+- (void)nativeFallbackThread:(NSDictionary *)payload {
+    NSAutoreleasePool *pool=[[NSAutoreleasePool alloc] init];
+    NSString *videoID=[payload objectForKey:@"videoID"];
+    NSDictionary *lower=[YTYouTube lowResolutionStreamsForID:videoID];
+    NSMutableDictionary *chosen=nil;
+    if(lower) {
+        chosen=[[lower mutableCopy] autorelease];
+        [chosen setObject:videoID forKey:@"videoID"];
+    } else chosen=[payload objectForKey:@"original"];
+    [self performSelectorOnMainThread:@selector(nativeFallbackFinished:) withObject:chosen waitUntilDone:YES];
+    [pool release];
+}
+- (void)nativeFallbackFinished:(NSDictionary *)streams {
+    [self setBusy:NO text:nil];
+    [self playSoftwareStreams:streams];
+}
+
 - (void)nativePlayer:(YTNativePlayer *)player finishedWithError:(BOOL)failed {
-    NSString *failure=[[player errorText] copy];
+    NSDictionary *streams=[[player streams] retain];
     [_nativePlayer release]; _nativePlayer=nil;
-    // Do not hide native startup failures behind another known-slow 360p
-    // software attempt. Use the existing error alert; the existing Info button
-    // retains the full preload/bridge report, even on legacy empty finishes.
-    if(failed) [self showError:failure];
-    [failure release];
+    if(failed) {
+        NSString *videoID=[streams objectForKey:@"videoID"];
+        if([videoID length]) {
+            [self setBusy:YES text:@"Apple playback failed. Getting the 144p stream..."];
+            NSDictionary *payload=[NSDictionary dictionaryWithObjectsAndKeys:videoID,@"videoID",streams,@"original",nil];
+            [NSThread detachNewThreadSelector:@selector(nativeFallbackThread:) toTarget:self withObject:payload];
+        } else [self playSoftwareStreams:streams];
+    }
+    [streams release];
 }
 - (void)dealloc {
     [UIApplication sharedApplication].networkActivityIndicatorVisible = NO;

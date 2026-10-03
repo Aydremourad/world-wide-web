@@ -9,8 +9,6 @@
     YTMediaSource *_sharedSource;
     int _listener;
     unsigned short _port;
-    unsigned _requestCount, _rangeRequestCount;
-    unsigned long long _bytesServed;
     volatile BOOL _stopped;
 }
 - (id)initWithURL:(NSURL *)url length:(int64_t)length userAgent:(NSString *)userAgent;
@@ -18,5 +16,4 @@
 - (NSURL *)movieURL;
 - (void)stop;
 - (NSString *)errorText;
-- (NSString *)diagnosticText;
 @end

@@ -31,26 +31,13 @@ static BOOL YTSendText(int fd,NSString *text) {
     if((self=[super init])) {
         _upstream=[url retain]; _length=length; _userAgent=[userAgent copy];
         _sharedSource=[[YTMediaSource alloc] initWithURL:url length:length userAgent:userAgent];
-        // Keep the native bootstrap chunk small. Apple's player often starts
-        // with a tiny range probe; waiting for a 256 KiB HTTPS read before
-        // answering that probe can make iPhone OS 3 abandon the movie.
+        [_sharedSource enableStreamingReadAhead];
         _lock=[[NSLock alloc] init]; _clients=[[NSMutableDictionary alloc] init]; _listener=-1;
     }
     return self;
 }
 - (BOOL)start {
     if(_length<=0 || !_upstream) return NO;
-    // Validate the signed CDN URL and learn its authoritative byte length
-    // before MPMoviePlayerController asks for suffix/moov ranges. A stale
-    // contentLength/clen value otherwise makes our local 206/416 responses
-    // internally inconsistent even though the upstream stream itself is fine.
-    unsigned char firstByte=0;
-    if([_sharedSource readAtOffset:0 into:&firstByte count:1]!=1) {
-        [_lock lock]; [_errorText release]; _errorText=[[_sharedSource errorText] copy]; [_lock unlock];
-        return NO;
-    }
-    int64_t actual=[_sharedSource length];
-    if(actual>0) _length=actual;
     int fd=socket(AF_INET,SOCK_STREAM,0); if(fd<0) return NO;
     struct sockaddr_in address; memset(&address,0,sizeof(address));
     address.sin_family=AF_INET; address.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
@@ -63,13 +50,6 @@ static BOOL YTSendText(int fd,NSString *text) {
 }
 - (NSURL *)movieURL { return [NSURL URLWithString:[NSString stringWithFormat:@"http://127.0.0.1:%u/movie.mp4",_port]]; }
 - (NSString *)errorText { [_lock lock]; NSString *text=[[_errorText copy] autorelease]; [_lock unlock]; return text; }
-- (NSString *)diagnosticText {
-    [_lock lock];
-    NSString *text=[NSString stringWithFormat:@"requests=%u ranges=%u bytes=%llu length=%lld upstream=%@",
-        _requestCount,_rangeRequestCount,_bytesServed,(long long)_length,
-        [_errorText length] ? _errorText : @"none"];
-    [[text retain] autorelease]; [_lock unlock]; return text;
-}
 - (void)acceptThread:(id)unused {
     NSAutoreleasePool *pool=[[NSAutoreleasePool alloc] init];
     while(!_stopped) {
@@ -84,10 +64,8 @@ static BOOL YTSendText(int fd,NSString *text) {
         int one=1; setsockopt(fd,SOL_SOCKET,SO_NOSIGPIPE,&one,sizeof(one));
 #endif
         NSAutoreleasePool *clientPool=[[NSAutoreleasePool alloc] init];
-        // Preserve the successful header-versus-query range selector discovered
-        // by bootstrap. Sharing only the cache reset every reader to header
-        // ranges, forcing another failed HTTPS exchange on query-only CDNs.
-        YTMediaSource *source=[[_sharedSource newReader] autorelease];
+        YTMediaSource *source=[[[YTMediaSource alloc] initWithURL:_upstream length:_length userAgent:_userAgent] autorelease];
+        [source shareCacheWithSource:_sharedSource];
         NSNumber *key=[NSNumber numberWithInt:fd];
         [_lock lock]; BOOL full=[_clients count]>=4 || _stopped;
         if(!full) [_clients setObject:source forKey:key]; [_lock unlock];
@@ -132,7 +110,6 @@ static BOOL YTSendText(int fd,NSString *text) {
         break;
     }
     if(!_stopped && valid) {
-        [_lock lock]; _requestCount++; if(partial) _rangeRequestCount++; [_lock unlock];
         NSString *range=partial ? [NSString stringWithFormat:@"Content-Range: bytes %lld-%lld/%lld\r\n",(long long)first,(long long)last,(long long)_length] : @"";
         NSString *response=[NSString stringWithFormat:@"HTTP/1.1 %d %@\r\nContent-Type: video/mp4\r\nContent-Length: %lld\r\nAccept-Ranges: bytes\r\n%@Connection: close\r\n\r\n",partial ? 206 : 200,partial ? @"Partial Content" : @"OK",(long long)(last-first+1),range];
         if(YTSendText(fd,response) && !head) {
@@ -143,7 +120,6 @@ static BOOL YTSendText(int fd,NSString *text) {
                 int count=[source readAtOffset:first into:bytes count:wanted];
                 BOOL sent=count>0 && YTSendBytes(fd,bytes,(size_t)count);
                 if(count<=0 && !_stopped) { [_lock lock]; [_errorText release]; _errorText=[[source errorText] copy]; [_lock unlock]; }
-                if(sent) { [_lock lock]; _bytesServed+=(unsigned long long)count; [_lock unlock]; }
                 [chunkPool release]; if(!sent) break; first+=count;
             }
             free(bytes);
