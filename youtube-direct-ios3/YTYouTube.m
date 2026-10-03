@@ -2,6 +2,7 @@
 #import "YTYouTube.h"
 #import "YTMediaSource.h"
 #import "YTSABR.h"
+#import "YTHLSBridge.h"
 #import "YTNativeProbe.h"
 #include <stdlib.h>
 #include <unistd.h>
@@ -226,12 +227,14 @@ static NSArray *YTPlayerClients(void) {
 }
 
 static NSString *YTPlayerResponse(NSString *videoID, NSDictionary *client, NSString **errorText) {
+    NSString *contextExtra=[client objectForKey:@"contextExtra"];
+    if(!contextExtra) contextExtra=@"";
     NSString *body = [NSString stringWithFormat:
         @"{\"context\":{\"client\":{\"clientName\":\"%@\",\"clientVersion\":\"%@\","
-        @"\"userAgent\":\"%@\",\"hl\":\"en\",\"gl\":\"US\"%@}},"
+        @"\"userAgent\":\"%@\",\"hl\":\"en\",\"gl\":\"US\"%@}%@},"
         @"\"videoId\":\"%@\",\"contentCheckOk\":true,\"racyCheckOk\":true}",
         [client objectForKey:@"name"], [client objectForKey:@"version"],
-        [client objectForKey:@"ua"], [client objectForKey:@"extra"], videoID];
+        [client objectForKey:@"ua"], [client objectForKey:@"extra"], contextExtra, videoID];
     NSNumber *timeout=[client objectForKey:@"timeout"];
     NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:
         [NSURL URLWithString:@"https://www.youtube.com/youtubei/v1/player?prettyPrint=false"]
@@ -261,44 +264,49 @@ static NSString *YTPlayerResponse(NSString *videoID, NSDictionary *client, NSStr
     return json;
 }
 
+static NSDictionary *YTEmbeddedHLSClient(void) {
+    // WEB_EMBEDDED_PLAYER currently has no GVS PO-token requirement and can
+    // expose the pre-muxed HLS ladder. The thirdParty context is required by
+    // YouTube's embedded player contract.
+    return [NSDictionary dictionaryWithObjectsAndKeys:
+        @"Web embedded HLS",@"label",@"WEB_EMBEDDED_PLAYER",@"name",@"2.20260708.00.00",@"version",@"56",@"number",
+        @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)",@"ua",
+        @"",@"extra",@",\"thirdParty\":{\"embedUrl\":\"https://www.reddit.com/\"}",@"contextExtra",
+        [NSNumber numberWithDouble:4.0],@"timeout",nil];
+}
+
 static NSDictionary *YTSafariHLSClient(void) {
     return [NSDictionary dictionaryWithObjectsAndKeys:
         @"Web Safari HLS",@"label",@"WEB",@"name",@"2.20260708.00.00",@"version",@"1",@"number",
         @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)",@"ua",
-        @"",@"extra",[NSNumber numberWithDouble:3.0],@"timeout",nil];
+        @"",@"extra",[NSNumber numberWithDouble:4.0],@"timeout",nil];
 }
 
 static NSDictionary *YTHLSStreamsForID(NSString *videoID) {
-    NSDictionary *client=YTSafariHLSClient();
-    NSString *ua=[client objectForKey:@"ua"];
-    NSString *watchURL=[NSString stringWithFormat:@"https://www.youtube.com/watch?v=%@&hl=en&gl=US",videoID];
-    NSData *watchData=YTGETWithUserAgent(watchURL,ua,3.0,NULL);
-    NSString *watch=watchData ? [[[NSString alloc] initWithData:watchData encoding:NSUTF8StringEncoding] autorelease] : nil;
-    // A normal Safari page establishes the short-lived logged-out session
-    // YouTube currently expects before exposing its Apple HLS ladder.
-    NSString *hls=YTJSONStringForKey(watch,@"hlsManifestUrl",0);
-    if(![hls length]) {
+    NSArray *clients=[NSArray arrayWithObjects:YTEmbeddedHLSClient(),YTSafariHLSClient(),nil];
+    for(NSDictionary *client in clients) {
         NSString *player=YTPlayerResponse(videoID,client,NULL);
-        hls=YTJSONStringForKey(player,@"hlsManifestUrl",0);
+        NSString *hls=YTJSONStringForKey(player,@"hlsManifestUrl",0);
+        if(![hls hasPrefix:@"https://"]) continue;
+        NSDictionary *info=[NSDictionary dictionaryWithObjectsAndKeys:
+            [NSNumber numberWithBool:YES],@"eligible",
+            [NSNumber numberWithInt:66],@"profile",[NSNumber numberWithInt:30],@"level",
+            [NSNumber numberWithDouble:0],@"fps",[NSNumber numberWithInt:256],@"width",
+            [NSNumber numberWithInt:144],@"height",[NSNumber numberWithLongLong:0],@"length",nil];
+        return [NSDictionary dictionaryWithObjectsAndKeys:
+            [NSURL URLWithString:hls],@"hlsURL",
+            [NSNumber numberWithBool:YES],@"nativeHLS",
+            [NSNumber numberWithBool:YES],@"nativeCandidate",
+            [NSNumber numberWithBool:YES],@"combined",
+            info,@"nativeInfo",
+            [NSNumber numberWithInteger:144],@"height",
+            [NSNumber numberWithInteger:91],@"videoItag",
+            [NSNumber numberWithInteger:0],@"fps",
+            [client objectForKey:@"ua"],@"userAgent",
+            [client objectForKey:@"label"],@"clientLabel",
+            @"HLS candidate; Baseline 144p must pass the on-phone bridge preflight",@"nativeSearch",nil];
     }
-    if(![hls hasPrefix:@"https://"]) return nil;
-    NSDictionary *info=[NSDictionary dictionaryWithObjectsAndKeys:
-        [NSNumber numberWithBool:YES],@"eligible",
-        [NSNumber numberWithInt:0],@"profile",[NSNumber numberWithInt:0],@"level",
-        [NSNumber numberWithDouble:0],@"fps",[NSNumber numberWithInt:256],@"width",
-        [NSNumber numberWithInt:144],@"height",[NSNumber numberWithLongLong:0],@"length",nil];
-    return [NSDictionary dictionaryWithObjectsAndKeys:
-        [NSURL URLWithString:hls],@"hlsURL",
-        [NSNumber numberWithBool:YES],@"nativeHLS",
-        [NSNumber numberWithBool:YES],@"nativeCandidate",
-        [NSNumber numberWithBool:YES],@"combined",
-        info,@"nativeInfo",
-        [NSNumber numberWithInteger:144],@"height",
-        [NSNumber numberWithInteger:91],@"videoItag",
-        [NSNumber numberWithInteger:0],@"fps",
-        ua,@"userAgent",
-        @"Web Safari HLS",@"clientLabel",
-        @"Safari HLS: 144p-only legacy bridge, 3-segment prebuffer",@"nativeSearch",nil];
+    return nil;
 }
 
 static NSString *YTHTML(NSString *url, NSString **errorText) {
@@ -782,6 +790,28 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
 }
 
 + (NSDictionary *)playbackStreamsForID:(NSString *)videoID error:(NSString **)errorText {
+    // The sustained 4-5 fps problem is CPU decode throughput, not a lack of
+    // range-buffering. Prefer a genuinely old-iPhone-compatible HLS rendition
+    // and let iPhone OS 3's hardware H.264 path do the decoding. Do all HLS
+    // validation and initial buffering here on the resolver thread; if any
+    // requirement fails, the known software path below is left untouched.
+    NSDictionary *hlsCandidate=YTHLSStreamsForID(videoID);
+    if(hlsCandidate) {
+        YTHLSBridge *bridge=[[[YTHLSBridge alloc] initWithURL:[hlsCandidate objectForKey:@"hlsURL"]
+            userAgent:[hlsCandidate objectForKey:@"userAgent"]] autorelease];
+        if([bridge start]) {
+            NSMutableDictionary *ready=[[[hlsCandidate mutableCopy] autorelease] retain];
+            [ready setObject:bridge forKey:@"hlsBridge"];
+            NSInteger height=[bridge selectedHeight];
+            double fps=[bridge selectedFPS];
+            if(height>0) [ready setObject:[NSNumber numberWithInteger:height] forKey:@"height"];
+            if(fps>0) [ready setObject:[NSNumber numberWithDouble:fps] forKey:@"fps"];
+            NSString *description=[bridge selectedDescription];
+            if([description length]) [ready setObject:description forKey:@"nativeSearch"];
+            return [ready autorelease];
+        }
+    }
+
     NSMutableDictionary *lowFPS=YTLowFPSStreamsForID(videoID);
     if(lowFPS) return lowFPS;
     NSArray *clients=YTPlayerClients();
