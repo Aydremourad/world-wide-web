@@ -14,8 +14,8 @@
     UISlider *_progress;
     UISlider *_volume;
     NSTimer *_controlsTimer;
-    id _videoSource;
-    YTMediaSource *_audioSource, *_videoCache, *_audioCache;
+    id _videoSource, _audioSource;
+    YTMediaSource *_videoCache, *_audioCache;
     YTHLSBridge *_hlsBridge;
     NSCondition *_seekCondition;
     YTFrameQueue _frameQueue;

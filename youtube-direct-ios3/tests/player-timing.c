@@ -36,12 +36,12 @@ int main(void) {
     assert(YTShouldDropNonRef(1,0.5));
     assert(!YTShouldDropNonRef(1,0.1));
     assert(!YTPreferReferenceFrames(256,144,15));
-    assert(YTPreferReferenceFrames(256,144,30));
+    assert(!YTPreferReferenceFrames(256,144,30));
     assert(YTPreferReferenceFrames(426,240,15));
     assert(!YTNeedsVideoResync(10,12,100,0));
     assert(YTNeedsVideoResync(10,13.1,100,0));
     assert(!YTNeedsVideoResync(10,13.1,105,100));
     assert(YTNeedsVideoResync(10,13.1,106,100));
-    puts("Player timing passed: adaptive pacing, early reference-frame policy, forward catch-up cooldown and clock continuity.");
+    puts("Player timing passed: 144p keeps all pictures, adaptive catch-up, pacing and clock continuity.");
     return 0;
 }

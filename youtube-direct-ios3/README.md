@@ -1,5 +1,19 @@
 # YouTube for iPhone OS 3
 
+Version 1.2.0 keeps the prepared 144p HLS video and its embedded AAC together.
+An unavailable adaptive URL can no longer force this route back to 360p CPU
+decoding. AAC access units go through the existing native AudioQueue pump,
+including its PCM fallback, buffering recovery, pause and seek handling.
+The network worker maintains three segments ahead instead of downloading the
+entire movie during playback. Small video retains every picture while in sync;
+measured lag may discard only non-reference pictures. A compatible Baseline
+HLS rendition outranks a same-size Main rendition and uses Apple's player.
+
+Navigation, layout and controls are unchanged. The fixture checks native AAC
+decoding and seeking from fragmented MPEG-TS input, all 240 pictures from an
+eight-second 144p/30-fps Main-profile movie, and a working HLS route with no
+adaptive URLs. Build/emulator checks do not establish physical iPhone FPS.
+
 This experimental branch replaces full download and conversion with a native
 player for the original iPhone / iPhone 2G on iPhone OS 3.1.3. Once installed,
 playback uses only the phone's Wi-Fi connection.

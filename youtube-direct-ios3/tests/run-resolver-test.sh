@@ -19,5 +19,5 @@ NSDictionary *YTNativeStreamInfo(NSDictionary *streams) {
 }
 EOF
 xcrun clang -fno-objc-arc -Wno-deprecated-declarations -I. -framework Foundation \
-    YTYouTube.m YTMediaSource.m tests/resolver.m "$TESTDIR/sabr-stub.m" -o "$TESTDIR/resolver-test"
+    YTYouTube.m YTMediaSource.m YTHLSBridge.m tests/resolver.m "$TESTDIR/sabr-stub.m" -o "$TESTDIR/resolver-test"
 "$TESTDIR/resolver-test"

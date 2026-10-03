@@ -1,6 +1,7 @@
 #import "YTSoftwarePlayer.h"
 #import "YTMediaSource.h"
 #import "YTHLSBridge.h"
+#import "YTHLSAudioSource.h"
 #import "YTVideoSurface.h"
 #import "YTAudioFile.h"
 #import "YTAudioPump.h"
@@ -53,7 +54,6 @@ typedef struct {
     BOOL bufferingShown;
     BOOL droppingNonRef;
     BOOL preferReferenceFrames;
-    BOOL aggressiveFrameDrop;
     unsigned serial;
     double startTime;
     BOOL previewShown;
@@ -154,7 +154,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     if (isnan(playback->firstPTS)) playback->firstPTS = pts;
     pts -= playback->firstPTS;
     pts += playback->videoTimeOffset;
-    playback->nextPTS = pts + playback->firstPTS + playback->frameDuration;
+    playback->nextPTS = pts - playback->videoTimeOffset + playback->firstPTS + playback->frameDuration;
     if(pts < playback->startTime-0.025) return !*playback->stop;
     if(*playback->paused && !playback->audioStarted && !playback->previewShown) {
         double conversionStart=YTPlayerWallTime();
@@ -218,7 +218,8 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
         if(!_videoCache && ![[_streams objectForKey:@"softwareHLS"] boolValue])
             _videoCache=[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"videoURL"]
                 length:[[streams objectForKey:@"videoLength"] longLongValue] userAgent:[streams objectForKey:@"userAgent"]];
-        if(!_audioCache) _audioCache=[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"audioURL"]
+        if(!_audioCache && ![[_streams objectForKey:@"hlsAudio"] boolValue])
+            _audioCache=[[YTMediaSource alloc] initWithURL:[streams objectForKey:@"audioURL"]
             length:[[streams objectForKey:@"audioLength"] longLongValue] userAgent:[streams objectForKey:@"userAgent"]];
         [_videoCache enableStreamingReadAhead]; [_audioCache enableStreamingReadAhead];
         if([[streams objectForKey:@"combined"] boolValue]) [_audioCache shareCacheWithSource:_videoCache];
@@ -444,6 +445,7 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
 }
 - (void)close {
     _stop=YES; _outputQueue=NULL; _audioPump=NULL;
+    [_hlsBridge stop];
     [_controlsTimer invalidate]; [_displayLink invalidate]; [_frameTimer invalidate];
     [self savePlaybackPerformance];
     [_seekCondition lock]; _sessionStop=YES;
@@ -584,10 +586,14 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
         _videoSource=[[_hlsBridge newSequentialReaderAtTime:time actualStart:&hlsStart] retain];
         playback.videoTimeOffset=hlsStart;
     } else _videoSource=[_videoCache newReader];
-    _audioSource=[_audioCache newReader];
+    if(softwareHLS && [[_streams objectForKey:@"hlsAudio"] boolValue])
+        _audioSource=[[YTHLSAudioSource alloc] initWithBridge:_hlsBridge];
+    else _audioSource=[_audioCache newReader];
     if(_sessionStop) { [_videoSource cancel]; [_audioSource cancel]; }
     [_seekCondition unlock];
-    io.source = _videoSource; io.sequential=softwareHLS; audio.source = _audioSource;
+    io.source = _videoSource; io.sequential=softwareHLS;
+    if([[_streams objectForKey:@"hlsAudio"] boolValue]) audio.packetSource=_audioSource;
+    else audio.source=_audioSource;
     [NSThread setThreadPriority:0.85];
     if (_sessionStop) goto finished;
     av_register_all();
@@ -623,24 +629,19 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
     frame = av_frame_alloc();
     if (!frame) { failure = @"Not enough memory for a video frame."; goto finished; }
     AVRational frameRate = format->streams[videoStream]->avg_frame_rate;
+    if(frameRate.num<=0 || frameRate.den<=0)
+        frameRate=av_guess_frame_rate(format,format->streams[videoStream],NULL);
     if (frameRate.num > 0 && frameRate.den > 0) playback.frameDuration = av_q2d(av_inv_q(frameRate));
+    else if([[_streams objectForKey:@"fps"] doubleValue]>0)
+        playback.frameDuration=1.0/[[_streams objectForKey:@"fps"] doubleValue];
     _sourceFPS=1.0/playback.frameDuration;
+    _qualityHeight=codec->height;
     playback.preferReferenceFrames=YTPreferReferenceFrames(codec->width,codec->height,_sourceFPS);
-    // A 15 fps 256x144 stream is already the CPU-saving rendition. Dropping
-    // its B pictures again turns useful motion into the ~4-5 fps slideshow we
-    // are trying to avoid. Reserve B-picture discard for 24/30 fps or larger
-    // Main-profile sources.
-    playback.aggressiveFrameDrop=(codec->codec_id==AV_CODEC_ID_H264 &&
-        codec->profile>66 && (_sourceFPS>18.0 || codec->width*codec->height>38400));
-    if(codec->codec_id==AV_CODEC_ID_H264) {
-        if(playback.aggressiveFrameDrop) {
-            // Main-profile YouTube video uses expensive B pictures. On ARM11,
-            // discarding bidirectional pictures before reconstruction saves far
-            // more CPU than decoding them and dropping them after the fact.
-            codec->skip_frame=AVDISCARD_BIDIR;
-            codec->skip_idct=AVDISCARD_BIDIR;
-        } else if(playback.preferReferenceFrames) codec->skip_frame=AVDISCARD_NONREF;
-    }
+    // Small video gets every picture while the decoder keeps up. Some B
+    // pictures are references; discarding every B picture is both unnecessarily
+    // choppy and unsafe for those streams. Adapt using NONREF only when late.
+    if(codec->codec_id==AV_CODEC_ID_H264 && playback.preferReferenceFrames)
+        codec->skip_frame=AVDISCARD_NONREF;
     playback.firstPTS=YTVideoTimeOrigin(format->streams[videoStream]);
     playback.nextPTS=playback.firstPTS+time;
     if(time>0 && !softwareHLS && YTSeekVideoToTime(format,videoStream,codec,time)<0) {
@@ -675,13 +676,8 @@ static BOOL YTDisplayDecodedFrame(YTPlayback *playback, AVFrame *frame, AVRation
                 double packetTime=stamp*av_q2d(format->streams[videoStream]->time_base)-playback.firstPTS+playback.videoTimeOffset;
                 double behind=audioTime-packetTime;
                 playback.droppingNonRef=playback.preferReferenceFrames || YTShouldDropNonRef(playback.droppingNonRef,behind);
-                if(playback.aggressiveFrameDrop) {
-                    codec->skip_frame=AVDISCARD_BIDIR;
-                    codec->skip_idct=AVDISCARD_BIDIR;
-                } else {
-                    codec->skip_frame=playback.droppingNonRef ? AVDISCARD_NONREF : AVDISCARD_DEFAULT;
-                    codec->skip_idct=AVDISCARD_DEFAULT;
-                }
+                codec->skip_frame=playback.droppingNonRef ? AVDISCARD_NONREF : AVDISCARD_DEFAULT;
+                codec->skip_idct=AVDISCARD_DEFAULT;
             }
             if(!softwareHLS && playback.audioStarted && !_paused && stamp!=AV_NOPTS_VALUE &&
                 YTNeedsVideoResync(stamp*av_q2d(format->streams[videoStream]->time_base)-playback.firstPTS,
@@ -770,6 +766,7 @@ finished:
     return [message autorelease];
 }
 - (void)dealloc {
+    [_hlsBridge stop];
     [_controlsTimer invalidate]; [_controlsTimer release];
     [_streams release]; [_hlsBridge release]; [_surface release]; [_message release]; [_spinner release];
     [_elapsedLabel release]; [_durationLabel release]; [_qualityLabel release]; [_topBar release]; [_transportBar release];

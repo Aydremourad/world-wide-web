@@ -2,6 +2,7 @@
 #define YT_AUDIO_PUMP_H
 #import <Foundation/Foundation.h>
 #import <AudioToolbox/AudioToolbox.h>
+#import "YTAACPacketSource.h"
 #include <pthread.h>
 @class YTMediaSource;
 #define YT_AUDIO_BUFFERS 12
@@ -19,6 +20,7 @@ typedef struct {
 
 typedef struct {
     YTMediaSource *source;
+    id<YTAACPacketReading> packetSource;
     AudioFileID file;
     AudioConverterRef converter;
     AudioStreamBasicDescription inputFormat;

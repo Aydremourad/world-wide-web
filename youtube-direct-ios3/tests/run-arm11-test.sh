@@ -12,13 +12,18 @@ cd "$TESTDIR/decoder"
     --disable-ffmpeg --disable-ffplay --disable-ffprobe --disable-ffserver \
     --disable-avdevice --disable-avfilter --disable-postproc --disable-swresample \
     --disable-network --disable-iconv --disable-bzlib --disable-lzma --disable-zlib \
-    --enable-demuxer=mov --enable-decoder=h264,mpeg4 --enable-parser=h264,mpeg4video \
+    --enable-demuxer=mov,mpegts --enable-decoder=h264,mpeg4 --enable-parser=h264,mpeg4video \
     --disable-safe-bitstream-reader --optflags="-O3 -mcpu=arm1176jzf-s -marm" > "$TESTDIR/config.log" 2>&1
 grep -q '^#define CONFIG_SAFE_BITSTREAM_READER 0' config.h
 grep -q '^#define HAVE_ARMV6_INLINE 1' config.h
 grep -q '^#define HAVE_ARMV6T2_INLINE 0' config.h
 make -j3 libavformat/libavformat.a libavcodec/libavcodec.a libswscale/libswscale.a libavutil/libavutil.a > "$TESTDIR/build.log" 2>&1 || { tail -80 "$TESTDIR/build.log"; exit 1; }
 cd "$ROOT"
+arm-linux-gnueabi-gcc -O3 -std=c99 -mcpu=arm1176jzf-s -marm -static -I. -I"$TESTDIR/decoder" \
+    YTVideoDecoder.c tests/hls-demux.c "$TESTDIR/decoder/libavformat/libavformat.a" \
+    "$TESTDIR/decoder/libavcodec/libavcodec.a" "$TESTDIR/decoder/libswscale/libswscale.a" \
+    "$TESTDIR/decoder/libavutil/libavutil.a" -lm -lpthread -o "$TESTDIR/hls-demux-test"
+qemu-arm -cpu arm1176 "$TESTDIR/hls-demux-test" tests/fixtures/hls-main-aac.ts
 for safe in 0 1; do
     # The checked/unchecked reader changes at include time in this test.
     arm-linux-gnueabi-gcc -O3 -mcpu=arm1176jzf-s -marm -static -I"$TESTDIR/decoder" \

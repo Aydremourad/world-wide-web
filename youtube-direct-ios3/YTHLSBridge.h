@@ -14,7 +14,9 @@
     NSString *_playlist;
     NSString *_cacheDir;
     NSString *_errorText;
-    NSLock *_lock;
+    NSCondition *_lock;
+    NSMutableSet *_fetching;
+    NSUInteger _readerSegment;
     int _listener;
     unsigned short _port;
     volatile BOOL _stopped;

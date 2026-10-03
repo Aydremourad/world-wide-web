@@ -4,6 +4,9 @@ ROOT="$(pwd)"
 xcrun clang -std=c99 -Wall -Wextra tests/player-timing.c -o /tmp/yt-player-timing-$$
 /tmp/yt-player-timing-$$
 rm /tmp/yt-player-timing-$$
+xcrun clang -std=c99 -Wall -Wextra tests/adts.c -o "$ROOT/../.yt-adts-test"
+"$ROOT/../.yt-adts-test"
+rm "$ROOT/../.yt-adts-test"
 xcrun clang -std=c99 -Wall -Wextra tests/frame-queue.c -o /tmp/yt-frame-queue-$$
 /tmp/yt-frame-queue-$$
 rm /tmp/yt-frame-queue-$$
@@ -17,9 +20,15 @@ cd "$TESTDIR/decoder"
     --disable-avdevice --disable-avfilter --disable-postproc --disable-swresample \
     --disable-network --disable-securetransport --disable-iconv --disable-bzlib \
     --disable-lzma --disable-zlib --disable-vda --disable-everything \
-    --enable-demuxer=mov --enable-decoder=h264,mpeg4 --enable-parser=h264,mpeg4video --disable-small --optflags="-O3" > "$TESTDIR/config.log" 2>&1
+    --enable-demuxer=mov,mpegts --enable-decoder=h264,mpeg4 --enable-parser=h264,mpeg4video --disable-small --optflags="-O3" > "$TESTDIR/config.log" 2>&1
 make -j3 libavformat/libavformat.a libavcodec/libavcodec.a libswscale/libswscale.a libavutil/libavutil.a > "$TESTDIR/build.log" 2>&1
 cd "$ROOT"
+xcrun clang -fno-objc-arc -Werror -Wno-deprecated-declarations -I. -I"$TESTDIR/decoder" \
+    -framework Foundation -framework AudioToolbox YTHLSBridge.m YTHLSAudioSource.m \
+    YTMediaSource.m YTAudioFile.m YTAudioPump.m tests/hls-audio.m \
+    "$TESTDIR/decoder/libavformat/libavformat.a" "$TESTDIR/decoder/libavcodec/libavcodec.a" \
+    "$TESTDIR/decoder/libavutil/libavutil.a" -lm -o "$TESTDIR/hls-audio-test"
+"$TESTDIR/hls-audio-test" tests/fixtures/hls-main-aac.ts
 xcrun clang -O3 -I. -I"$TESTDIR/decoder" YTVideoDecoder.c tests/pixels.c \
     "$TESTDIR/decoder/libavformat/libavformat.a" "$TESTDIR/decoder/libavcodec/libavcodec.a" \
     "$TESTDIR/decoder/libswscale/libswscale.a" "$TESTDIR/decoder/libavutil/libavutil.a" \

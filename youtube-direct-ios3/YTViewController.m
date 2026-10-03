@@ -256,27 +256,28 @@
     NSString *videoID=[payload objectForKey:@"videoID"];
     NSDictionary *original=[payload objectForKey:@"original"];
     NSDictionary *lower=nil;
-    if([[original objectForKey:@"nativeHLS"] boolValue])
-        lower=[YTYouTube softwareFallbackForID:videoID error:NULL];
-    else
-        lower=[YTYouTube lowResolutionStreamsForID:videoID];
     NSMutableDictionary *chosen=nil;
-    if(lower) {
-        chosen=[[lower mutableCopy] autorelease];
-        [chosen setObject:videoID forKey:@"videoID"];
-        if([[original objectForKey:@"nativeHLS"] boolValue]) {
-            YTHLSBridge *bridge=[[[YTHLSBridge alloc] initWithURL:[original objectForKey:@"hlsURL"]
-                userAgent:[original objectForKey:@"userAgent"]] autorelease];
-            if([bridge start]) {
-                [chosen setObject:bridge forKey:@"hlsBridge"];
-                [chosen setObject:[NSNumber numberWithBool:YES] forKey:@"softwareHLS"];
-                NSInteger h=[bridge selectedHeight];
-                if(h>0) [chosen setObject:[NSNumber numberWithInteger:h] forKey:@"height"];
-                double f=[bridge selectedFPS];
-                if(f>0) [chosen setObject:[NSNumber numberWithDouble:f] forKey:@"fps"];
-            }
+    if([[original objectForKey:@"nativeHLS"] boolValue]) {
+        YTHLSBridge *bridge=[[[YTHLSBridge alloc] initWithURL:[original objectForKey:@"hlsURL"]
+            userAgent:[original objectForKey:@"userAgent"]] autorelease];
+        if([bridge start]) {
+            chosen=[[original mutableCopy] autorelease];
+            [chosen removeObjectForKey:@"nativeHLS"];
+            [chosen removeObjectForKey:@"nativeInfo"];
+            [chosen setObject:bridge forKey:@"hlsBridge"];
+            [chosen setObject:[NSNumber numberWithBool:YES] forKey:@"softwareHLS"];
+            [chosen setObject:[NSNumber numberWithBool:YES] forKey:@"hlsAudio"];
+            NSInteger h=[bridge selectedHeight];
+            if(h>0) [chosen setObject:[NSNumber numberWithInteger:h] forKey:@"height"];
+            double f=[bridge selectedFPS];
+            if(f>0) [chosen setObject:[NSNumber numberWithDouble:f] forKey:@"fps"];
         }
-    } else if(![[original objectForKey:@"nativeHLS"] boolValue]) chosen=(NSMutableDictionary *)original;
+        if(!chosen) lower=[YTYouTube softwareFallbackForID:videoID error:NULL];
+    } else lower=[YTYouTube lowResolutionStreamsForID:videoID];
+    if(!chosen && lower) {
+        chosen=[[lower mutableCopy] autorelease]; [chosen setObject:videoID forKey:@"videoID"];
+    } else if(!chosen && ![[original objectForKey:@"nativeHLS"] boolValue])
+        chosen=(NSMutableDictionary *)original;
     [self performSelectorOnMainThread:@selector(nativeFallbackFinished:) withObject:chosen waitUntilDone:YES];
     [pool release];
 }

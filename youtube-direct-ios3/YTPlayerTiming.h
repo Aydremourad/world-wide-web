@@ -31,9 +31,10 @@ static int YTShouldDropNonRef(int currentlyDropping,double secondsBehind) {
     return secondsBehind > 0.45;
 }
 static int YTPreferReferenceFrames(int width,int height,double fps) {
-    // Discard only pictures that cannot be referenced by a later picture.
-    // Start immediately for 30 fps, rather than first accumulating a backlog.
-    return width*height>38400 || fps>18.0;
+    // Rate alone is not evidence that decoding is too slow. The 144p source
+    // keeps all pictures until measured lag activates NONREF discard.
+    (void)fps;
+    return width*height>38400;
 }
 static int YTNeedsVideoResync(double videoTime,double audioTime,double now,double lastSeek) {
     return audioTime-videoTime>3.0 && (lastSeek<=0 || now-lastSeek>=6);

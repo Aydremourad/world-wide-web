@@ -77,6 +77,7 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
 @interface YTHLSBridge (ReaderPrivate)
 - (NSData *)dataForSegment:(NSUInteger)index;
 - (NSUInteger)segmentCount;
+- (void)readerNeedsSegment:(NSUInteger)index;
 @end
 
 @implementation YTHLSSequentialReader
@@ -90,6 +91,7 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
     while(copied<count && !_cancelled) {
         if(!_data) {
             if(_segment>=[_bridge segmentCount]) break;
+            [_bridge readerNeedsSegment:_segment];
             _data=[[_bridge dataForSegment:_segment] retain];
             _inside=0;
             if(!_data) {
@@ -119,7 +121,7 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
     if((self=[super init])) {
         _masterURL=[url retain];
         _userAgent=[userAgent copy];
-        _lock=[[NSLock alloc] init];
+        _lock=[[NSCondition alloc] init]; _fetching=[[NSMutableSet alloc] init];
         _listener=-1;
     }
     return self;
@@ -194,7 +196,15 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
         NSInteger width=0,height=0; YTHLSResolution(info,&width,&height);
         if(width<=0 || height<=0 || width>256 || height>144) continue;
         double fps=YTHLSFrameRate(info);
-        long long score=(long long)width*height;
+        // A same-size Main rendition must never outrank hardware-compatible
+        // Baseline merely because it appeared first in the manifest.
+        NSRange avc=[lower rangeOfString:@"avc1."];
+        unsigned codec=0;
+        if(avc.location!=NSNotFound)
+            [[NSScanner scannerWithString:[lower substringFromIndex:avc.location+5]] scanHexInt:&codec];
+        BOOL baseline=(codec>>16)==66 && (codec&255)<=30 && (fps<=30 || fps==0);
+        long long score=(baseline ? 0 : 1000000000LL)+(long long)width*height*100;
+        if(fps>0) score+=(long long)llround(fps*100);
         NSString *address=nil;
         for(NSUInteger j=i+1;j<[lines count];j++) {
             NSString *candidate=YTHLSTrim([lines objectAtIndex:j]);
@@ -205,7 +215,7 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
         if(address && score<bestScore) {
             best=YTHLSResolveURL(address,_masterURL);
             bestScore=score; bestWidth=width; bestHeight=height; bestFPS=fps;
-            bestBaseline=([lower rangeOfString:@"avc1.42"].location!=NSNotFound);
+            bestBaseline=baseline;
         }
     }
     if(best) { _selectedWidth=bestWidth; _selectedHeight=bestHeight; _selectedFPS=bestFPS; _selectedBaseline=bestBaseline; }
@@ -252,11 +262,25 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
     NSString *path=[self segmentPath:index];
     NSData *cached=[NSData dataWithContentsOfFile:path];
     if(cached) return cached;
+    NSNumber *key=[NSNumber numberWithUnsignedInteger:index];
+    [_lock lock];
+    while([_fetching containsObject:key] && !_stopped)
+        [_lock waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.1]];
+    if(_stopped) { [_lock unlock]; return nil; }
+    cached=[NSData dataWithContentsOfFile:path];
+    if(cached) { [_lock unlock]; return cached; }
+    [_fetching addObject:key]; [_lock unlock];
     NSData *data=[self fetchURL:[_segments objectAtIndex:index] timeout:20.0];
     if(data && !_stopped) [data writeToFile:path atomically:YES];
+    [_lock lock]; [_fetching removeObject:key]; [_lock broadcast]; [_lock unlock];
     return data;
 }
 - (NSUInteger)segmentCount { return [_segments count]; }
+- (void)readerNeedsSegment:(NSUInteger)index {
+    [_lock lock];
+    if(index>_readerSegment) _readerSegment=index;
+    [_lock broadcast]; [_lock unlock];
+}
 - (id<YTHLSSequentialReading>)newSequentialReaderAtTime:(double)time actualStart:(double *)actualStart {
     double cursor=0; NSUInteger segment=0;
     if(time<0) time=0;
@@ -271,6 +295,7 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
         for(NSUInteger i=0;i<segment;i++) cursor+=[[_durations objectAtIndex:i] doubleValue];
     }
     if(actualStart) *actualStart=cursor;
+    [_lock lock]; _readerSegment=segment; [_lock broadcast]; [_lock unlock];
     return [[[YTHLSSequentialReader alloc] initWithBridge:self segment:segment] autorelease];
 }
 - (BOOL)prebuffer {
@@ -287,9 +312,22 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
 }
 - (void)prefetchThread:(id)unused {
     NSAutoreleasePool *pool=[[NSAutoreleasePool alloc] init];
-    for(NSUInteger i=3;i<[_segments count] && !_stopped;i++) {
+    while(!_stopped) {
         NSAutoreleasePool *part=[[NSAutoreleasePool alloc] init];
-        [self dataForSegment:i];
+        [_lock lock];
+        NSUInteger next=NSNotFound;
+        for(NSUInteger i=_readerSegment;i<[_segments count] && i<_readerSegment+3;i++)
+            if(![[NSFileManager defaultManager] fileExistsAtPath:[self segmentPath:i]]) { next=i; break; }
+        if(next==NSNotFound && !_stopped)
+            [_lock waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.5]];
+        [_lock unlock];
+        // TLS and disk writes stop once three segments are ready. Downloading
+        // the entire movie in the background competes with ARM11 video decode.
+        if(next!=NSNotFound && !_stopped && ![self dataForSegment:next]) {
+            [_lock lock];
+            if(!_stopped) [_lock waitUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.5]];
+            [_lock unlock];
+        }
         [part release];
     }
     [pool release];
@@ -324,6 +362,7 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
 - (BOOL)start {
     if(!_masterURL) return NO;
     _stopped=NO;
+    _readerSegment=0;
     [_errorText release]; _errorText=nil;
     _selectedWidth=_selectedHeight=0; _selectedFPS=0; _selectedBaseline=NO;
     // Preparation is allowed to wait for enough network headroom, but it must
@@ -402,6 +441,7 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
     } else if((head || [method isEqualToString:@"GET"]) && [path hasPrefix:@"/seg/"]) {
         NSString *leaf=[[path lastPathComponent] stringByDeletingPathExtension];
         NSInteger index=[leaf integerValue];
+        if(index>=0 && (NSUInteger)index<[_segments count]) [self readerNeedsSegment:(NSUInteger)index];
         NSData *body=(index>=0 && (NSUInteger)index<[_segments count]) ? [self dataForSegment:(NSUInteger)index] : nil;
         if(body) {
             YTHLSSendText(fd,[NSString stringWithFormat:@"HTTP/1.1 200 OK\r\nContent-Type: video/MP2T\r\nContent-Length: %lu\r\nCache-Control: max-age=3600\r\nConnection: close\r\n\r\n",(unsigned long)[body length]]);
@@ -415,13 +455,14 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
 }
 - (void)stop {
     _stopped=YES;
+    [_lock lock]; [_lock broadcast]; [_lock unlock];
     if(_listener>=0) { shutdown(_listener,SHUT_RDWR); close(_listener); _listener=-1; }
 }
 - (void)dealloc {
     [self stop];
     [[NSFileManager defaultManager] removeItemAtPath:_cacheDir error:NULL];
     [_masterURL release]; [_userAgent release]; [_segments release]; [_durations release];
-    [_playlist release]; [_cacheDir release]; [_errorText release]; [_lock release];
+    [_playlist release]; [_cacheDir release]; [_errorText release]; [_fetching release]; [_lock release];
     [super dealloc];
 }
 @end

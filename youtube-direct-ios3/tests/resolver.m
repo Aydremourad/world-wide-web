@@ -22,6 +22,7 @@ static NSString *Combined = @"{\"itag\":18,\"mimeType\":\"video/mp4; codecs=\\\"
 static BOOL BlockAndroid;
 static BOOL CombinedOnly;
 static BOOL LighterAvailable, LighterBroken;
+static BOOL HLSOnly, HLSBaseline;
 static int AndroidRequests, VisionRequests, HeadRequests, VRRequests, AudioReads;
 @interface YTFixtureProtocol : NSURLProtocol
 @end
@@ -42,7 +43,8 @@ static int AndroidRequests, VisionRequests, HeadRequests, VRRequests, AudioReads
         BOOL android = [clientName isEqualToString:@"3"];
         if (android) AndroidRequests++; else if ([clientName isEqualToString:@"101"]) VisionRequests++;
         if([clientName isEqualToString:@"28"]) VRRequests++;
-        NSString *json = [clientName isEqualToString:@"28"] ? Player(LighterAvailable ? HalfRateVideo : [NSString stringWithFormat:@"%@,%@",Video,Audio]) : android && BlockAndroid ?
+        NSString *json = HLSOnly ? @"{\"streamingData\":{\"hlsManifestUrl\":\"https://media.example/hls-master\"}}" :
+            [clientName isEqualToString:@"28"] ? Player(LighterAvailable ? HalfRateVideo : [NSString stringWithFormat:@"%@,%@",Video,Audio]) : android && BlockAndroid ?
             @"{\"playabilityStatus\":{\"status\":\"LOGIN_REQUIRED\",\"reason\":\"Fixture blocked Android\"}}" :
             CombinedOnly ? Player([NSString stringWithFormat:@"%@,%@,%@", Combined,
                 @"{\"itag\":160,\"mimeType\":\"video/mp4; codecs=\\\"avc1.4d400c\\\"\"}",
@@ -53,6 +55,22 @@ static int AndroidRequests, VisionRequests, HeadRequests, VRRequests, AudioReads
         data = [json dataUsingEncoding:NSUTF8StringEncoding];
         [headers setObject:@"application/json" forKey:@"Content-Type"];
         [headers setObject:[NSString stringWithFormat:@"%lu", (unsigned long)[data length]] forKey:@"Content-Length"];
+    } else if([[url path] hasPrefix:@"/hls-"]) {
+        NSString *text=nil;
+        if([[url path] isEqualToString:@"/hls-master"]) {
+            text=@"#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=90000,RESOLUTION=256x144,FRAME-RATE=15,CODECS=\"avc1.4d400b,mp4a.40.2\"\nhls-media\n";
+            if(HLSBaseline) text=[text stringByAppendingString:
+                @"#EXT-X-STREAM-INF:BANDWIDTH=100000,RESOLUTION=256x144,FRAME-RATE=30,CODECS=\"avc1.42001e,mp4a.40.2\"\nhls-media\n"];
+        } else if([[url path] isEqualToString:@"/hls-media"]) {
+            text=@"#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nhls-0.ts\n#EXTINF:1,\nhls-1.ts\n#EXTINF:1,\nhls-2.ts\n#EXT-X-ENDLIST\n";
+        }
+        if(text) data=[text dataUsingEncoding:NSUTF8StringEncoding];
+        else {
+            NSMutableData *ts=[NSMutableData dataWithLength:188*3];
+            unsigned char *bytes=[ts mutableBytes]; bytes[0]=bytes[188]=bytes[376]=0x47; data=ts;
+        }
+        [headers setObject:@"application/octet-stream" forKey:@"Content-Type"];
+        [headers setObject:[NSString stringWithFormat:@"%lu",(unsigned long)[data length]] forKey:@"Content-Length"];
     } else {
         long long length = [[url path] isEqualToString:@"/video"] ? 70000 : [[url path] isEqualToString:@"/half"] ? 35000 : 80000;
         [headers setObject:@"video/mp4" forKey:@"Content-Type"];
@@ -164,6 +182,18 @@ int main(void) {
     assert([result objectForKey:@"videoSource"] != [result objectForKey:@"audioSource"]);
     result=[YTYouTube lowResolutionStreamsForID:@"jNQXAC9IVRw"];
     assert(result && ![[result objectForKey:@"combined"] boolValue] && [[result objectForKey:@"videoLength"] longLongValue]==70000);
+    HLSOnly=YES; AndroidRequests=VisionRequests=HeadRequests=0;
+    result=[YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
+    assert(result && [[result objectForKey:@"softwareHLS"] boolValue] && [[result objectForKey:@"hlsAudio"] boolValue]);
+    assert(![result objectForKey:@"nativeHLS"] && ![result objectForKey:@"videoURL"] && ![result objectForKey:@"audioURL"]);
+    assert(AndroidRequests==0 && VisionRequests==0 && HeadRequests==0);
+    [[result objectForKey:@"hlsBridge"] stop];
+    HLSBaseline=YES;
+    result=[YTYouTube playbackStreamsForID:@"jNQXAC9IVRw" error:&error];
+    assert(result && [[result objectForKey:@"nativeHLS"] boolValue] &&
+        [[[result objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue]);
+    assert([[result objectForKey:@"fps"] doubleValue]==30);
+    [[result objectForKey:@"hlsBridge"] stop];
     [NSURLProtocol unregisterClass:[YTFixtureProtocol class]];
     [[NSUserDefaults standardUserDefaults] removeObjectForKey:@"YTWorkingClient"];
     NSLog(@"Resolver checks passed, including restored direct fallback, cross-client native search, and native/progressive routing.");
