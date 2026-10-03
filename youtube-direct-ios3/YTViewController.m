@@ -194,11 +194,12 @@
         NSString *route=[[[streams objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue] ? @"Apple player" : @"Software player";
         NSString *build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"YTBuildLabel"];
         if(![build length]) build=[[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleVersion"];
-        NSString *diagnostic=[NSString stringWithFormat:@"Version %@\nPlayback: %@\nQuality: %@p\nSource: %@\nItag: %@\nSource fps: %@\n",
+        NSString *diagnostic=[NSString stringWithFormat:@"Version %@\nPlayback: %@\nQuality: %@p\nSource: %@\nItag: %@\nSource fps: %@\nNative search: %@\n",
             build,route,[streams objectForKey:@"height"],
             [streams objectForKey:@"clientLabel"] ? [streams objectForKey:@"clientLabel"] : @"direct",
             [streams objectForKey:@"videoItag"] ? [streams objectForKey:@"videoItag"] : @"?",
-            [streams objectForKey:@"fps"] ? [streams objectForKey:@"fps"] : @"?"];
+            [streams objectForKey:@"fps"] ? [streams objectForKey:@"fps"] : @"?",
+            [streams objectForKey:@"nativeSearch"] ? [streams objectForKey:@"nativeSearch"] : @"none"];
         [diagnostic writeToFile:[NSTemporaryDirectory() stringByAppendingPathComponent:@"YouTube-playback.txt"] atomically:YES encoding:NSUTF8StringEncoding error:NULL];
     }
     NSDictionary *payload = [NSDictionary dictionaryWithObjectsAndKeys:
