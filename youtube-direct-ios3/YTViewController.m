@@ -183,27 +183,14 @@
     if (streams) {
         NSDictionary *info=YTNativeStreamInfo(streams);
         if(info) [streams setObject:info forKey:@"nativeInfo"];
-        NSInteger pixels=info ? [[info objectForKey:@"width"] intValue]*[[info objectForKey:@"height"] intValue] : 0;
-        NSInteger height=[[streams objectForKey:@"height"] intValue];
-        double fps=[[streams objectForKey:@"fps"] doubleValue];
-        BOOL nativeEligible=info && [[info objectForKey:@"eligible"] boolValue];
-        BOOL needsSmaller=!nativeEligible && (pixels>38400 || height>144 || fps>18.0);
-        if(needsSmaller) {
+        if(info && ![[info objectForKey:@"eligible"] boolValue] &&
+           [[info objectForKey:@"width"] intValue]*[[info objectForKey:@"height"] intValue]>38400) {
+            // Keep the quick direct low-resolution probe from the known-good
+            // build, but do not block startup downloading/preparing a whole
+            // replacement movie on the phone.
             [self performSelectorOnMainThread:@selector(showLowResolutionStatus) withObject:nil waitUntilDone:NO];
-
-            // First prefer a normal direct 144p URL when YouTube still exposes one.
             NSDictionary *lower=[YTYouTube lowResolutionStreamsForID:videoID];
-            if(lower) {
-                streams=[[lower mutableCopy] autorelease];
-            } else {
-                // Modern YouTube often exposes the lightweight 144p rendition
-                // only through SABR. Prepare that video entirely on the phone,
-                // while retaining the already-working AAC source. Failure here
-                // is deliberately non-fatal: the proven software stream remains.
-                NSString *smallError=nil;
-                NSDictionary *phone=[YTYouTube phoneOnlyStreamsForID:videoID original:streams error:&smallError];
-                if(phone) streams=[[phone mutableCopy] autorelease];
-            }
+            if(lower) streams=[[lower mutableCopy] autorelease];
         }
         // The raw player response is needed only while choosing a stream and is
         // much too large to retain during playback on a 128 MB device.
