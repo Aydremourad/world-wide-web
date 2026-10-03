@@ -173,16 +173,14 @@ static NSString *YTQueryEscape(NSString *value) {
     return escaped;
 }
 
-static NSData *YTGET(NSString *urlString, NSString **errorText) {
+static NSData *YTGETWithUserAgent(NSString *urlString, NSString *userAgent, NSTimeInterval timeout, NSString **errorText) {
     NSMutableURLRequest *req = [NSMutableURLRequest requestWithURL:[NSURL URLWithString:urlString]
                                                        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData
-                                                   timeoutInterval:25.0];
+                                                   timeoutInterval:timeout];
     [req setHTTPMethod:@"GET"];
-    // Ask YouTube for the normal desktop WEB page. The phone's real iOS 3 UA
-    // would be served an unsupported-browser path.
-    [req setValue:@"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
-forHTTPHeaderField:@"User-Agent"];
+    if([userAgent length]) [req setValue:userAgent forHTTPHeaderField:@"User-Agent"];
     [req setValue:@"en-US,en;q=0.9" forHTTPHeaderField:@"Accept-Language"];
+    [req setValue:@"identity" forHTTPHeaderField:@"Accept-Encoding"];
     [req setValue:@"text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8"
 forHTTPHeaderField:@"Accept"];
 
@@ -200,6 +198,12 @@ forHTTPHeaderField:@"Accept"];
         else *errorText = [NSString stringWithFormat:@"YouTube HTTP %d", (int)status];
     }
     return nil;
+}
+
+static NSData *YTGET(NSString *urlString, NSString **errorText) {
+    return YTGETWithUserAgent(urlString,
+        @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36",
+        25.0,errorText);
 }
 
 
@@ -270,6 +274,47 @@ static NSString *YTPlayerResponse(NSString *videoID, NSDictionary *client, NSStr
         return nil;
     }
     return json;
+}
+
+static NSDictionary *YTSafariHLSClient(void) {
+    return [NSDictionary dictionaryWithObjectsAndKeys:
+        @"Web Safari HLS",@"label",@"WEB",@"name",@"2.20260708.00.00",@"version",@"1",@"number",
+        @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.5 Safari/605.1.15,gzip(gfe)",@"ua",
+        @"",@"extra",[NSNumber numberWithDouble:4.0],@"timeout",nil];
+}
+
+static NSDictionary *YTHLSStreamsForID(NSString *videoID) {
+    NSDictionary *client=YTSafariHLSClient();
+    NSString *ua=[client objectForKey:@"ua"];
+    NSString *watchURL=[NSString stringWithFormat:@"https://www.youtube.com/watch?v=%@&hl=en&gl=US",videoID];
+    NSData *watchData=YTGETWithUserAgent(watchURL,ua,4.0,NULL);
+    NSString *watch=watchData ? [[[NSString alloc] initWithData:watchData encoding:NSUTF8StringEncoding] autorelease] : nil;
+    // A normal Safari page establishes the short-lived logged-out session
+    // YouTube currently expects before exposing its Apple HLS ladder.
+    NSString *hls=YTJSONStringForKey(watch,@"hlsManifestUrl",0);
+    if(![hls length]) {
+        NSString *player=YTPlayerResponse(videoID,client,NULL);
+        NSString *streaming=YTObjectForKey(player,@"streamingData");
+        hls=YTJSONStringForKey(streaming,@"hlsManifestUrl",0);
+    }
+    if(![hls hasPrefix:@"https://"]) return nil;
+    NSDictionary *info=[NSDictionary dictionaryWithObjectsAndKeys:
+        [NSNumber numberWithBool:YES],@"eligible",
+        [NSNumber numberWithInt:0],@"profile",[NSNumber numberWithInt:0],@"level",
+        [NSNumber numberWithDouble:0],@"fps",[NSNumber numberWithInt:256],@"width",
+        [NSNumber numberWithInt:144],@"height",[NSNumber numberWithLongLong:0],@"length",nil];
+    return [NSDictionary dictionaryWithObjectsAndKeys:
+        [NSURL URLWithString:hls],@"hlsURL",
+        [NSNumber numberWithBool:YES],@"nativeHLS",
+        [NSNumber numberWithBool:YES],@"nativeCandidate",
+        [NSNumber numberWithBool:YES],@"combined",
+        info,@"nativeInfo",
+        [NSNumber numberWithInteger:144],@"height",
+        [NSNumber numberWithInteger:91],@"videoItag",
+        [NSNumber numberWithInteger:0],@"fps",
+        ua,@"userAgent",
+        @"Web Safari HLS",@"clientLabel",
+        @"Safari HLS: 144p-only legacy bridge, 3-segment prebuffer",@"nativeSearch",nil];
 }
 
 static NSString *YTHTML(NSString *url, NSString **errorText) {
@@ -530,6 +575,30 @@ static NSMutableDictionary *YTCombinedCandidateFromPlayer(NSString *player, NSSt
     return streams;
 }
 
+static NSMutableDictionary *YTAdaptiveCandidateFromPlayer(NSString *player, NSString *userAgent) {
+    NSString *streaming=YTObjectForKey(player,@"streamingData");
+    if(!streaming) return nil;
+    NSArray *formats=YTJSONObjectStringsInArray(streaming,@"adaptiveFormats");
+    NSString *video=YTChooseFormat(formats,YES),*audio=YTChooseFormat(formats,NO);
+    if(!video || !audio) return nil;
+    NSInteger itag=YTJSONIntForKey(video,@"itag");
+    NSInteger fps=YTJSONIntForKey(video,@"fps");
+    if(fps<=0) {
+        if(itag==597) fps=15;
+        else if(itag==160) fps=30;
+    }
+    return [NSMutableDictionary dictionaryWithObjectsAndKeys:
+        YTFormatURL(video),@"videoURL",YTFormatURL(audio),@"audioURL",
+        [NSNumber numberWithLongLong:YTFormatLength(video)],@"videoLength",
+        [NSNumber numberWithLongLong:YTFormatLength(audio)],@"audioLength",
+        [NSNumber numberWithBool:NO],@"combined",
+        [NSNumber numberWithBool:NO],@"nativeCandidate",
+        [NSNumber numberWithInteger:YTJSONIntForKey(video,@"height")],@"height",
+        [NSNumber numberWithInteger:fps],@"fps",
+        [NSNumber numberWithInteger:itag],@"videoItag",
+        userAgent,@"userAgent",nil];
+}
+
 static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSString **failure) {
     long long videoLength=[[streams objectForKey:@"videoLength"] longLongValue];
     long long audioLength=[[streams objectForKey:@"audioLength"] longLongValue];
@@ -673,6 +742,10 @@ static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSStr
 }
 
 + (NSDictionary *)playbackStreamsForID:(NSString *)videoID error:(NSString **)errorText {
+    // Version 2.0 first recreates the original iPhone-era delivery model:
+    // Safari HLS, a single tiny rendition, local HTTP, and real prebuffering.
+    NSDictionary *hls=YTHLSStreamsForID(videoID);
+    if(hls) return hls;
     NSArray *clients=YTPlayerClients();
     NSMutableArray *errors=[NSMutableArray array];
     NSMutableArray *fallbacks=[NSMutableArray array];
@@ -688,7 +761,10 @@ static NSMutableDictionary *YTPrepareStreams(NSMutableDictionary *streams, NSStr
             continue;
         }
 
-        NSMutableDictionary *normal=[[[self streamsFromPlayerResponse:player userAgent:[client objectForKey:@"ua"] error:&failure] mutableCopy] autorelease];
+        // Once a native movie has not yet been proven, keep the software
+        // fallback at the true adaptive 144p representation. Never fall back
+        // to the same 360p itag 18 that just failed the native profile probe.
+        NSMutableDictionary *normal=YTAdaptiveCandidateFromPlayer(player,[client objectForKey:@"ua"]);
         if(normal) {
             [normal setObject:[client objectForKey:@"label"] forKey:@"clientLabel"];
             // Preserve Android as the proven software/audio fallback. The web
@@ -794,6 +870,26 @@ static NSDictionary *YTSABRFormat(NSString *format) {
     [chosen setObject:@"Android SABR, prepared on phone" forKey:@"clientLabel"];
     [chosen setObject:[NSNumber numberWithBool:YES] forKey:@"phonePrepared"];
     return chosen;
+}
+
++ (NSDictionary *)softwareFallbackForID:(NSString *)videoID error:(NSString **)errorText {
+    NSMutableArray *errors=[NSMutableArray array];
+    for(NSDictionary *client in YTPlayerClients()) {
+        NSString *failure=nil;
+        NSString *player=YTPlayerResponse(videoID,client,&failure);
+        if(!player) {
+            if(failure) [errors addObject:[NSString stringWithFormat:@"%@: %@",[client objectForKey:@"label"],failure]];
+            continue;
+        }
+        NSMutableDictionary *streams=YTAdaptiveCandidateFromPlayer(player,[client objectForKey:@"ua"]);
+        if(!streams) continue;
+        [streams setObject:[client objectForKey:@"label"] forKey:@"clientLabel"];
+        if(YTPrepareStreams(streams,&failure)) return streams;
+        if(failure) [errors addObject:[NSString stringWithFormat:@"%@: %@",[client objectForKey:@"label"],failure]];
+    }
+    if(errorText) *errorText=[errors count] ? [errors componentsJoinedByString:@"\n\n"] :
+        @"YouTube did not expose a direct 144p H.264 + AAC fallback.";
+    return nil;
 }
 
 // Try one additional client only when the current combined stream needs
