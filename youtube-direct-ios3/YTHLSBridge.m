@@ -319,7 +319,7 @@ static BOOL YTHLSLooksLikeTransportStream(NSData *data) {
     BOOL head=[method isEqualToString:@"HEAD"];
     if((head || [method isEqualToString:@"GET"]) && [path isEqualToString:@"/index.m3u8"]) {
         NSData *body=[_playlist dataUsingEncoding:NSUTF8StringEncoding];
-        YTHLSSendText(fd,[NSString stringWithFormat:@"HTTP/1.1 200 OK\r\nContent-Type: application/vnd.apple.mpegurl\r\nContent-Length: %lu\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",(unsigned long)[body length]]);
+        YTHLSSendText(fd,[NSString stringWithFormat:@"HTTP/1.1 200 OK\r\nContent-Type: application/x-mpegURL\r\nContent-Length: %lu\r\nCache-Control: no-cache\r\nConnection: close\r\n\r\n",(unsigned long)[body length]]);
         if(!head) YTHLSSendBytes(fd,[body bytes],[body length]);
     } else if((head || [method isEqualToString:@"GET"]) && [path hasPrefix:@"/seg/"]) {
         NSString *leaf=[[path lastPathComponent] stringByDeletingPathExtension];
