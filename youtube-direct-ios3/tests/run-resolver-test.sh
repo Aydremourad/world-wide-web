@@ -8,6 +8,7 @@ NSString *YTDownloadSABRVideo(NSDictionary *options, NSString **errorText) {
     if(errorText) *errorText=@"SABR not used by resolver fixtures.";
     return nil;
 }
+NSDictionary *YTNativeStreamInfo(NSDictionary *streams) { return nil; }
 EOF
 xcrun clang -fno-objc-arc -Wno-deprecated-declarations -I. -framework Foundation \
     YTYouTube.m YTMediaSource.m tests/resolver.m "$TESTDIR/sabr-stub.m" -o "$TESTDIR/resolver-test"
