@@ -379,6 +379,22 @@ static BOOL YTMimeNativeCandidate(NSString *mime) {
     return [mime length] && ([mime rangeOfString:@"avc1.42" options:NSCaseInsensitiveSearch].location!=NSNotFound ||
         [mime rangeOfString:@"mp4v.20.3" options:NSCaseInsensitiveSearch].location!=NSNotFound);
 }
+static NSString *YTChooseLegacy3GP(NSArray *formats) {
+    // YouTube's Android itag 17 is a combined 176x144 3GP movie using
+    // MPEG-4 Visual Simple Profile plus AAC-LC. This is dramatically cheaper
+    // for the original iPhone than modern Main-profile H.264.
+    for(NSString *format in formats) {
+        if(YTJSONIntForKey(format,@"itag")!=17 || !YTFormatURL(format)) continue;
+        NSString *mime=YTJSONStringForKey(format,@"mimeType",0);
+        if([mime length] &&
+           ([mime rangeOfString:@"video/3gpp" options:NSCaseInsensitiveSearch].location==NSNotFound ||
+            [mime rangeOfString:@"mp4v.20.3" options:NSCaseInsensitiveSearch].location==NSNotFound ||
+            [mime rangeOfString:@"mp4a.40.2" options:NSCaseInsensitiveSearch].location==NSNotFound))
+            continue;
+        return format;
+    }
+    return nil;
+}
 static NSString *YTChooseCombinedMP4(NSArray *formats) {
     NSString *best=nil; long long bestRank=LLONG_MAX;
     for (NSString *format in formats) {
@@ -546,14 +562,17 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
         [formats addObjectsFromArray:YTJSONObjectStringsInArray(streaming, @"formats")];
         [formats addObjectsFromArray:YTJSONObjectStringsInArray(streaming, @"adaptiveFormats")];
     }
+    NSString *legacy=YTChooseLegacy3GP(formats);
     NSString *video = YTChooseFormat(formats, YES), *audio = YTChooseFormat(formats, NO);
-    BOOL combined = NO;
-    NSString *mp4 = YTChooseCombinedMP4(formats);
+    BOOL combined = legacy != nil;
+    NSString *mp4 = legacy ? legacy : YTChooseCombinedMP4(formats);
     NSString *combinedMime=YTJSONStringForKey(mp4,@"mimeType",0);
-    // A native-capable progressive video avoids CPU decoding, even when a
-    // separate Main-profile 144p video is also exposed by this client.
-    BOOL nativeCandidate=mp4 && YTMimeNativeCandidate(combinedMime);
-    if (nativeCandidate || !video || !audio) {
+    // Always take Android itag 17 when it is exposed. Otherwise preserve the
+    // existing native Baseline/MPEG-4 candidate preference.
+    BOOL nativeCandidate=legacy != nil || (mp4 && YTMimeNativeCandidate(combinedMime));
+    if(legacy) {
+        video=audio=legacy;
+    } else if (nativeCandidate || !video || !audio) {
         if (mp4) { video = audio = mp4; combined = YES; }
     }
     if (!video || !audio) {
@@ -565,7 +584,8 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
     NSInteger sourceFPS=YTJSONIntForKey(video,@"fps"); if(sourceFPS<0) sourceFPS=0;
     NSInteger videoItag=YTJSONIntForKey(video,@"itag"); if(videoItag<0) videoItag=0;
     if(sourceFPS<=0) {
-        if(videoItag==597) sourceFPS=15;
+        if(videoItag==17) sourceFPS=10;
+        else if(videoItag==597) sourceFPS=15;
         else if(videoItag==160) sourceFPS=30;
     }
     return [NSDictionary dictionaryWithObjectsAndKeys:
@@ -582,12 +602,8 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
 
 + (NSDictionary *)playbackStreamsForID:(NSString *)videoID error:(NSString **)errorText {
     NSMutableArray *clients = [NSMutableArray arrayWithArray:YTPlayerClients()];
-    NSString *preferred = [[NSUserDefaults standardUserDefaults] stringForKey:@"YTWorkingClient"];
-    for (NSDictionary *client in [NSArray arrayWithArray:clients]) {
-        if ([[client objectForKey:@"label"] isEqualToString:preferred]) {
-            [clients removeObject:client]; [clients insertObject:client atIndex:0]; break;
-        }
-    }
+    // Android must stay first: it is the client that can expose legacy itag 17.
+    // Do not let a cached VisionOS/TV success hide the native 3GP opportunity.
     NSMutableArray *errors = [NSMutableArray array];
     for (NSDictionary *client in clients) {
         NSString *failure = nil;
