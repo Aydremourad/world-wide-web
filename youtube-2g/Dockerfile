@@ -30,7 +30,11 @@ RUN git clone --filter=blob:none --no-checkout \
 
 RUN python -m pip install --no-cache-dir \
     -r /app/upstream-requirements.txt \
-    yt-dlp
+    yt-dlp \
+    && mv /usr/local/bin/yt-dlp /usr/local/bin/yt-dlp-real
+
+COPY yt-dlp-proxy-wrapper.sh /usr/local/bin/yt-dlp
+RUN chmod 0755 /usr/local/bin/yt-dlp
 
 WORKDIR /app/modified-tuberepair/tuberepair
 
