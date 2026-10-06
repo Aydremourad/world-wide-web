@@ -1067,7 +1067,7 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
             (info && [[info objectForKey:@"eligible"] boolValue]) ? @"NATIVE" : @"rejected"]];
 
         if(info && [[info objectForKey:@"eligible"] boolValue]) {
-            [nativeNotes insertObject:@"1.2.2 progressive-first" atIndex:0];
+            [nativeNotes insertObject:@"1.2.3 progressive-first" atIndex:0];
             [candidate setObject:[nativeNotes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
             [[NSUserDefaults standardUserDefaults] setObject:(label ? label : @"Web")
                                                       forKey:@"YTWorkingClient"];
@@ -1134,7 +1134,7 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
             (info && [[info objectForKey:@"eligible"] boolValue]) ? @"NATIVE" : @"rejected"]];
 
         if(info && [[info objectForKey:@"eligible"] boolValue]) {
-            [nativeNotes insertObject:@"1.2.2 progressive-first" atIndex:0];
+            [nativeNotes insertObject:@"1.2.3 progressive-first" atIndex:0];
             [candidate setObject:[nativeNotes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
             [[NSUserDefaults standardUserDefaults] setObject:[client objectForKey:@"label"]
                                                       forKey:@"YTWorkingClient"];
