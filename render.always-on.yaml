@@ -1,6 +1,4 @@
-# Apply this profile only after choosing a paid Render compute plan.
-# It is intentionally separate from render.yaml so syncing the repository
-# cannot start billing without an explicit dashboard action.
+# Optional paid always-on profile for the unmodified upstream server.
 services:
   - type: web
     name: youtube-2g
@@ -9,11 +7,11 @@ services:
     branch: youtube-2g-server
     dockerfilePath: ./youtube-2g/Dockerfile
     dockerContext: ./youtube-2g
-    healthCheckPath: /healthz
+    healthCheckPath: /
     autoDeployTrigger: "commit"
     disk:
       name: tuberepair-data
-      mountPath: /var/data
+      mountPath: /app/modified-tuberepair/tuberepair/data
       sizeGB: 1
     envVars:
       - key: PORT
@@ -28,8 +26,6 @@ services:
         value: "true"
       - key: USE_REDIS
         value: "false"
-      - key: TUBEREPAIR_DATA_DIR
-        value: "/var/data"
       - key: GOOGLE_CLIENT_ID
         sync: false
       - key: GOOGLE_CLIENT_SECRET
