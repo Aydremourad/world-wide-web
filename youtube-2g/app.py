@@ -46,7 +46,7 @@ LOCAL_TEST_IDS = {PLAYBACK_TEST_ID, STREAM_TEST_ID}
 PLAYBACK_TEST_ITEM = dict(videoId=PLAYBACK_TEST_ID, title='Playback test',
     author='YouTube 2G', authorId='unknown', description='A local playback test.',
     published=0, lengthSeconds=8, viewCount=0)
-VERSION = '2g-2.3'
+VERSION = '2g-2.4'
 
 
 def media_ready(vid):
@@ -139,8 +139,14 @@ def run_ytdlp(args, timeout=90):
                     # Actual 144p downloads are small; 45 s is enough to make useful
                     # progress and still leaves time for alternate client profiles.
                     attempt_timeout = min(timeout, 45)
-                    result = subprocess.run(cmd, capture_output=True, text=True,
-                                            timeout=attempt_timeout)
+                    try:
+                        result = subprocess.run(cmd, capture_output=True, text=True,
+                                                timeout=attempt_timeout)
+                    except subprocess.TimeoutExpired:
+                        failures.append(f'{label}: timed out after {attempt_timeout}s')
+                        log.warning('yt-dlp %s attempt timed out (%s)',
+                                    label, 'cookies' if use_cookies else 'anonymous')
+                        continue
 
             if result.returncode == 0:
                 if failures:
