@@ -694,6 +694,7 @@ static NSMutableDictionary *YTServerPreparedNativeForID(NSString *videoID, NSStr
         [NSNumber numberWithLongLong:length],@"audioLength",
         [NSNumber numberWithBool:YES],@"combined",
         [NSNumber numberWithBool:YES],@"nativeCandidate",
+        [NSNumber numberWithBool:YES],@"serverPrepared",
         info,@"nativeInfo",
         [NSNumber numberWithInteger:height],@"height",
         [NSNumber numberWithInteger:fps],@"fps",
