@@ -46,7 +46,7 @@ LOCAL_TEST_IDS = {PLAYBACK_TEST_ID, STREAM_TEST_ID}
 PLAYBACK_TEST_ITEM = dict(videoId=PLAYBACK_TEST_ID, title='Playback test',
     author='YouTube 2G', authorId='unknown', description='A local playback test.',
     published=0, lengthSeconds=8, viewCount=0)
-VERSION = '2g-2.2'
+VERSION = '2g-2.3'
 
 
 def media_ready(vid):
@@ -135,7 +135,12 @@ def run_ytdlp(args, timeout=90):
 
                 cmd += args
                 with downloads:
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+                    # One broken YouTube client must not monopolize the preparation job.
+                    # Actual 144p downloads are small; 45 s is enough to make useful
+                    # progress and still leaves time for alternate client profiles.
+                    attempt_timeout = min(timeout, 45)
+                    result = subprocess.run(cmd, capture_output=True, text=True,
+                                            timeout=attempt_timeout)
 
             if result.returncode == 0:
                 if failures:
@@ -393,12 +398,12 @@ def ffmpeg_args(source, destination):
     # on free/cloud CPU while staying inside Baseline L3.0.
     return ['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', str(source),
             '-map', '0:v:0', '-map', '0:a:0?', '-vf',
-            'scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2,setsar=1',
+            'scale=256:144:force_original_aspect_ratio=decrease,pad=256:144:(ow-iw)/2:(oh-ih)/2,setsar=1',
             '-r', '15', '-c:v', 'libx264', '-threads', '0', '-preset', 'ultrafast',
             '-profile:v', 'baseline', '-level:v', '3.0', '-pix_fmt', 'yuv420p',
             '-refs', '1', '-bf', '0', '-coder', '0',
             '-x264-params', 'cabac=0:ref=1:bframes=0:8x8dct=0:weightp=0:keyint=30:min-keyint=15',
-            '-b:v', '360k', '-maxrate', '480k', '-bufsize', '960k',
+            '-b:v', '220k', '-maxrate', '300k', '-bufsize', '600k',
             '-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '64k', '-ar', '44100', '-ac', '2',
             '-movflags', '+faststart', str(destination)]
 
@@ -489,8 +494,8 @@ def verify_converted_movie(path):
     audio = next((v for v in probe['streams'] if v.get('codec_type') == 'audio'), None)
     if not (video.get('codec_name') == 'h264' and
             video.get('profile') in ('Baseline', 'Constrained Baseline') and
-            video.get('level', 999) <= 30 and video.get('width') == 320 and
-            video.get('height') == 240 and video.get('pix_fmt') == 'yuv420p'):
+            video.get('level', 999) <= 30 and video.get('width') == 256 and
+            video.get('height') == 144 and video.get('pix_fmt') == 'yuv420p'):
         raise RuntimeError('Converted movie is not original-iPhone Baseline')
     if audio and not (audio.get('codec_name') == 'aac' and audio.get('profile') == 'LC' and
                       audio.get('sample_rate') == '44100' and audio.get('channels') == 2):
@@ -518,10 +523,11 @@ def convert(vid, hint=None):
                 item = hint or info(vid)
                 if item['lengthSeconds'] > MAX_SECONDS:
                     raise ValueError('too-long')
-                selector = ('18/'
-                            'best[ext=mp4][height<=360][vcodec^=avc1][acodec^=mp4a]/'
-                            'best[height<=360]/bestvideo[height<=360]+bestaudio/'
-                            'best[height<=480]')
+                selector = ('bestvideo[ext=mp4][height<=144][vcodec^=avc1]+'
+                            'bestaudio[ext=m4a][acodec^=mp4a]/'
+                            'bestvideo[height<=144]+bestaudio/'
+                            '18/best[ext=mp4][height<=360][vcodec^=avc1][acodec^=mp4a]/'
+                            'best[height<=360]')
                 run_ytdlp(['-f', selector, '--merge-output-format', 'mp4',
                            '--max-filesize', '200M',
                            '--match-filters', f'!is_live & duration <= {MAX_SECONDS}',
@@ -581,8 +587,8 @@ def playback_file(path, status='ready', native=True):
     response.headers['X-YouTube2G-Status'] = status
     response.headers['X-YouTube2G-Native'] = '1' if native else '0'
     if native:
-        response.headers['X-YouTube2G-Width'] = '320'
-        response.headers['X-YouTube2G-Height'] = '240'
+        response.headers['X-YouTube2G-Width'] = '256'
+        response.headers['X-YouTube2G-Height'] = '144'
         response.headers['X-YouTube2G-FPS'] = '15'
     return response
 
