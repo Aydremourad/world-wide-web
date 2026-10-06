@@ -8,3 +8,18 @@ services:
     dockerContext: ./youtube-2g
     healthCheckPath: /healthz
     autoDeployTrigger: "commit"
+    envVars:
+      - key: PORT
+        value: "10000"
+      - key: DEBUG
+        value: "false"
+      - key: SPYING
+        value: "false"
+      - key: COMPRESS
+        value: "true"
+      - key: MEDIUM_QUALITY
+        value: "true"
+      - key: USE_REDIS
+        value: "false"
+      - key: TUBEREPAIR_DATA_DIR
+        value: "/var/data"
