@@ -2,6 +2,10 @@ import os
 import sys
 import shutil
 import threading
+import subprocess
+import time
+import urllib.request
+import atexit
 from pathlib import Path
 
 APP_ROOT = Path("/app/tuberepair")
@@ -49,6 +53,41 @@ from main import app
 from api.video import cleanup_old_files
 from waitress import serve
 
+provider = None
+
+def start_token_provider():
+    global provider
+    provider_dir = Path(os.environ.get("YOUTUBE_TOKEN_SERVER_DIR", "/opt/bgutil/server"))
+    provider = subprocess.Popen([
+        "node", "--max-old-space-size=160", str(provider_dir / "build/main.js"),
+        "--host", "127.0.0.1", "--port", "4416",
+    ], cwd=provider_dir)
+
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        if provider.poll() is not None:
+            raise RuntimeError("YouTube token provider stopped during startup")
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:4416/ping", timeout=1) as r:
+                if r.status == 200:
+                    print("Private YouTube token provider is ready", flush=True)
+                    return
+        except OSError:
+            time.sleep(0.2)
+    raise RuntimeError("YouTube token provider did not become ready")
+
+def stop_token_provider():
+    global provider
+    if provider is not None and provider.poll() is None:
+        provider.terminate()
+        try:
+            provider.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            provider.kill()
+            provider.wait()
+
+atexit.register(stop_token_provider)
+
 @app.get("/healthz")
 def healthz():
     return {
@@ -72,6 +111,7 @@ def diagnostics():
     }
 
 if __name__ == "__main__":
+    start_token_provider()
     threading.Thread(target=cleanup_old_files, daemon=True).start()
     serve(
         app,
