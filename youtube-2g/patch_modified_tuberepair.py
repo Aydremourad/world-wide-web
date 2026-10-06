@@ -22,8 +22,8 @@ s = s.replace(
 
 # Give every yt-dlp invocation a JS runtime before modifying its YouTube client.
 s = s.replace(
-    '["yt-dlp",',
-    '["yt-dlp", "--ignore-config", "--js-runtimes", "node", "--socket-timeout", "15",',
+    '"yt-dlp",',
+    '"yt-dlp", "--ignore-config", "--js-runtimes", "node", "--socket-timeout", "15",',
 )
 
 # Upstream's local-server recipe uses the Android client directly. That often
