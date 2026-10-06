@@ -510,6 +510,24 @@ static NSString *YTChooseLegacy3GP(NSArray *formats) {
     }
     return nil;
 }
+static NSString *YTChooseItag18(NSArray *formats) {
+    // First choice for the original iPhone: YouTube's progressive itag 18.
+    // In 2026 this can still be H.264 Baseline L3.0 + AAC-LC. Do not trust
+    // the itag alone: YTNativeStreamInfo() probes the actual MP4 before Apple
+    // playback and rejects anything outside the iPhone 2G hardware envelope.
+    for (NSString *format in formats) {
+        if (YTJSONIntForKey(format, @"itag") != 18 || !YTFormatURL(format)) continue;
+        NSString *mime = YTJSONStringForKey(format, @"mimeType", 0);
+        if ([mime length]) {
+            if ([mime rangeOfString:@"video/mp4" options:NSCaseInsensitiveSearch].location == NSNotFound) continue;
+            if ([mime rangeOfString:@"avc1" options:NSCaseInsensitiveSearch].location == NSNotFound) continue;
+            if ([mime rangeOfString:@"mp4a.40.2" options:NSCaseInsensitiveSearch].location == NSNotFound) continue;
+        }
+        return format;
+    }
+    return nil;
+}
+
 static NSString *YTChooseCombinedMP4(NSArray *formats) {
     NSString *best=nil; long long bestRank=LLONG_MAX;
     for (NSString *format in formats) {
@@ -608,7 +626,12 @@ static NSMutableDictionary *YTCombinedCandidateFromPlayer(NSString *player, NSSt
     NSMutableArray *formats=[NSMutableArray array];
     [formats addObjectsFromArray:YTJSONObjectStringsInArray(streaming,@"formats")];
     [formats addObjectsFromArray:YTJSONObjectStringsInArray(streaming,@"adaptiveFormats")];
-    NSString *format=YTChooseLegacy3GP(formats);
+    // Prefer progressive itag 18 so the Apple hardware path is tested before
+    // the very-low-resolution 3GP escape hatch. The native probe below is the
+    // authority: it must report H.264 Baseline (profile 66), level <= 3.0 and
+    // AAC-LC before this stream is allowed into MPMoviePlayerController.
+    NSString *format=YTChooseItag18(formats);
+    if(!format) format=YTChooseLegacy3GP(formats);
     if(!format) format=YTChooseCombinedMP4(formats);
     if(!format) return nil;
     NSURL *url=YTFormatURL(format);
@@ -920,71 +943,140 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
 }
 
 + (NSDictionary *)playbackStreamsForID:(NSString *)videoID error:(NSString **)errorText {
-    // The sustained 4-5 fps problem is CPU decode throughput, not a lack of
-    // range-buffering. Prefer a genuinely old-iPhone-compatible HLS rendition
-    // and let iPhone OS 3's hardware H.264 path do the decoding. Do all HLS
-    // validation and initial buffering here on the resolver thread; if any
-    // requirement fails, the known software path below is left untouched.
-    NSMutableArray *responses=[NSMutableArray array],*streamNotes=[NSMutableArray array];
+    /*
+     * 1.2.2 native-first order:
+     *
+     *   progressive combined movie (prefer itag 18) -> Apple player
+     *   old combined 3GP if exposed                  -> Apple player
+     *   compatible HLS                              -> Apple player
+     *   144p/low-FPS adaptive                       -> software fallback
+     *
+     * The old order could return HLS or a CPU-decoded 144p stream before an
+     * available progressive Baseline MP4 was ever tested. That hid the path
+     * most likely to use the iPhone 2G's hardware H.264 decoder.
+     */
+    NSMutableArray *responses=[NSMutableArray array];
+    NSMutableArray *streamNotes=[NSMutableArray array];
+
+    /*
+     * YTHLSStreamsForID also obtains correctly contextualized WEB_EMBEDDED and
+     * Safari player responses (visitor data, embed referer, encrypted flags).
+     * Keep its candidate for later, but inspect those player responses for a
+     * progressive movie BEFORE accepting HLS.
+     */
     NSDictionary *hlsCandidate=YTHLSStreamsForID(videoID,responses,streamNotes);
-    if(hlsCandidate) {
-        if([[[hlsCandidate objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue])
-            return hlsCandidate;
 
-        // The prepared HLS movie already contains AAC. Requiring a second
-        // readable adaptive video URL merely to obtain audio used to throw
-        // away this 144p source and send a 360p movie to the CPU instead.
-        NSMutableDictionary *ready=[[hlsCandidate mutableCopy] autorelease];
-        [ready removeObjectForKey:@"nativeHLS"];
-        [ready setObject:[NSNumber numberWithBool:YES] forKey:@"softwareHLS"];
-        [ready setObject:[NSNumber numberWithBool:YES] forKey:@"hlsAudio"];
-        return ready;
-    }
-
-    NSMutableDictionary *lowFPS=YTLowFPSStreamsForID(videoID);
-    if(lowFPS) return lowFPS;
     NSArray *clients=YTPlayerClients();
     NSMutableArray *errors=[NSMutableArray array];
     NSMutableArray *fallbacks=[NSMutableArray array];
     NSMutableArray *nativeNotes=[NSMutableArray array];
 
-    // If the hardware HLS preflight above is unavailable, direct range
-    // playback remains the guaranteed fallback. Do not let the native route
-    // take away the known-working software player.
-    for(NSDictionary *client in clients) {
+    // First inspect the already-fetched web/embedded responses. WEB_EMBEDDED is
+    // especially useful because it can still expose progressive itag 18 even
+    // when newer YouTube delivery paths are SABR-oriented.
+    NSArray *webResponses=[NSArray arrayWithArray:responses];
+    for(NSDictionary *response in webResponses) {
+        NSDictionary *client=[response objectForKey:@"client"];
+        NSString *player=[response objectForKey:@"player"];
+        NSString *label=[client objectForKey:@"label"];
         NSString *failure=nil;
-        NSString *player=YTPlayerResponse(videoID,client,&failure);
-        if(!player) {
-            [errors addObject:[NSString stringWithFormat:@"%@: %@",[client objectForKey:@"label"],failure ? failure : @"No player response."]];
-            continue;
-        }
-        [responses addObject:[NSDictionary dictionaryWithObjectsAndKeys:player,@"player",client,@"client",nil]];
 
-        // Always preserve a real software fallback; a format experiment
-        // must never be allowed to prevent the player from opening.
-        NSMutableDictionary *normal=[[[self streamsFromPlayerResponse:player userAgent:[client objectForKey:@"ua"] error:&failure] mutableCopy] autorelease];
+        NSMutableDictionary *normal=[[[self streamsFromPlayerResponse:player
+            userAgent:[client objectForKey:@"ua"] error:&failure] mutableCopy] autorelease];
         if(normal) {
-            [normal setObject:[client objectForKey:@"label"] forKey:@"clientLabel"];
+            [normal setObject:(label ? label : @"Web") forKey:@"clientLabel"];
             [fallbacks addObject:normal];
-        } else if([failure length]) {
-            [errors addObject:[NSString stringWithFormat:@"%@: %@",[client objectForKey:@"label"],failure]];
         }
 
         NSMutableDictionary *candidate=YTCombinedCandidateFromPlayer(player,[client objectForKey:@"ua"]);
         if(!candidate) {
-            [nativeNotes addObject:[NSString stringWithFormat:@"%@: no combined movie",[client objectForKey:@"label"]]];
+            [nativeNotes addObject:[NSString stringWithFormat:@"%@: no progressive combined movie",
+                label ? label : @"Web"]];
             continue;
         }
-        [candidate setObject:[client objectForKey:@"label"] forKey:@"clientLabel"];
+        [candidate setObject:(label ? label : @"Web") forKey:@"clientLabel"];
+
         NSString *candidateFailure=nil;
         if(!YTPrepareStreams(candidate,&candidateFailure)) {
-            [nativeNotes addObject:[NSString stringWithFormat:@"%@: combined unavailable",[client objectForKey:@"label"]]];
+            [nativeNotes addObject:[NSString stringWithFormat:@"%@: progressive movie unreadable%@%@",
+                label ? label : @"Web",
+                candidateFailure ? @" (" : @"",
+                candidateFailure ? candidateFailure : @""]];
             continue;
         }
+
         NSDictionary *info=YTNativeStreamInfo(candidate);
         if(info) [candidate setObject:info forKey:@"nativeInfo"];
         if(info && [[info objectForKey:@"height"] integerValue]>0)
             [candidate setObject:[info objectForKey:@"height"] forKey:@"height"];
+
+        [nativeNotes addObject:[NSString stringWithFormat:@"%@: itag %@ p%@ L%@ %@x%@ %@",
+            label ? label : @"Web",
+            [candidate objectForKey:@"videoItag"] ? [candidate objectForKey:@"videoItag"] : @"?",
+            info ? [info objectForKey:@"profile"] : @"?",
+            info ? [info objectForKey:@"level"] : @"?",
+            info ? [info objectForKey:@"width"] : @"?",
+            info ? [info objectForKey:@"height"] : @"?",
+            (info && [[info objectForKey:@"eligible"] boolValue]) ? @"NATIVE" : @"rejected"]];
+
+        if(info && [[info objectForKey:@"eligible"] boolValue]) {
+            [nativeNotes insertObject:@"1.2.2 progressive-first" atIndex:0];
+            [candidate setObject:[nativeNotes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
+            [[NSUserDefaults standardUserDefaults] setObject:(label ? label : @"Web")
+                                                      forKey:@"YTWorkingClient"];
+            return candidate;
+        }
+
+        if(normal && [[normal objectForKey:@"videoURL"] isEqual:[candidate objectForKey:@"videoURL"]])
+            [fallbacks replaceObjectAtIndex:[fallbacks indexOfObjectIdenticalTo:normal]
+                                  withObject:candidate];
+        else
+            [fallbacks addObject:candidate];
+    }
+
+    // Then try the established direct clients. A compatible progressive movie
+    // still outranks HLS and every software-decoded fallback.
+    for(NSDictionary *client in clients) {
+        NSString *failure=nil;
+        NSString *player=YTPlayerResponse(videoID,client,&failure);
+        if(!player) {
+            [errors addObject:[NSString stringWithFormat:@"%@: %@",
+                [client objectForKey:@"label"],failure ? failure : @"No player response."]];
+            continue;
+        }
+        [responses addObject:[NSDictionary dictionaryWithObjectsAndKeys:
+            player,@"player",client,@"client",nil]];
+
+        NSMutableDictionary *normal=[[[self streamsFromPlayerResponse:player
+            userAgent:[client objectForKey:@"ua"] error:&failure] mutableCopy] autorelease];
+        if(normal) {
+            [normal setObject:[client objectForKey:@"label"] forKey:@"clientLabel"];
+            [fallbacks addObject:normal];
+        } else if([failure length]) {
+            [errors addObject:[NSString stringWithFormat:@"%@: %@",
+                [client objectForKey:@"label"],failure]];
+        }
+
+        NSMutableDictionary *candidate=YTCombinedCandidateFromPlayer(player,[client objectForKey:@"ua"]);
+        if(!candidate) {
+            [nativeNotes addObject:[NSString stringWithFormat:@"%@: no progressive combined movie",
+                [client objectForKey:@"label"]]];
+            continue;
+        }
+        [candidate setObject:[client objectForKey:@"label"] forKey:@"clientLabel"];
+
+        NSString *candidateFailure=nil;
+        if(!YTPrepareStreams(candidate,&candidateFailure)) {
+            [nativeNotes addObject:[NSString stringWithFormat:@"%@: progressive unavailable",
+                [client objectForKey:@"label"]]];
+            continue;
+        }
+
+        NSDictionary *info=YTNativeStreamInfo(candidate);
+        if(info) [candidate setObject:info forKey:@"nativeInfo"];
+        if(info && [[info objectForKey:@"height"] integerValue]>0)
+            [candidate setObject:[info objectForKey:@"height"] forKey:@"height"];
+
         [nativeNotes addObject:[NSString stringWithFormat:@"%@: itag %@ p%@ L%@ %@x%@ %@",
             [client objectForKey:@"label"],
             [candidate objectForKey:@"videoItag"] ? [candidate objectForKey:@"videoItag"] : @"?",
@@ -992,37 +1084,77 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
             info ? [info objectForKey:@"level"] : @"?",
             info ? [info objectForKey:@"width"] : @"?",
             info ? [info objectForKey:@"height"] : @"?",
-            (info && [[info objectForKey:@"eligible"] boolValue]) ? @"native" : @"rejected"]];
+            (info && [[info objectForKey:@"eligible"] boolValue]) ? @"NATIVE" : @"rejected"]];
+
         if(info && [[info objectForKey:@"eligible"] boolValue]) {
+            [nativeNotes insertObject:@"1.2.2 progressive-first" atIndex:0];
             [candidate setObject:[nativeNotes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
-            [[NSUserDefaults standardUserDefaults] setObject:[client objectForKey:@"label"] forKey:@"YTWorkingClient"];
+            [[NSUserDefaults standardUserDefaults] setObject:[client objectForKey:@"label"]
+                                                      forKey:@"YTWorkingClient"];
             return candidate;
         }
-        // A readable combined movie is also the reliable AAC source for a
-        // smaller video-only response from another client.
+
         if(normal && [[normal objectForKey:@"videoURL"] isEqual:[candidate objectForKey:@"videoURL"]])
-            [fallbacks replaceObjectAtIndex:[fallbacks indexOfObjectIdenticalTo:normal] withObject:candidate];
-        else [fallbacks addObject:candidate];
+            [fallbacks replaceObjectAtIndex:[fallbacks indexOfObjectIdenticalTo:normal]
+                                  withObject:candidate];
+        else
+            [fallbacks addObject:candidate];
     }
 
-    // A working Android 360p response must not outrank a readable 144p
-    // response from a later client merely because it arrived first.
+    // Progressive native playback was not available. Now use the already
+    // validated HLS candidate before falling back to software H.264 decoding.
+    if(hlsCandidate) {
+        if([[[hlsCandidate objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue]) {
+            NSMutableDictionary *nativeHLS=[[[hlsCandidate mutableCopy] autorelease] retain];
+            NSMutableArray *notes=[NSMutableArray arrayWithObject:@"1.2.2 progressive unavailable; Apple HLS fallback"];
+            [notes addObjectsFromArray:nativeNotes];
+            [nativeHLS setObject:[notes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
+            return [nativeHLS autorelease];
+        }
+
+        NSMutableDictionary *ready=[[hlsCandidate mutableCopy] autorelease];
+        [ready removeObjectForKey:@"nativeHLS"];
+        [ready setObject:[NSNumber numberWithBool:YES] forKey:@"softwareHLS"];
+        [ready setObject:[NSNumber numberWithBool:YES] forKey:@"hlsAudio"];
+        NSMutableArray *notes=[NSMutableArray arrayWithObject:@"1.2.2 progressive unavailable; software HLS fallback"];
+        [notes addObjectsFromArray:nativeNotes];
+        [ready setObject:[notes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
+        return ready;
+    }
+
+    // Only now spend CPU on the low-FPS software route.
+    NSMutableDictionary *lowFPS=YTLowFPSStreamsForID(videoID);
+    if(lowFPS) {
+        NSMutableArray *notes=[NSMutableArray arrayWithObject:@"1.2.2 no native progressive/HLS; low-FPS software fallback"];
+        [notes addObjectsFromArray:nativeNotes];
+        [lowFPS setObject:[notes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
+        return lowFPS;
+    }
+
+    // Preserve the established software fallback, preferring the smallest
+    // readable H.264 representation and retaining the already-working audio.
     for(NSMutableDictionary *fallback in [fallbacks sortedArrayUsingFunction:YTSoftwareFallbackOrder context:NULL]) {
         NSString *failure=nil;
         if(YTPrepareStreams(fallback,&failure)) {
             BOOL large=[[fallback objectForKey:@"height"] integerValue]>144 ||
-                ([[fallback objectForKey:@"combined"] boolValue] && [[fallback objectForKey:@"videoItag"] integerValue]==18);
+                ([[fallback objectForKey:@"combined"] boolValue] &&
+                 [[fallback objectForKey:@"videoItag"] integerValue]==18);
             if(large) {
                 NSMutableDictionary *small=YTSmallVideoWithExistingAudio(fallback,responses,streamNotes);
                 if(small) fallback=small;
                 else [streamNotes addObject:@"No readable small video; using the 360p CPU fallback"];
             }
-            NSMutableArray *allNotes=[NSMutableArray arrayWithArray:streamNotes]; [allNotes addObjectsFromArray:nativeNotes];
-            if([allNotes count]) [fallback setObject:[allNotes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
-            [[NSUserDefaults standardUserDefaults] setObject:[fallback objectForKey:@"clientLabel"] forKey:@"YTWorkingClient"];
+            NSMutableArray *allNotes=[NSMutableArray arrayWithArray:streamNotes];
+            [allNotes addObjectsFromArray:nativeNotes];
+            if([allNotes count])
+                [fallback setObject:[allNotes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
+            [[NSUserDefaults standardUserDefaults] setObject:[fallback objectForKey:@"clientLabel"]
+                                                      forKey:@"YTWorkingClient"];
             return fallback;
         }
-        [errors addObject:[NSString stringWithFormat:@"%@: %@",[fallback objectForKey:@"clientLabel"],failure ? failure : @"Media URL failed."]];
+        [errors addObject:[NSString stringWithFormat:@"%@: %@",
+            [fallback objectForKey:@"clientLabel"],
+            failure ? failure : @"Media URL failed."]];
     }
 
     if(errorText) {
