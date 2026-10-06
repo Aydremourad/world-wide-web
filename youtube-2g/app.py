@@ -46,7 +46,7 @@ LOCAL_TEST_IDS = {PLAYBACK_TEST_ID, STREAM_TEST_ID}
 PLAYBACK_TEST_ITEM = dict(videoId=PLAYBACK_TEST_ID, title='Playback test',
     author='YouTube 2G', authorId='unknown', description='A local playback test.',
     published=0, lengthSeconds=8, viewCount=0)
-VERSION = '2g-2.0'
+VERSION = '2g-2.1'
 
 
 def media_ready(vid):
@@ -376,17 +376,18 @@ def thumbnail(vid):
 
 
 def ffmpeg_args(source, destination):
-    # Conservative original-iPhone H.264: Baseline, one reference frame,
-    # no B-frames, no CABAC, no 8x8 transform or weighted prediction.
+    # Original-iPhone hardware path. Encode only as hard as needed to guarantee
+    # the user's 15 fps floor; ultrafast substantially reduces first-play wait
+    # on free/cloud CPU while staying inside Baseline L3.0.
     return ['ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error', '-y', '-i', str(source),
             '-map', '0:v:0', '-map', '0:a:0?', '-vf',
             'scale=320:240:force_original_aspect_ratio=decrease,pad=320:240:(ow-iw)/2:(oh-ih)/2,setsar=1',
-            '-r', '24', '-c:v', 'libx264', '-threads', '0', '-preset', 'veryfast',
+            '-r', '15', '-c:v', 'libx264', '-threads', '0', '-preset', 'ultrafast',
             '-profile:v', 'baseline', '-level:v', '3.0', '-pix_fmt', 'yuv420p',
             '-refs', '1', '-bf', '0', '-coder', '0',
-            '-x264-params', 'cabac=0:ref=1:bframes=0:8x8dct=0:weightp=0',
-            '-b:v', '400k', '-maxrate', '500k', '-bufsize', '1000k',
-            '-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '80k', '-ar', '44100', '-ac', '2',
+            '-x264-params', 'cabac=0:ref=1:bframes=0:8x8dct=0:weightp=0:keyint=30:min-keyint=15',
+            '-b:v', '360k', '-maxrate', '480k', '-bufsize', '960k',
+            '-c:a', 'aac', '-profile:a', 'aac_low', '-b:a', '64k', '-ar', '44100', '-ac', '2',
             '-movflags', '+faststart', str(destination)]
 
 
@@ -570,8 +571,15 @@ def playback_file(path, status='ready', native=True):
     if native:
         response.headers['X-YouTube2G-Width'] = '320'
         response.headers['X-YouTube2G-Height'] = '240'
-        response.headers['X-YouTube2G-FPS'] = '24'
+        response.headers['X-YouTube2G-FPS'] = '15'
     return response
+
+
+@app.route('/prepare/<vid>', methods=['GET', 'POST'])
+def prepare_video(vid):
+    validate(vid)
+    status = 'ready' if media_ready(vid) else schedule(vid)
+    return jsonify(status=status)
 
 
 @app.route('/getvideo/<vid>', methods=['GET', 'HEAD'])
