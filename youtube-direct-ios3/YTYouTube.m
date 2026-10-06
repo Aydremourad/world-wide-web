@@ -643,7 +643,7 @@ static NSString *YTServerBase(void) {
     return @"https://aydreyoutube2g.duckdns.org";
 }
 static NSString *YTServerUserAgent(void) {
-    return @"YouTubeDirect/1.2.5 (iPhone1,1; iPhone OS 3.1.3)";
+    return @"YouTubeDirect/1.2.6 (iPhone1,1; iPhone OS 3.1.3)";
 }
 static void YTServerBeginPrepare(NSString *videoID) {
     NSString *address=[NSString stringWithFormat:@"%@/prepare/%@",YTServerBase(),videoID];
@@ -706,8 +706,8 @@ static NSMutableDictionary *YTServerPreparedNativeForID(NSString *videoID, NSStr
 
     long long length=probe->length;
     BOOL native=probe->serverNative;
-    NSInteger width=probe->serverWidth>0 ? probe->serverWidth : 320;
-    NSInteger height=probe->serverHeight>0 ? probe->serverHeight : 240;
+    NSInteger width=probe->serverWidth>0 ? probe->serverWidth : 256;
+    NSInteger height=probe->serverHeight>0 ? probe->serverHeight : 144;
     NSInteger fps=probe->serverFPS>0 ? probe->serverFPS : 15;
     [probe->connection cancel];
     [probe release];
@@ -740,7 +740,7 @@ static NSMutableDictionary *YTServerPreparedNativeForID(NSString *videoID, NSStr
         [NSNumber numberWithInteger:-18],@"videoItag",
         YTServerUserAgent(),@"userAgent",
         @"YouTube 2G server Baseline MP4",@"clientLabel",
-        @"1.2.5 server-ready H.264 Baseline/AAC-LC native path",@"nativeSearch",nil];
+        @"1.2.6 server-ready H.264 Baseline/AAC-LC native path",@"nativeSearch",nil];
 }
 
 static NSMutableDictionary *YTCombinedCandidateFromPlayer(NSString *player, NSString *userAgent) {
@@ -1185,7 +1185,7 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
             (info && [[info objectForKey:@"eligible"] boolValue]) ? @"NATIVE" : @"rejected"]];
 
         if(info && [[info objectForKey:@"eligible"] boolValue]) {
-            [nativeNotes insertObject:@"1.2.5 progressive-first" atIndex:0];
+            [nativeNotes insertObject:@"1.2.6 progressive-first" atIndex:0];
             [candidate setObject:[nativeNotes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
             [[NSUserDefaults standardUserDefaults] setObject:(label ? label : @"Web")
                                                       forKey:@"YTWorkingClient"];
@@ -1252,7 +1252,7 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
             (info && [[info objectForKey:@"eligible"] boolValue]) ? @"NATIVE" : @"rejected"]];
 
         if(info && [[info objectForKey:@"eligible"] boolValue]) {
-            [nativeNotes insertObject:@"1.2.5 progressive-first" atIndex:0];
+            [nativeNotes insertObject:@"1.2.6 progressive-first" atIndex:0];
             [candidate setObject:[nativeNotes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
             [[NSUserDefaults standardUserDefaults] setObject:[client objectForKey:@"label"]
                                                       forKey:@"YTWorkingClient"];
@@ -1275,7 +1275,7 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
     NSMutableDictionary *serverNative=YTServerPreparedNativeForID(videoID,&serverFailure);
     if(serverNative) {
         NSMutableArray *notes=[NSMutableArray arrayWithObject:
-            @"1.2.5 direct native unavailable; server-ready native MP4"];
+            @"1.2.6 direct native unavailable; server-ready native MP4"];
         [notes addObjectsFromArray:nativeNotes];
         [serverNative setObject:[notes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
         return serverNative;
@@ -1283,67 +1283,21 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
     if([serverFailure length])
         [streamNotes addObject:[NSString stringWithFormat:@"Server native: %@",serverFailure]];
 
-    // The remote native path was unavailable. Only now spend time probing HLS.
-    NSDictionary *hlsCandidate=YTHLSStreamsFromResponses(webResponses,streamNotes);
-    if(hlsCandidate &&
-       [[[hlsCandidate objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue]) {
-        NSMutableDictionary *nativeHLS=[[hlsCandidate mutableCopy] autorelease];
-        NSMutableArray *notes=[NSMutableArray arrayWithObject:@"1.2.3 progressive unavailable; Apple hardware HLS fallback"];
-        [notes addObjectsFromArray:nativeNotes];
-        [nativeHLS setObject:[notes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
-        return nativeHLS;
-    }
-
     /*
-     * A non-native HLS rendition still costs ARM11 decode time. Do NOT return
-     * it before the tiny direct 144p/<=18fps AVC path. The last build could
-     * therefore strand us at ~240p/15fps source and ~5-6 decoded fps.
+     * 1.2.6 quality floor: software H.264 on the ARM11 has repeatedly measured
+     * only ~4-6 fps. That is not an acceptable playback route anymore. If the
+     * direct Apple-compatible path and server-prepared native MP4 both fail,
+     * report the preparation failure instead of silently opening the slow
+     * decoder/HLS fallback.
      */
-    NSMutableDictionary *lowFPS=YTLowFPSStreamsForID(videoID);
-    if(lowFPS) {
-        NSMutableArray *notes=[NSMutableArray arrayWithObject:@"1.2.3 native unavailable; forced tiny direct software path"];
-        [notes addObjectsFromArray:nativeNotes];
-        [lowFPS setObject:[notes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
-        return lowFPS;
+    if(errorText) {
+        NSString *detail=[serverFailure length] ? serverFailure :
+            @"No Apple-compatible native movie was available.";
+        *errorText=[NSString stringWithFormat:
+            @"Native playback could not be prepared. %@ Please try the video again after the server finishes or check the server status.",
+            detail];
     }
-
-    // Only if the direct tiny stream does not exist do we permit software HLS.
-    if(hlsCandidate) {
-        NSMutableDictionary *ready=[[hlsCandidate mutableCopy] autorelease];
-        [ready removeObjectForKey:@"nativeHLS"];
-        [ready setObject:[NSNumber numberWithBool:YES] forKey:@"softwareHLS"];
-        [ready setObject:[NSNumber numberWithBool:YES] forKey:@"hlsAudio"];
-        NSMutableArray *notes=[NSMutableArray arrayWithObject:@"1.2.3 tiny direct unavailable; software HLS last resort"];
-        [notes addObjectsFromArray:nativeNotes];
-        [ready setObject:[notes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
-        return ready;
-    }
-
-    // Preserve the established software fallback, preferring the smallest
-    // readable H.264 representation and retaining the already-working audio.
-    for(NSMutableDictionary *fallback in [fallbacks sortedArrayUsingFunction:YTSoftwareFallbackOrder context:NULL]) {
-        NSString *failure=nil;
-        if(YTPrepareStreams(fallback,&failure)) {
-            BOOL large=[[fallback objectForKey:@"height"] integerValue]>144 ||
-                ([[fallback objectForKey:@"combined"] boolValue] &&
-                 [[fallback objectForKey:@"videoItag"] integerValue]==18);
-            if(large) {
-                NSMutableDictionary *small=YTSmallVideoWithExistingAudio(fallback,responses,streamNotes);
-                if(small) fallback=small;
-                else [streamNotes addObject:@"No readable small video; using the 360p CPU fallback"];
-            }
-            NSMutableArray *allNotes=[NSMutableArray arrayWithArray:streamNotes];
-            [allNotes addObjectsFromArray:nativeNotes];
-            if([allNotes count])
-                [fallback setObject:[allNotes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
-            [[NSUserDefaults standardUserDefaults] setObject:[fallback objectForKey:@"clientLabel"]
-                                                      forKey:@"YTWorkingClient"];
-            return fallback;
-        }
-        [errors addObject:[NSString stringWithFormat:@"%@: %@",
-            [fallback objectForKey:@"clientLabel"],
-            failure ? failure : @"Media URL failed."]];
-    }
+    return nil;
 
     if(errorText) {
         *errorText=[errors count] ? [errors componentsJoinedByString:@"\n\n"] :
