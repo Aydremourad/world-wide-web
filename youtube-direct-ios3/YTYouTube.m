@@ -806,20 +806,53 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
     NSString *streaming=YTObjectForKey(player,@"streamingData");
     if(!streaming) return nil;
     NSArray *formats=YTJSONObjectStringsInArray(streaming,@"adaptiveFormats");
+
+    /*
+     * Software emergency path: choose by the ACTUAL dimensions/fps, not by an
+     * assumed itag-to-codec mapping. YouTube's low-rate 144p AVC is commonly
+     * Main profile (for example 597), which Apple hardware may reject but our
+     * FFmpeg decoder can handle. At 256x144 it has only ~36% of the pixels of
+     * 426x240, giving the ARM11 its first realistic chance to sustain 15 fps.
+     */
     NSString *video=nil,*audio=nil;
+    long long bestScore=LLONG_MAX;
     for(NSString *format in formats) {
         NSInteger itag=YTJSONIntForKey(format,@"itag");
         NSString *mime=YTJSONStringForKey(format,@"mimeType",0);
+        NSInteger width=YTJSONIntForKey(format,@"width");
+        NSInteger height=YTJSONIntForKey(format,@"height");
         NSInteger fps=YTJSONIntForKey(format,@"fps");
-        if(!video && (itag==160 || itag==597) && fps>0 && fps<=18 &&
-           [mime rangeOfString:@"video/mp4" options:NSCaseInsensitiveSearch].location!=NSNotFound &&
-           [mime rangeOfString:@"avc1.42" options:NSCaseInsensitiveSearch].location!=NSNotFound &&
-           YTFormatURL(format)) video=format;
+
+        if(fps<=0 && itag==597) fps=15;
+        if((width<=0 || height<=0) && (itag==597 || itag==160)) {
+            width=256; height=144;
+        }
+
+        BOOL tinyAVC=[mime rangeOfString:@"video/mp4" options:NSCaseInsensitiveSearch].location!=NSNotFound &&
+                     [mime rangeOfString:@"avc1." options:NSCaseInsensitiveSearch].location!=NSNotFound &&
+                     width>0 && height>0 && width<=256 && height<=144 &&
+                     fps>0 && fps<=18 && YTFormatURL(format);
+        if(tinyAVC) {
+            long long length=YTFormatLength(format);
+            // Prefer fewer pixels first, then lower fps, then smaller bytes.
+            long long score=(long long)width*height*1000000LL + (long long)fps*10000LL +
+                            (length>0 ? MIN(length/1024,9999) : 9999);
+            if(score<bestScore) { video=format; bestScore=score; }
+        }
+
         if(!audio && itag==140 &&
            [mime rangeOfString:@"mp4a.40.2" options:NSCaseInsensitiveSearch].location!=NSNotFound &&
            YTFormatURL(format)) audio=format;
     }
+
     if(!video || !audio) return nil;
+
+    NSInteger chosenItag=YTJSONIntForKey(video,@"itag");
+    NSInteger chosenFPS=YTJSONIntForKey(video,@"fps");
+    NSInteger chosenHeight=YTJSONIntForKey(video,@"height");
+    if(chosenFPS<=0 && chosenItag==597) chosenFPS=15;
+    if(chosenHeight<=0 && (chosenItag==597 || chosenItag==160)) chosenHeight=144;
+
     long long videoLength=YTFormatLength(video),audioLength=YTFormatLength(audio);
     NSMutableDictionary *streams=[NSMutableDictionary dictionaryWithObjectsAndKeys:
         YTFormatURL(video),@"videoURL",YTFormatURL(audio),@"audioURL",
@@ -827,12 +860,12 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
         [NSNumber numberWithLongLong:audioLength],@"audioLength",
         [NSNumber numberWithBool:NO],@"combined",
         [NSNumber numberWithBool:NO],@"nativeCandidate",
-        [NSNumber numberWithInteger:YTJSONIntForKey(video,@"height")],@"height",
-        [NSNumber numberWithInteger:YTJSONIntForKey(video,@"fps")],@"fps",
-        [NSNumber numberWithInteger:YTJSONIntForKey(video,@"itag")],@"videoItag",
+        [NSNumber numberWithInteger:chosenHeight],@"height",
+        [NSNumber numberWithInteger:chosenFPS],@"fps",
+        [NSNumber numberWithInteger:chosenItag],@"videoItag",
         [client objectForKey:@"ua"],@"userAgent",
-        @"Web low-FPS Baseline",@"clientLabel",
-        @"15 fps Baseline direct path",@"nativeSearch",nil];
+        @"Web tiny-AVC software fallback",@"clientLabel",
+        @"1.2.3 forced <=144p <=18fps AVC software path",@"nativeSearch",nil];
     NSString *failure=nil;
     return YTPrepareStreams(streams,&failure);
 }
@@ -1118,32 +1151,38 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
     // Progressive native playback was not available. Only now inspect and
     // prebuffer an HLS rendition from the already-fetched web responses.
     NSDictionary *hlsCandidate=YTHLSStreamsFromResponses(webResponses,streamNotes);
-    if(hlsCandidate) {
-        if([[[hlsCandidate objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue]) {
-            NSMutableDictionary *nativeHLS=[[hlsCandidate mutableCopy] autorelease];
-            NSMutableArray *notes=[NSMutableArray arrayWithObject:@"1.2.2 progressive unavailable; Apple HLS fallback"];
-            [notes addObjectsFromArray:nativeNotes];
-            [nativeHLS setObject:[notes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
-            return nativeHLS;
-        }
+    if(hlsCandidate &&
+       [[[hlsCandidate objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue]) {
+        NSMutableDictionary *nativeHLS=[[hlsCandidate mutableCopy] autorelease];
+        NSMutableArray *notes=[NSMutableArray arrayWithObject:@"1.2.3 progressive unavailable; Apple hardware HLS fallback"];
+        [notes addObjectsFromArray:nativeNotes];
+        [nativeHLS setObject:[notes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
+        return nativeHLS;
+    }
 
+    /*
+     * A non-native HLS rendition still costs ARM11 decode time. Do NOT return
+     * it before the tiny direct 144p/<=18fps AVC path. The last build could
+     * therefore strand us at ~240p/15fps source and ~5-6 decoded fps.
+     */
+    NSMutableDictionary *lowFPS=YTLowFPSStreamsForID(videoID);
+    if(lowFPS) {
+        NSMutableArray *notes=[NSMutableArray arrayWithObject:@"1.2.3 native unavailable; forced tiny direct software path"];
+        [notes addObjectsFromArray:nativeNotes];
+        [lowFPS setObject:[notes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
+        return lowFPS;
+    }
+
+    // Only if the direct tiny stream does not exist do we permit software HLS.
+    if(hlsCandidate) {
         NSMutableDictionary *ready=[[hlsCandidate mutableCopy] autorelease];
         [ready removeObjectForKey:@"nativeHLS"];
         [ready setObject:[NSNumber numberWithBool:YES] forKey:@"softwareHLS"];
         [ready setObject:[NSNumber numberWithBool:YES] forKey:@"hlsAudio"];
-        NSMutableArray *notes=[NSMutableArray arrayWithObject:@"1.2.2 progressive unavailable; software HLS fallback"];
+        NSMutableArray *notes=[NSMutableArray arrayWithObject:@"1.2.3 tiny direct unavailable; software HLS last resort"];
         [notes addObjectsFromArray:nativeNotes];
         [ready setObject:[notes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
         return ready;
-    }
-
-    // Only now spend CPU on the low-FPS software route.
-    NSMutableDictionary *lowFPS=YTLowFPSStreamsForID(videoID);
-    if(lowFPS) {
-        NSMutableArray *notes=[NSMutableArray arrayWithObject:@"1.2.2 no native progressive/HLS; low-FPS software fallback"];
-        [notes addObjectsFromArray:nativeNotes];
-        [lowFPS setObject:[notes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
-        return lowFPS;
     }
 
     // Preserve the established software fallback, preferring the smallest
