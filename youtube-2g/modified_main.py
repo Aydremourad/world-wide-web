@@ -100,6 +100,12 @@ def healthz():
 @app.get("/diagnostics")
 def diagnostics():
     token_file = DATA_ROOT / "data" / "tokens.json"
+    provider_ready = False
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:4416/ping", timeout=1) as r:
+            provider_ready = (r.status == 200)
+    except OSError:
+        pass
     return {
         "server": "Modified TubeRepair for iOS 3",
         "upstream_commit": os.environ.get("MODIFIED_TUBEREPAIR_COMMIT", "unknown"),
@@ -108,6 +114,8 @@ def diagnostics():
         "hls_resolution": int(getattr(config, "HLS_RESOLUTION", 720)),
         "persistent_data_root": str(DATA_ROOT),
         "login_storage_present": token_file.exists(),
+        "token_provider_ready": provider_ready,
+        "playback_patch": "render-pot-direct-mp4-320x240-15fps",
     }
 
 if __name__ == "__main__":
