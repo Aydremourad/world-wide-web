@@ -6,7 +6,7 @@ services:
     branch: youtube-2g-server
     dockerfilePath: ./youtube-2g/Dockerfile
     dockerContext: ./youtube-2g
-    healthCheckPath: /schemas/2007/categories.cat
+    healthCheckPath: /healthz
     autoDeployTrigger: "commit"
     envVars:
       - key: PORT
