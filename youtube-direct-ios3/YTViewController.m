@@ -184,7 +184,12 @@
     if (streams) {
         // HLS is already preflighted by the bridge; it has no progressive
         // videoURL for the FFmpeg native probe to open.
-        NSDictionary *info=([[streams objectForKey:@"nativeHLS"] boolValue] || [[streams objectForKey:@"softwareHLS"] boolValue]) ? nil : YTNativeStreamInfo(streams);
+        // Server-prepared movies have already been ffprobe-verified by the
+        // backend and advertise X-YouTube2G-Native: 1. Do not waste iPhone CPU
+        // probing the same MP4 again before handing it to Apple's player.
+        BOOL preverified=[[streams objectForKey:@"serverPrepared"] boolValue];
+        NSDictionary *info=(preverified || [[streams objectForKey:@"nativeHLS"] boolValue] ||
+            [[streams objectForKey:@"softwareHLS"] boolValue]) ? nil : YTNativeStreamInfo(streams);
         if(info) [streams setObject:info forKey:@"nativeInfo"];
         // Do not detour through another H.264 client here. The only preferred
         // alternate path is legacy itag 17, selected earlier from Android.
