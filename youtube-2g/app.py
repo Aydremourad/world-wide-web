@@ -46,7 +46,7 @@ LOCAL_TEST_IDS = {PLAYBACK_TEST_ID, STREAM_TEST_ID}
 PLAYBACK_TEST_ITEM = dict(videoId=PLAYBACK_TEST_ID, title='Playback test',
     author='YouTube 2G', authorId='unknown', description='A local playback test.',
     published=0, lengthSeconds=8, viewCount=0)
-VERSION = 'tuberepair-stock-3.0'
+VERSION = 'tuberepair-stock-3.1'
 
 
 def media_ready(vid):
@@ -234,12 +234,15 @@ def feed(data, template='classic/search.jinja2'):
 
 
 def warm_results(data):
-    # Only speculate on the top short result, and only while the queue is idle.
-    # Do not download every visible video or fill the queue ahead of a selection.
-    limit = min(int(os.environ.get('PREFETCH_SECONDS', '60')), MAX_SECONDS)
+    # Begin one likely playback job as soon as the stock app receives a feed.
+    # Flat YouTube search often omits duration (0), so treating 0 as "unknown"
+    # instead of "do not prefetch" lets useful work start before the user taps.
+    limit = min(int(os.environ.get('PREFETCH_SECONDS', '180')), MAX_SECONDS)
     if data and limit > 0:
         first = data[0]
-        if first['videoId'] not in LOCAL_TEST_IDS and 0 < first.get('lengthSeconds', 0) <= limit:
+        duration = int(first.get('lengthSeconds') or 0)
+        if (first['videoId'] not in LOCAL_TEST_IDS and
+                (duration == 0 or duration <= limit)):
             schedule(first['videoId'], hint=first, prefetch=True)
 
 
@@ -289,7 +292,7 @@ def diagnostics():
                    stock_bundle='com.apple.youtube',
                    youtube_clients='mweb,web_embedded,android_vr,default',
                    cookie_fallback='anonymous', playback_wait_seconds=120,
-                   progressive_fast_path=False)
+                   progressive_fast_path=True, prefetch_seconds=int(os.environ.get('PREFETCH_SECONDS', '180')))
 
 
 @app.get('/feeds/api/videos')
@@ -563,54 +566,112 @@ def verify_converted_movie(path):
         raise RuntimeError('Converted audio is not original-iPhone AAC')
 
 
+def source_is_native_compatible(path):
+    """Return True only for a source the original iPhone hardware should decode."""
+    try:
+        probe = json.loads(subprocess.check_output(['ffprobe', '-v', 'error',
+            '-show_streams', '-of', 'json', str(path)], timeout=20))
+        video = next((v for v in probe.get('streams', []) if v.get('codec_type') == 'video'), {})
+        audio = next((v for v in probe.get('streams', []) if v.get('codec_type') == 'audio'), None)
+        rate = video.get('avg_frame_rate') or video.get('r_frame_rate') or '0/1'
+        try:
+            num, den = rate.split('/', 1)
+            fps = float(num) / max(float(den), 1.0)
+        except Exception:
+            fps = 0.0
+        video_ok = (
+            video.get('codec_name') == 'h264'
+            and video.get('profile') in ('Baseline', 'Constrained Baseline')
+            and int(video.get('level') or 999) <= 30
+            and int(video.get('width') or 0) <= 640
+            and int(video.get('height') or 0) <= 480
+            and video.get('pix_fmt') == 'yuv420p'
+            and 0 < fps <= 30.1
+        )
+        if not video_ok:
+            return False
+        if audio:
+            audio_ok = (
+                audio.get('codec_name') == 'aac'
+                and audio.get('profile') == 'LC'
+                and int(audio.get('sample_rate') or 0) <= 48000
+                and int(audio.get('channels') or 0) <= 2
+            )
+            if not audio_ok:
+                return False
+        return True
+    except Exception:
+        return False
+
+
 def convert(vid, hint=None):
     import tempfile
     try:
-        if hint and hint['lengthSeconds'] > MAX_SECONDS:
+        if hint and hint.get('lengthSeconds', 0) > MAX_SECONDS:
             raise ValueError('too-long')
+
         with tempfile.TemporaryDirectory(prefix='source-', dir=STATE) as work:
             source = Path(work) / 'source.mp4'
-            try:
-                download_direct_source(vid, source)
-                log.info('Downloaded mobile source for %s', vid)
-            except ValueError as exc:
-                if str(exc) == 'too-long':
-                    raise
-                source.unlink(missing_ok=True)
-            except Exception:
-                # Do not log signed media URLs from transport exceptions.
-                source.unlink(missing_ok=True)
-            if not source.exists():
-                item = hint or info(vid)
-                if item['lengthSeconds'] > MAX_SECONDS:
-                    raise ValueError('too-long')
-                selector = ('bestvideo[ext=mp4][height<=144][vcodec^=avc1]+'
-                            'bestaudio[ext=m4a][acodec^=mp4a]/'
-                            'bestvideo[height<=144]+bestaudio/'
-                            '18/best[ext=mp4][height<=360][vcodec^=avc1][acodec^=mp4a]/'
-                            'best[height<=360]')
-                run_ytdlp(['-f', selector, '--merge-output-format', 'mp4',
-                           '--max-filesize', '200M',
-                           '--match-filters', f'!is_live & duration <= {MAX_SECONDS}',
-                           '-o', str(source), 'https://www.youtube.com/watch?v=' + vid], timeout=600)
-            if not source.exists():
-                raise RuntimeError('Video exceeds source limit or is unavailable')
+            item = hint or info(vid)
+            if item.get('lengthSeconds', 0) > MAX_SECONDS:
+                raise ValueError('too-long')
+
+            # Do NOT fetch 360p itag 18 first. We are ultimately serving 144p
+            # to the original iPhone, so start with the smallest H.264/AAC
+            # source YouTube exposes. This cuts both transfer and decode work.
+            selector = (
+                'bestvideo[ext=mp4][height<=144][vcodec^=avc1]+'
+                'bestaudio[ext=m4a][acodec^=mp4a]/'
+                'bestvideo[height<=144]+bestaudio/'
+                '17/18/'
+                'best[ext=mp4][height<=240][vcodec^=avc1][acodec^=mp4a]/'
+                'best[height<=240]'
+            )
+            run_ytdlp([
+                '-f', selector,
+                '--concurrent-fragments', '4',
+                '--merge-output-format', 'mp4',
+                '--max-filesize', '120M',
+                '--match-filters', f'!is_live & duration <= {MAX_SECONDS}',
+                '-o', str(source),
+                'https://www.youtube.com/watch?v=' + vid
+            ], timeout=180)
+
+            if not source.exists() or source.stat().st_size < 1000:
+                raise RuntimeError('Video source was not downloaded')
+
             prune_cache()
             output = Path(work) / 'converted.mp4'
-            # Always transcode. The original iPhone/stock YouTube player is more
-            # restrictive than container/codec metadata alone can prove; some
-            # nominally Baseline progressive YouTube MP4s still produce
-            # "format not supported" on-device.
-            log.info('Transcoding %s for original iPhone compatibility', vid)
-            subprocess.run(ffmpeg_args(source, output), check=True,
-                           capture_output=True, timeout=600)
+
+            # Fastest possible path: if YouTube already supplied Baseline L3.0
+            # + AAC-LC, only move the MP4 moov atom to the front. No H.264
+            # re-encode at all.
+            if source_is_native_compatible(source):
+                log.info('Native-compatible source for %s; remuxing without transcode', vid)
+                subprocess.run([
+                    'ffmpeg', '-nostdin', '-hide_banner', '-loglevel', 'error',
+                    '-y', '-i', str(source), '-map', '0:v:0', '-map', '0:a:0?',
+                    '-c', 'copy', '-movflags', '+faststart', str(output)
+                ], check=True, capture_output=True, timeout=90)
+            else:
+                log.info('Transcoding %s to 256x144/15fps original-iPhone Baseline', vid)
+                subprocess.run(ffmpeg_args(source, output), check=True,
+                               capture_output=True, timeout=420)
+
             if not output.exists() or output.stat().st_size < 1000:
-                raise RuntimeError('Empty converted video')
-            verify_converted_movie(output)
+                raise RuntimeError('Empty prepared video')
+
+            # Transcoded output gets the strict 256x144 verification; remuxed
+            # output was already checked by source_is_native_compatible().
+            if not source_is_native_compatible(output):
+                verify_converted_movie(output)
+
             output.replace(MEDIA / (vid + '.mp4'))
+
         with jobs_lock:
             jobs[vid] = ('ready', time.monotonic())
             job_errors.pop(vid, None)
+
     except Exception as exc:
         log.warning('Conversion failed for %s: %s', vid, exc)
         with jobs_lock:
@@ -619,7 +680,6 @@ def convert(vid, hint=None):
                                'timeout' if isinstance(exc, subprocess.TimeoutExpired) else
                                'conversion-failed' if isinstance(exc, subprocess.CalledProcessError) else
                                'too-long' if str(exc) == 'too-long' else 'download-failed')
-
 
 def schedule(vid, hint=None, prefetch=False):
     with jobs_lock:
