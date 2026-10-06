@@ -23,13 +23,7 @@ RUN git clone --filter=blob:none --no-checkout \
     && cd /app/modified-tuberepair \
     && git checkout "${MODIFIED_TUBEREPAIR_COMMIT}" \
     && cp requirements.txt /app/upstream-requirements.txt \
-    && python - <<'PY'
-from pathlib import Path
-p = Path('/app/modified-tuberepair/tuberepair/api/video.py')
-s = p.read_text()
-s = s.replace('''print(\n    "TEST CHANNEL ID:",\n    get_channel_id_from_name("MrBeast")\n)\n''', '')
-p.write_text(s)
-PY
+    && python -c 'from pathlib import Path; p=Path("/app/modified-tuberepair/tuberepair/api/video.py"); s=p.read_text(); s=s.replace("print(\\n    \\"TEST CHANNEL ID:\\",\\n    get_channel_id_from_name(\\"MrBeast\\")\\n)\\n", ""); p.write_text(s)'
 
 RUN python -m pip install --no-cache-dir \
     -r /app/upstream-requirements.txt \
