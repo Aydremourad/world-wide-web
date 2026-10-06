@@ -300,7 +300,9 @@ static NSDictionary *YTSafariHLSClient(void) {
         @"",@"extra",[NSNumber numberWithDouble:4.0],@"timeout",nil];
 }
 
-static NSDictionary *YTHLSStreamsForID(NSString *videoID,NSMutableArray *responses,NSMutableArray *notes) {
+static NSArray *YTPreparedWebClients(NSString *videoID) {
+    // Prepare WEB_EMBEDDED with the context YouTube expects, but DO NOT touch
+    // an HLS manifest yet. This lets 1.2.2 test progressive itag 18 first.
     NSMutableDictionary *embedded=[[YTEmbeddedHLSClient() mutableCopy] autorelease];
     NSString *embedPage=[NSString stringWithFormat:@"https://www.youtube.com/embed/%@?hl=en",videoID];
     NSData *pageData=YTGETWithUserAgent(embedPage,[embedded objectForKey:@"ua"],3.0,NULL);
@@ -313,31 +315,36 @@ static NSDictionary *YTHLSStreamsForID(NSString *videoID,NSMutableArray *respons
     }
     NSString *flags=YTJSONStringForKey(page,@"encryptedHostFlags",0);
     if([flags length]) [embedded setObject:[NSString stringWithFormat:
-        @",\"playbackContext\":{\"contentPlaybackContext\":{\"html5Preference\":\"HTML5_PREF_WANTS\",\"encryptedHostFlags\":%@}}",YTJSONQuote(flags)] forKey:@"requestExtra"];
+        @",\"playbackContext\":{\"contentPlaybackContext\":{\"html5Preference\":\"HTML5_PREF_WANTS\",\"encryptedHostFlags\":%@}}",
+        YTJSONQuote(flags)] forKey:@"requestExtra"];
     [embedded setObject:embedPage forKey:@"referer"];
-    NSArray *clients=[NSArray arrayWithObjects:embedded,YTSafariHLSClient(),nil];
-    for(NSDictionary *client in clients) {
-        NSString *failure=nil;
-        NSString *player=YTPlayerResponse(videoID,client,&failure);
-        if(player) [responses addObject:[NSDictionary dictionaryWithObjectsAndKeys:player,@"player",client,@"client",nil]];
+    return [NSArray arrayWithObjects:embedded,YTSafariHLSClient(),nil];
+}
+
+static NSDictionary *YTHLSStreamsFromResponses(NSArray *responses,NSMutableArray *notes) {
+    // This is deliberately called only AFTER every progressive combined movie
+    // has been probed. No HLS segment is downloaded on the successful itag-18
+    // path.
+    for(NSDictionary *response in responses) {
+        NSDictionary *client=[response objectForKey:@"client"];
+        NSString *player=[response objectForKey:@"player"];
         NSString *hls=YTJSONStringForKey(player,@"hlsManifestUrl",0);
         if(![hls hasPrefix:@"https://"]) {
             NSString *status=YTJSONStringForKey(player,@"status",0);
-            [notes addObject:[NSString stringWithFormat:@"%@: %@",[client objectForKey:@"label"],
-                failure ? failure : status && ![status isEqualToString:@"OK"] ? status : @"no HLS manifest"]];
+            [notes addObject:[NSString stringWithFormat:@"%@: %@",
+                [client objectForKey:@"label"],
+                status && ![status isEqualToString:@"OK"] ? status : @"no HLS manifest"]];
             continue;
         }
 
-        // Do not stop at the first manifest URL. A client can expose HLS but
-        // omit the old Baseline rendition or return an unusable playlist.
-        // Preflight each independent client until one proves it can serve
-        // 144p Baseline MPEG-TS and has three complete segments buffered.
         YTHLSBridge *bridge=[[[YTHLSBridge alloc] initWithURL:[NSURL URLWithString:hls]
             userAgent:[client objectForKey:@"ua"]] autorelease];
         if(![bridge start]) {
-            [notes addObject:[NSString stringWithFormat:@"%@: %@",[client objectForKey:@"label"],
+            [notes addObject:[NSString stringWithFormat:@"%@: %@",
+                [client objectForKey:@"label"],
                 [bridge errorText] ? [bridge errorText] : @"HLS preflight failed"]];
-            [bridge stop]; continue;
+            [bridge stop];
+            continue;
         }
 
         NSInteger height=[bridge selectedHeight];
@@ -345,8 +352,10 @@ static NSDictionary *YTHLSStreamsForID(NSString *videoID,NSMutableArray *respons
         BOOL baseline=[bridge selectedBaseline];
         NSDictionary *info=[NSDictionary dictionaryWithObjectsAndKeys:
             [NSNumber numberWithBool:baseline],@"eligible",
-            [NSNumber numberWithInt:baseline ? 66 : 77],@"profile",[NSNumber numberWithInt:30],@"level",
-            [NSNumber numberWithDouble:fps],@"fps",[NSNumber numberWithInt:256],@"width",
+            [NSNumber numberWithInt:baseline ? 66 : 77],@"profile",
+            [NSNumber numberWithInt:30],@"level",
+            [NSNumber numberWithDouble:fps],@"fps",
+            [NSNumber numberWithInt:256],@"width",
             [NSNumber numberWithInteger:height>0 ? height : 144],@"height",
             [NSNumber numberWithLongLong:0],@"length",nil];
         NSMutableDictionary *ready=[NSMutableDictionary dictionaryWithObjectsAndKeys:
@@ -364,8 +373,8 @@ static NSDictionary *YTHLSStreamsForID(NSString *videoID,NSMutableArray *respons
             [client objectForKey:@"label"],@"clientLabel",nil];
         NSString *description=[bridge selectedDescription];
         if([description length])
-            [ready setObject:[NSString stringWithFormat:@"%@ via %@",description,[client objectForKey:@"label"]]
-                forKey:@"nativeSearch"];
+            [ready setObject:[NSString stringWithFormat:@"%@ via %@",
+                description,[client objectForKey:@"label"]] forKey:@"nativeSearch"];
         return ready;
     }
     return nil;
@@ -958,13 +967,19 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
     NSMutableArray *responses=[NSMutableArray array];
     NSMutableArray *streamNotes=[NSMutableArray array];
 
-    /*
-     * YTHLSStreamsForID also obtains correctly contextualized WEB_EMBEDDED and
-     * Safari player responses (visitor data, embed referer, encrypted flags).
-     * Keep its candidate for later, but inspect those player responses for a
-     * progressive movie BEFORE accepting HLS.
-     */
-    NSDictionary *hlsCandidate=YTHLSStreamsForID(videoID,responses,streamNotes);
+    // Obtain the correctly contextualized WEB_EMBEDDED/Safari player
+    // responses without starting or buffering HLS.
+    NSArray *webClients=YTPreparedWebClients(videoID);
+    for(NSDictionary *client in webClients) {
+        NSString *failure=nil;
+        NSString *player=YTPlayerResponse(videoID,client,&failure);
+        if(player)
+            [responses addObject:[NSDictionary dictionaryWithObjectsAndKeys:
+                player,@"player",client,@"client",nil]];
+        else
+            [streamNotes addObject:[NSString stringWithFormat:@"%@: %@",
+                [client objectForKey:@"label"],failure ? failure : @"No player response."]];
+    }
 
     NSArray *clients=YTPlayerClients();
     NSMutableArray *errors=[NSMutableArray array];
@@ -998,10 +1013,9 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
 
         NSString *candidateFailure=nil;
         if(!YTPrepareStreams(candidate,&candidateFailure)) {
-            [nativeNotes addObject:[NSString stringWithFormat:@"%@: progressive movie unreadable%@%@",
+            [nativeNotes addObject:[NSString stringWithFormat:@"%@: progressive movie unreadable (%@)",
                 label ? label : @"Web",
-                candidateFailure ? @" (" : @"",
-                candidateFailure ? candidateFailure : @""]];
+                candidateFailure ? candidateFailure : @"unknown error"]];
             continue;
         }
 
@@ -1101,15 +1115,16 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
             [fallbacks addObject:candidate];
     }
 
-    // Progressive native playback was not available. Now use the already
-    // validated HLS candidate before falling back to software H.264 decoding.
+    // Progressive native playback was not available. Only now inspect and
+    // prebuffer an HLS rendition from the already-fetched web responses.
+    NSDictionary *hlsCandidate=YTHLSStreamsFromResponses(webResponses,streamNotes);
     if(hlsCandidate) {
         if([[[hlsCandidate objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue]) {
-            NSMutableDictionary *nativeHLS=[[[hlsCandidate mutableCopy] autorelease] retain];
+            NSMutableDictionary *nativeHLS=[[hlsCandidate mutableCopy] autorelease];
             NSMutableArray *notes=[NSMutableArray arrayWithObject:@"1.2.2 progressive unavailable; Apple HLS fallback"];
             [notes addObjectsFromArray:nativeNotes];
             [nativeHLS setObject:[notes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
-            return [nativeHLS autorelease];
+            return nativeHLS;
         }
 
         NSMutableDictionary *ready=[[hlsCandidate mutableCopy] autorelease];
