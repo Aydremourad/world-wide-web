@@ -46,7 +46,7 @@ LOCAL_TEST_IDS = {PLAYBACK_TEST_ID, STREAM_TEST_ID}
 PLAYBACK_TEST_ITEM = dict(videoId=PLAYBACK_TEST_ID, title='Playback test',
     author='YouTube 2G', authorId='unknown', description='A local playback test.',
     published=0, lengthSeconds=8, viewCount=0)
-VERSION = '2g-2.1'
+VERSION = '2g-2.2'
 
 
 def media_ready(vid):
@@ -91,55 +91,67 @@ def base_url():
 
 
 def run_ytdlp(args, timeout=90):
-    # YouTube's current rollout can return zero usable formats specifically for
-    # logged-in mweb/web_embedded sessions. Include yt-dlp's normal clients and,
-    # when a private cookie jar is available, retry once without it. This keeps
-    # cookies useful for Render IP bot checks without making a bad account-side
-    # experiment a single point of failure.
+    # 2026 YouTube delivery is client-dependent. Start with yt-dlp's currently
+    # recommended mweb + PO-token-provider route, but do not make it a single
+    # point of failure. If that client cannot expose/download a source, retry
+    # with clients that do not require the same GVS token path.
     base_cmd = [sys.executable, '-m', 'yt_dlp', '--ignore-config', '--no-warnings',
                 '--no-playlist', '--socket-timeout', '15', '--retries', '1',
-                '--extractor-retries', '1']
-    if os.environ.get('YOUTUBE_POT_ENABLED') == '1':
-        # yt-dlp's current recommendation is mweb + a GVS PO-token provider.
-        # Running this on the user's residential Mac also avoids cloud-host IP
-        # reputation/bot checks that PO tokens do not solve by themselves.
-        base_cmd += [
-            '--extractor-args', 'youtube:player_client=mweb',
-            '--extractor-args', 'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416',
-            '--js-runtimes', 'node',
-            '--js-runtimes', 'deno',
-        ]
+                '--extractor-retries', '1', '--js-runtimes', 'node', '--js-runtimes', 'deno']
 
     configured = os.environ.get('YOUTUBE_COOKIES_FILE')
     secret = Path(configured or '/etc/secrets/youtube-cookies.txt')
     if configured and not secret.is_file():
         raise RuntimeError('Configured YouTube cookie file is missing')
 
-    attempts = (True, False) if secret.is_file() else (False,)
+    token_enabled = os.environ.get('YOUTUBE_POT_ENABLED') == '1'
+    profiles = [
+        ('mweb+pot', 'mweb', True),
+        ('embedded', 'web_embedded,default', False),
+        ('android-vr', 'android_vr,default', False),
+    ]
+
     failures = []
-    for use_cookies in attempts:
-        cmd = list(base_cmd)
-        with tempfile.TemporaryDirectory(prefix='cookies-', dir=STATE) as work:
-            if use_cookies:
-                # yt-dlp writes its cookie jar. Work on a private copy and leave
-                # the Render secret file untouched.
-                jar = Path(work) / 'cookies.txt'
-                shutil.copyfile(secret, jar)
-                jar.chmod(0o600)
-                cmd[4:4] = ['--cookies', str(jar)]
-            cmd += args
-            with downloads:
-                result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-        if result.returncode == 0:
-            if failures:
-                log.info('yt-dlp anonymous fallback succeeded after cookie-session failure')
-            return result.stdout
-        failures.append(result.stderr[-1200:] or 'YouTube request failed')
+    cookie_modes = (True, False) if secret.is_file() else (False,)
+    for use_cookies in cookie_modes:
+        for label, clients, wants_provider in profiles:
+            # android_vr does not support account cookies; use it only on the
+            # anonymous pass. web_embedded/default remains a useful cookie pass.
+            if use_cookies and label == 'android-vr':
+                continue
+
+            cmd = list(base_cmd)
+            cmd += ['--extractor-args', 'youtube:player_client=' + clients]
+            if token_enabled and wants_provider:
+                cmd += ['--extractor-args',
+                        'youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416']
+
+            with tempfile.TemporaryDirectory(prefix='cookies-', dir=STATE) as work:
+                if use_cookies:
+                    jar = Path(work) / 'cookies.txt'
+                    shutil.copyfile(secret, jar)
+                    jar.chmod(0o600)
+                    cmd[4:4] = ['--cookies', str(jar)]
+
+                cmd += args
+                with downloads:
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+            if result.returncode == 0:
+                if failures:
+                    log.info('yt-dlp fallback succeeded via %s (%s)',
+                             label, 'cookies' if use_cookies else 'anonymous')
+                return result.stdout
+
+            tail = result.stderr[-1200:] or 'YouTube request failed'
+            failures.append(f'{label}: {tail}')
+            log.warning('yt-dlp %s attempt failed (%s)',
+                        label, 'cookies' if use_cookies else 'anonymous')
+
         if use_cookies:
-            log.warning('yt-dlp cookie-session extraction failed; retrying without cookies')
+            log.warning('yt-dlp cookie-session extraction failed; retrying anonymously')
 
-    raise DownloadError(failures[-1])
-
+    raise DownloadError(failures[-1] if failures else 'YouTube request failed')
 
 def normalize(item):
     vid = item.get('id', '')
@@ -262,7 +274,7 @@ def diagnostics():
     # Only readiness flags and versions; no tokens, file contents, or account data.
     return jsonify(version=VERSION, downloader=version('yt-dlp'),
                    token_provider_ready=provider, cookies_loaded=secret.is_file(),
-                   playback_mode='mp4', youtube_clients='mweb',
+                   playback_mode='mp4', youtube_clients='mweb,web_embedded,android_vr,default',
                    cookie_fallback='anonymous', playback_wait_seconds=120,
                    progressive_fast_path=False)
 
