@@ -46,7 +46,7 @@ LOCAL_TEST_IDS = {PLAYBACK_TEST_ID, STREAM_TEST_ID}
 PLAYBACK_TEST_ITEM = dict(videoId=PLAYBACK_TEST_ID, title='Playback test',
     author='YouTube 2G', authorId='unknown', description='A local playback test.',
     published=0, lengthSeconds=8, viewCount=0)
-VERSION = '2g-2.4'
+VERSION = 'tuberepair-stock-3.0'
 
 
 def media_ready(vid):
@@ -285,13 +285,17 @@ def diagnostics():
     # Only readiness flags and versions; no tokens, file contents, or account data.
     return jsonify(version=VERSION, downloader=version('yt-dlp'),
                    token_provider_ready=provider, cookies_loaded=secret.is_file(),
-                   playback_mode='mp4', youtube_clients='mweb,web_embedded,android_vr,default',
+                   playback_mode='stock-youtube-tuberepair-mp4', tube_repair=True,
+                   stock_bundle='com.apple.youtube',
+                   youtube_clients='mweb,web_embedded,android_vr,default',
                    cookie_fallback='anonymous', playback_wait_seconds=120,
                    progressive_fast_path=False)
 
 
 @app.get('/feeds/api/videos')
 @app.get('/feeds/api/videos/')
+@app.get('/api/videos')
+@app.get('/api/videos/')
 def video_search():
     try:
         data = search(request.args.get('q') or 'recent videos',
@@ -305,6 +309,8 @@ def video_search():
 
 @app.get('/feeds/api/standardfeeds/<popular>')
 @app.get('/feeds/api/standardfeeds/<region>/<popular>')
+@app.get('/api/standardfeeds/<popular>')
+@app.get('/api/standardfeeds/<region>/<popular>')
 def frontpage(popular, region='US'):
     # Search-backed browsing; these are not the defunct official rankings.
     query = {'most_viewed': 'popular music videos', 'top_rated': 'popular videos',
@@ -316,6 +322,7 @@ def frontpage(popular, region='US'):
 
 
 @app.get('/feeds/api/videos/<vid>')
+@app.get('/api/videos/<vid>')
 def single(vid):
     item = info(vid)
     if vid not in LOCAL_TEST_IDS:
@@ -324,6 +331,7 @@ def single(vid):
 
 
 @app.route('/feeds/api/videos/batch', methods=['POST', 'GET'])
+@app.route('/api/videos/batch', methods=['POST', 'GET'])
 def batch():
     text = request.get_data(as_text=True) + ' ' + request.query_string.decode(errors='replace')
     # Extract IDs only; never fetch arbitrary URLs supplied by a caller.
@@ -338,12 +346,14 @@ def batch():
 
 
 @app.get('/feeds/api/videos/<vid>/related')
+@app.get('/api/videos/<vid>/related')
 def related(vid):
     item = info(vid)
     return feed(search(item['title'][:100]))
 
 
 @app.get('/feeds/api/users/<channel>/uploads')
+@app.get('/api/users/<channel>/uploads')
 def uploads(channel):
     if not re.fullmatch(r'UC[A-Za-z0-9_-]{22}', channel):
         return feed([])
@@ -367,6 +377,51 @@ def comments(vid):
     validate(vid)
     return Response('<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"><title>Comments</title></feed>', mimetype='application/atom+xml')
 
+
+# Classic TubeRepair / pre-iPhone-4 servers sometimes prefix GData
+# requests with the requested playback height (for example /144/feeds/api/...).
+# Keep the canonical feed generation in one place and simply dispatch those
+# legacy forms to the same handlers.
+def _legacy_res_ok(res):
+    return 144 <= int(res) <= 480
+
+@app.get('/<int:res>/feeds/api/videos')
+@app.get('/<int:res>/feeds/api/videos/')
+def legacy_video_search(res):
+    if not _legacy_res_ok(res): abort(404)
+    return video_search()
+
+@app.get('/<int:res>/feeds/api/standardfeeds/<popular>')
+@app.get('/<int:res>/feeds/api/standardfeeds/<region>/<popular>')
+def legacy_frontpage(res, popular, region='US'):
+    if not _legacy_res_ok(res): abort(404)
+    return frontpage(popular, region)
+
+@app.get('/<int:res>/feeds/api/videos/<vid>')
+def legacy_single(res, vid):
+    if not _legacy_res_ok(res): abort(404)
+    return single(vid)
+
+@app.route('/<int:res>/feeds/api/videos/batch', methods=['POST', 'GET'])
+def legacy_batch(res):
+    if not _legacy_res_ok(res): abort(404)
+    return batch()
+
+@app.get('/<int:res>/feeds/api/videos/<vid>/related')
+def legacy_related(res, vid):
+    if not _legacy_res_ok(res): abort(404)
+    return related(vid)
+
+@app.get('/<int:res>/feeds/api/users/<channel>/uploads')
+def legacy_uploads(res, channel):
+    if not _legacy_res_ok(res): abort(404)
+    return uploads(channel)
+
+@app.get('/<int:res>/api/videos/<vid>/comments')
+@app.get('/<int:res>/feeds/api/videos/<vid>/comments')
+def legacy_comments(res, vid):
+    if not _legacy_res_ok(res): abort(404)
+    return comments(vid)
 
 @app.post('/youtube/accounts/applelogin1')
 def applelogin1():
@@ -609,7 +664,8 @@ def prepare_video(vid):
 @app.route('/getvideo/<vid>', methods=['GET', 'HEAD'])
 @app.route('/video/sd/<vid>', methods=['GET', 'HEAD'])
 @app.route('/video/hd/<vid>', methods=['GET', 'HEAD'])
-def playback(vid):
+@app.route('/<int:res>/getvideo/<vid>', methods=['GET', 'HEAD'])
+def playback(vid, res=None):
     validate(vid)
     # The stock OS 3 player rejected HLS even after its server error was fixed.
     # Both sample IDs serve the exact known-compatible MP4, without a redirect.
