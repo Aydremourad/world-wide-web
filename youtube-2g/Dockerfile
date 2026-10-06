@@ -30,6 +30,7 @@ RUN git clone --filter=blob:none --no-checkout \
     && cp -a tuberepair /app/tuberepair \
     && cp requirements.txt /app/upstream-requirements.txt \
     && cp LICENSE /app/UPSTREAM-GPL-3.0-LICENSE \
+    && find /app/tuberepair -maxdepth 1 -type f \\( -name '*.mp4' -o -name '*.mp4.part' \\) -delete \
     && rm -rf /tmp/modified-tuberepair
 
 # Upstream README requires yt-dlp + FFmpeg but its Dockerfile does not install
