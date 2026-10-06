@@ -584,6 +584,8 @@ static NSString *YTPlayerDiagnostic(NSString *player, NSArray *formats) {
 @public
     long long length;
     BOOL done;
+    BOOL serverNative;
+    NSInteger serverWidth, serverHeight, serverFPS;
     NSURLConnection *connection;
 }
 @end
@@ -594,11 +596,20 @@ static NSString *YTPlayerDiagnostic(NSString *player, NSArray *formats) {
         NSString *mime = [response MIMEType];
         if (([http statusCode] == 200 || [http statusCode] == 206) &&
             ([mime hasPrefix:@"video/"] || [mime hasPrefix:@"audio/"] || [mime isEqualToString:@"application/octet-stream"])) {
-            for (NSString *key in [http allHeaderFields]) {
+            NSDictionary *headers=[http allHeaderFields];
+            for (NSString *key in headers) {
+                NSString *value=[headers objectForKey:key];
                 if ([key caseInsensitiveCompare:@"Content-Range"] == NSOrderedSame) {
-                    NSString *value = [[http allHeaderFields] objectForKey:key];
                     NSRange slash = [value rangeOfString:@"/" options:NSBackwardsSearch];
                     if (slash.location != NSNotFound) length = [[value substringFromIndex:slash.location + 1] longLongValue];
+                } else if([key caseInsensitiveCompare:@"X-YouTube2G-Native"]==NSOrderedSame) {
+                    serverNative=[value intValue]==1;
+                } else if([key caseInsensitiveCompare:@"X-YouTube2G-Width"]==NSOrderedSame) {
+                    serverWidth=[value integerValue];
+                } else if([key caseInsensitiveCompare:@"X-YouTube2G-Height"]==NSOrderedSame) {
+                    serverHeight=[value integerValue];
+                } else if([key caseInsensitiveCompare:@"X-YouTube2G-FPS"]==NSOrderedSame) {
+                    serverFPS=[value integerValue];
                 }
             }
             if (length <= 0 && [http statusCode] == 200) length = [response expectedContentLength];
@@ -626,6 +637,70 @@ static long long YTRemoteLength(NSURL *url, NSString *userAgent) {
     [probe->connection cancel];
     [probe release];
     return length;
+}
+
+static NSMutableDictionary *YTServerPreparedNativeForID(NSString *videoID, NSString **failure) {
+    /*
+     * Remote compatibility fallback. The existing youtube-2g backend always
+     * transcodes real videos to H.264 Baseline L3.0 + AAC-LC, verifies the
+     * result with ffprobe, publishes it atomically, and serves byte ranges.
+     * The phone therefore performs ZERO H.264 software decoding on this path.
+     */
+    NSString *address=[NSString stringWithFormat:
+        @"https://aydreyoutube2g.duckdns.org/getvideo/%@",videoID];
+    NSURL *url=[NSURL URLWithString:address];
+    NSString *ua=@"YouTubeDirect/1.2.4 (iPhone1,1; iPhone OS 3.1.3)";
+
+    NSMutableURLRequest *request=[NSMutableURLRequest requestWithURL:url
+        cachePolicy:NSURLRequestReloadIgnoringLocalCacheData timeoutInterval:62.0];
+    [request setHTTPMethod:@"HEAD"];
+    [request setValue:ua forHTTPHeaderField:@"User-Agent"];
+    [request setValue:@"identity" forHTTPHeaderField:@"Accept-Encoding"];
+
+    YTLengthRequest *probe=[[YTLengthRequest alloc] init];
+    probe->connection=[[NSURLConnection alloc] initWithRequest:request delegate:probe];
+
+    NSDate *deadline=[NSDate dateWithTimeIntervalSinceNow:62.5];
+    while(probe->connection && !probe->done && [deadline timeIntervalSinceNow]>0)
+        [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
+                                beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.05]];
+
+    long long length=probe->length;
+    BOOL native=probe->serverNative;
+    NSInteger width=probe->serverWidth>0 ? probe->serverWidth : 320;
+    NSInteger height=probe->serverHeight>0 ? probe->serverHeight : 240;
+    NSInteger fps=probe->serverFPS>0 ? probe->serverFPS : 24;
+    [probe->connection cancel];
+    [probe release];
+
+    if(!native || length<=0) {
+        if(failure) *failure=native ? @"Server movie had no usable Content-Length." :
+            @"Server did not return a prepared native movie within 62 seconds.";
+        return nil;
+    }
+
+    NSDictionary *info=[NSDictionary dictionaryWithObjectsAndKeys:
+        [NSNumber numberWithBool:YES],@"eligible",
+        [NSNumber numberWithInt:66],@"profile",
+        [NSNumber numberWithInt:30],@"level",
+        [NSNumber numberWithInteger:fps],@"fps",
+        [NSNumber numberWithInteger:width],@"width",
+        [NSNumber numberWithInteger:height],@"height",
+        [NSNumber numberWithLongLong:length],@"length",nil];
+
+    return [NSMutableDictionary dictionaryWithObjectsAndKeys:
+        url,@"videoURL",url,@"audioURL",
+        [NSNumber numberWithLongLong:length],@"videoLength",
+        [NSNumber numberWithLongLong:length],@"audioLength",
+        [NSNumber numberWithBool:YES],@"combined",
+        [NSNumber numberWithBool:YES],@"nativeCandidate",
+        info,@"nativeInfo",
+        [NSNumber numberWithInteger:height],@"height",
+        [NSNumber numberWithInteger:fps],@"fps",
+        [NSNumber numberWithInteger:-18],@"videoItag",
+        ua,@"userAgent",
+        @"YouTube 2G server Baseline MP4",@"clientLabel",
+        @"1.2.4 server-prepared H.264 Baseline/AAC-LC native path",@"nativeSearch",nil];
 }
 
 
@@ -1148,8 +1223,24 @@ static NSMutableDictionary *YTLowFPSStreamsForID(NSString *videoID) {
             [fallbacks addObject:candidate];
     }
 
-    // Progressive native playback was not available. Only now inspect and
-    // prebuffer an HLS rendition from the already-fetched web responses.
+    /*
+     * Direct YouTube did not expose a hardware-safe progressive movie.
+     * Ask the already-existing remote backend to prepare one. This is the
+     * decisive 1.2.4 path: server transcode, Apple player decode.
+     */
+    NSString *serverFailure=nil;
+    NSMutableDictionary *serverNative=YTServerPreparedNativeForID(videoID,&serverFailure);
+    if(serverNative) {
+        NSMutableArray *notes=[NSMutableArray arrayWithObject:
+            @"1.2.4 direct native unavailable; server-prepared native MP4"];
+        [notes addObjectsFromArray:nativeNotes];
+        [serverNative setObject:[notes componentsJoinedByString:@" | "] forKey:@"nativeSearch"];
+        return serverNative;
+    }
+    if([serverFailure length])
+        [streamNotes addObject:[NSString stringWithFormat:@"Server native: %@",serverFailure]];
+
+    // The remote native path was unavailable. Only now spend time probing HLS.
     NSDictionary *hlsCandidate=YTHLSStreamsFromResponses(webResponses,streamNotes);
     if(hlsCandidate &&
        [[[hlsCandidate objectForKey:@"nativeInfo"] objectForKey:@"eligible"] boolValue]) {
