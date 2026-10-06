@@ -20,6 +20,12 @@ s = s.replace(
     'return send_file(temp_output, mimetype="video/mp4", conditional=True)',
 )
 
+# Give every yt-dlp invocation a JS runtime before modifying its YouTube client.
+s = s.replace(
+    '["yt-dlp",',
+    '["yt-dlp", "--ignore-config", "--js-runtimes", "node", "--socket-timeout", "15",',
+)
+
 # Upstream's local-server recipe uses the Android client directly. That often
 # works from a home IP but gets restricted from cloud/datacenter IPs. Route
 # all of its yt-dlp calls through the same PO-token-capable client mix that
