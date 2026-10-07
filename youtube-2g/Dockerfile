@@ -21,6 +21,8 @@ RUN apt-get update \
 
 WORKDIR /app
 
+COPY patch_video_proxy.py /tmp/patch_video_proxy.py
+
 # Run the actual Modified TubeRepair source, pinned to a known upstream commit.
 RUN git clone --filter=blob:none --no-checkout \
       https://github.com/ShahAndI123/Modified-Tuberepair-for-ios-2-6-built-in-YT-best-for-pre-iphone-4.git \
@@ -33,6 +35,8 @@ RUN git clone --filter=blob:none --no-checkout \
     && find /app/tuberepair -maxdepth 1 -type f -name '*.mp4' -delete \
     && find /app/tuberepair -maxdepth 1 -type f -name '*.mp4.part' -delete \
     && rm -rf /tmp/modified-tuberepair
+
+RUN python /tmp/patch_video_proxy.py && rm /tmp/patch_video_proxy.py
 
 # Upstream README requires yt-dlp + FFmpeg but its Dockerfile does not install
 # yt-dlp. Use the same current nightly that was already proven on this service.
