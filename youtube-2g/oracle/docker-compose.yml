@@ -1,0 +1,42 @@
+services:
+  tuberepair:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      companion:
+        condition: service_started
+    environment:
+      PORT: "10000"
+      DEBUG: "false"
+      SPYING: "false"
+      COMPRESS: "true"
+      MEDIUM_QUALITY: "true"
+      USE_REDIS: "false"
+      TUBEREPAIR_DATA_DIR: "/var/data"
+      SERVER_THREADS: "8"
+      LOCAL_COMPANION_URL: "http://companion:8282/companion"
+      INVIDIOUS_VIDEO_PROXIES: ""
+      GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
+      GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
+    ports:
+      - "10000:10000"
+    volumes:
+      - tuberepair-data:/var/data
+
+  companion:
+    image: quay.io/invidious/invidious-companion:latest
+    restart: unless-stopped
+    environment:
+      SERVER_SECRET_KEY: "${COMPANION_SECRET_KEY}"
+      HOST: "0.0.0.0"
+      PORT: "8282"
+      CACHE_DIRECTORY: "/var/tmp/youtubei.js"
+      SERVER_VERIFY_REQUESTS: "false"
+    volumes:
+      - companion-cache:/var/tmp
+
+volumes:
+  tuberepair-data:
+  companion-cache:
