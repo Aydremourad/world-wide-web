@@ -41,6 +41,21 @@ LINKER_SHIM="$(mktemp -d /tmp/tuberepair-armv6-linker.XXXXXX)"
 trap 'rm -rf "$LINKER_SHIM"' EXIT
 ln -s "$LEGACY_LD" "$LINKER_SHIM/ld"
 
+SERVER_API="$(curl -fsS --max-time 10 https://aydreyoutube2g.duckdns.org/bridge-api-version 2>/dev/null || true)"
+if [ "$SERVER_API" != "prepare-v1" ]; then
+    echo
+    echo "Render does not have the new nonblocking prepare API yet."
+    echo "Deploy the latest youtube-2g-server branch on Render, then rerun this command."
+    echo "Expected: prepare-v1"
+    if [ -n "$SERVER_API" ]; then
+        echo "Received: $SERVER_API"
+    else
+        echo "Received: no response"
+    fi
+    exit 2
+fi
+
+echo "[server] Nonblocking prepare API is live."
 echo "[preflight] Verifying clang will use the legacy armv6 linker..."
 PREFLIGHT="$(
     clang -### \
