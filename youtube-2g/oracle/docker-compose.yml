@@ -1,4 +1,10 @@
 services:
+  bgutil-provider:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:4416:4416"
+
   tuberepair:
     build:
       context: ..
@@ -6,7 +12,7 @@ services:
     restart: unless-stopped
     network_mode: host
     depends_on:
-      companion:
+      bgutil-provider:
         condition: service_started
     environment:
       PORT: "10000"
@@ -17,7 +23,7 @@ services:
       USE_REDIS: "false"
       TUBEREPAIR_DATA_DIR: "/var/data"
       SERVER_THREADS: "8"
-      LOCAL_COMPANION_URL: "http://127.0.0.1:8282/companion"
+      LOCAL_COMPANION_URL: ""
       INVIDIOUS_VIDEO_PROXIES: ""
       GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
       GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
