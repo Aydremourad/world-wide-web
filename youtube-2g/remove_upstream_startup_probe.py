@@ -342,8 +342,15 @@ if '@static.route("/healthz")' not in static_text:
 def render_healthz():
     return "ok", 200
 '''
-    static_path.write_text(static_text)
-print("Ensured /healthz route exists")
+if '@static.route("/bridge-api-version")' not in static_text:
+    static_text += '''
+
+@static.route("/bridge-api-version")
+def bridge_api_version():
+    return "prepare-v1", 200
+'''
+static_path.write_text(static_text)
+print("Ensured /healthz and /bridge-api-version routes exist")
 
 # 5) Terse request tracing, useful for confirming whether a tap reaches Render.
 main_text = main_path.read_text()
