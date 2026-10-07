@@ -66,19 +66,31 @@ new = """    let youtubePlayerResponse = await callWatchEndpoint(
                 console.log(
                     `[OAUTH] Client ${innertubeClientUsed} not playable; trying ${client}`,
                 );
-                const candidate = await callWatchEndpoint(
-                    videoId,
-                    innertubeClient,
-                    client,
-                    contentPoToken,
-                );
-                if (playable(candidate)) {
-                    console.log(`[OAUTH] Playback accepted by client ${client}`);
+                try {
+                    const candidate = await callWatchEndpoint(
+                        videoId,
+                        innertubeClient,
+                        client,
+                        contentPoToken,
+                    );
+                    if (playable(candidate)) {
+                        console.log(`[OAUTH] Playback accepted by client ${client}`);
+                        youtubePlayerResponse = candidate;
+                        innertubeClientUsed = client;
+                        break;
+                    }
+                    console.log(
+                        `[OAUTH] Client ${client} responded but was not playable: ${candidate.data?.playabilityStatus?.status ?? "unknown"} / ${candidate.data?.playabilityStatus?.reason ?? "no reason"}`,
+                    );
                     youtubePlayerResponse = candidate;
-                    break;
+                    innertubeClientUsed = client;
+                } catch (err) {
+                    console.log(
+                        `[OAUTH] Client ${client} request failed; continuing to next client:`,
+                        err,
+                    );
+                    innertubeClientUsed = client;
                 }
-                youtubePlayerResponse = candidate;
-                innertubeClientUsed = client;
             }
         }
     }
