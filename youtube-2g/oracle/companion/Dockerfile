@@ -8,8 +8,10 @@ RUN git clone https://github.com/iv-org/invidious-companion.git .
 RUN git checkout bb3b37f
 COPY oauth-no-pot.patch.py /tmp/oauth-no-pot.patch.py
 COPY youtubejs-18.1.0.patch.py /tmp/youtubejs-18.1.0.patch.py
+COPY potoken-skip-validation.patch.py /tmp/potoken-skip-validation.patch.py
 RUN python3 /tmp/oauth-no-pot.patch.py
 RUN python3 /tmp/youtubejs-18.1.0.patch.py
+RUN python3 /tmp/potoken-skip-validation.patch.py
 ENV DENO_DIR=/deno-dir
 RUN mkdir -p /var/tmp/youtubei.js /deno-dir
 RUN deno task compile
