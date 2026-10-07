@@ -1,21 +1,13 @@
-FROM debian:13-slim AS src
+FROM denoland/deno:bin-2.9.2 AS deno-bin
+
+FROM debian:13-slim AS builder
 RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates python3 && rm -rf /var/lib/apt/lists/*
-WORKDIR /src
+WORKDIR /app
+COPY --from=deno-bin /deno /usr/bin/deno
 RUN git clone https://github.com/iv-org/invidious-companion.git .
 RUN git checkout bb3b37f
 COPY oauth-no-pot.patch.py /tmp/oauth-no-pot.patch.py
 RUN python3 /tmp/oauth-no-pot.patch.py
-
-FROM denoland/deno:bin-2.9.2 AS deno-bin
-
-FROM debian:13-slim AS builder
-RUN apt-get update && apt-get install -y --no-install-recommends git ca-certificates && rm -rf /var/lib/apt/lists/*
-WORKDIR /app
-COPY --from=deno-bin /deno /usr/bin/deno
-COPY --from=src /src/deno.lock ./
-COPY --from=src /src/deno.jsonc ./
-COPY --from=src /src/src ./src
-COPY --from=src /src/config ./config
 ENV DENO_DIR=/deno-dir
 RUN mkdir -p /var/tmp/youtubei.js /deno-dir
 RUN deno task compile
