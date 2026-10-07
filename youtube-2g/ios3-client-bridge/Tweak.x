@@ -111,6 +111,10 @@ static NSURL *TRBRewriteURL(NSURL *url, NSString *source) {
     if (!url || ![TRBEndpoint length]) return url;
 
     NSString *absolute = [url absoluteString];
+    if ([absolute rangeOfString:@"youtube"].location != NSNotFound ||
+        [absolute hasPrefix:TRBEndpoint]) {
+        TRBLog(@"OBSERVED %@ %@", source, absolute);
+    }
     if ([absolute hasPrefix:TRBEndpoint]) return url;
 
     NSString *videoID = TRBVideoIDFromURL(url);
@@ -136,6 +140,22 @@ static NSString *TRBRewriteString(NSString *string, NSString *source) {
     NSURL *rewritten = TRBRewriteURL(url, source);
     if (rewritten != url) return [rewritten absoluteString];
     return string;
+}
+
+
+static NSURLRequest *TRBRewriteRequest(NSURLRequest *request, NSString *source) {
+    if (!request) return request;
+
+    NSURL *oldURL = [request URL];
+    NSURL *newURL = TRBRewriteURL(oldURL, source);
+    if (newURL == oldURL || [[newURL absoluteString] isEqualToString:[oldURL absoluteString]]) {
+        return request;
+    }
+
+    NSMutableURLRequest *copy = [[request mutableCopy] autorelease];
+    [copy setURL:newURL];
+    TRBLog(@"REQUEST REWRITE %@ -> %@", [oldURL absoluteString], [newURL absoluteString]);
+    return copy;
 }
 
 %hook NSURL
@@ -178,6 +198,23 @@ static NSString *TRBRewriteString(NSString *string, NSString *source) {
 
 - (void)setURL:(NSURL *)URL {
     %orig(TRBRewriteURL(URL, @"NSMutableURLRequest setURL:"));
+}
+
+%end
+
+
+%hook NSURLConnection
+
++ (NSData *)sendSynchronousRequest:(NSURLRequest *)request returningResponse:(NSURLResponse **)response error:(NSError **)error {
+    return %orig(TRBRewriteRequest(request, @"NSURLConnection sendSynchronousRequest:"), response, error);
+}
+
++ (id)connectionWithRequest:(NSURLRequest *)request delegate:(id)delegate {
+    return %orig(TRBRewriteRequest(request, @"NSURLConnection connectionWithRequest:"), delegate);
+}
+
+- (id)initWithRequest:(NSURLRequest *)request delegate:(id)delegate {
+    return %orig(TRBRewriteRequest(request, @"NSURLConnection initWithRequest:"), delegate);
 }
 
 %end
