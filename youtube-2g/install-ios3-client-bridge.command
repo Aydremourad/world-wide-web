@@ -21,11 +21,30 @@ SSH_OPTS=(
     -o Ciphers=+aes128-cbc,3des-cbc
 )
 
-echo "[1/4] Building ARMv6 iOS 3 bridge..."
+LEGACY_LD="$HOME/legacy-cctools/bin/arm-apple-darwin9-ld"
+
+if [ ! -x "$LEGACY_LD" ]; then
+    echo "Missing legacy armv6 linker:"
+    echo "  $LEGACY_LD"
+    echo
+    echo "Your working iPhone 2G projects use this exact linker."
+    exit 1
+fi
+
+if [ ! -d "$THEOS/sdks/iPhoneOS3.1.3.sdk" ]; then
+    echo "Missing iPhoneOS3.1.3.sdk at:"
+    echo "  $THEOS/sdks/iPhoneOS3.1.3.sdk"
+    exit 1
+fi
+
+echo "[1/4] Building ARMv6 iOS 3 bridge with legacy linker..."
 cd "$BRIDGE_DIR"
 rm -rf packages .theos
 make clean
-make package FINALPACKAGE=1
+make package FINALPACKAGE=1 \
+    ARCHS=armv6 \
+    TARGET=iphone:clang:3.1.3:3.0 \
+    TARGET_LD="clang --ld-path=$LEGACY_LD"
 
 DEB="$(ls -t packages/*.deb 2>/dev/null | head -n 1)"
 if [ -z "$DEB" ] || [ ! -f "$DEB" ]; then
