@@ -8,5 +8,6 @@ TWEAK_NAME = TubeRepairIOS3Bridge
 TubeRepairIOS3Bridge_FILES = Tweak.x
 TubeRepairIOS3Bridge_FRAMEWORKS = Foundation UIKit MediaPlayer
 TubeRepairIOS3Bridge_CFLAGS = -Wno-deprecated-declarations -Wno-format
+TubeRepairIOS3Bridge_LOGOS_DEFAULT_GENERATOR = internal
 
 include $(THEOS_MAKE_PATH)/tweak.mk
