@@ -17,6 +17,8 @@ helper = r'''
 #
 # The incoming Range header is forwarded because MPMoviePlayerController on
 # iPhone OS 3 probes MP4s with byte-range requests.
+_LOCAL_COMPANION_URL = os.environ.get("LOCAL_COMPANION_URL", "").rstrip("/")
+
 _INVIDIOUS_VIDEO_PROXIES = [
     host.strip()
     for host in os.environ.get(
@@ -38,11 +40,16 @@ def _proxy_invidious_video(video_id):
     if incoming_range:
         source_headers["Range"] = incoming_range
 
-    for host in _INVIDIOUS_VIDEO_PROXIES:
-        source_url = (
-            f"https://{host}/latest_version"
-            f"?id={video_id}&itag=18&local=true"
-        )
+    candidates = []
+    if _LOCAL_COMPANION_URL:
+        candidates.append(("local-companion", _LOCAL_COMPANION_URL + "/latest_version"))
+    candidates.extend(
+        (host, f"https://{host}/latest_version")
+        for host in _INVIDIOUS_VIDEO_PROXIES
+    )
+
+    for host, base_url in candidates:
+        source_url = f"{base_url}?id={video_id}&itag=18&local=true"
 
         upstream = None
         try:
