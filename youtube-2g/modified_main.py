@@ -59,6 +59,60 @@ def healthz():
         "playback_backend": "invidious-range-proxy-v1",
     }
 
+@app.get("/proxy-diagnostics/<video_id>")
+def proxy_diagnostics(video_id):
+    import requests
+
+    hosts = [
+        h.strip()
+        for h in os.environ.get(
+            "INVIDIOUS_VIDEO_PROXIES",
+            "invidious.tiekoetter.com,invidious.nerdvpn.de,inv.nadeko.net,yt.chocolatemoo53.com,invidious.f5.si",
+        ).split(",")
+        if h.strip()
+    ]
+
+    results = []
+    headers = {
+        "Range": "bytes=0-1",
+        "Accept": "*/*",
+        "Accept-Encoding": "identity",
+        "User-Agent": "Mozilla/5.0",
+    }
+
+    for host in hosts:
+        url = f"https://{host}/latest_version?id={video_id}&itag=18&local=true"
+        try:
+            r = requests.get(
+                url,
+                headers=headers,
+                allow_redirects=True,
+                stream=True,
+                timeout=(6, 12),
+            )
+            results.append({
+                "host": host,
+                "status": r.status_code,
+                "content_type": r.headers.get("Content-Type"),
+                "content_length": r.headers.get("Content-Length"),
+                "content_range": r.headers.get("Content-Range"),
+                "final_url": r.url,
+                "redirects": [x.status_code for x in r.history],
+            })
+            r.close()
+        except Exception as e:
+            results.append({
+                "host": host,
+                "error": repr(e),
+            })
+
+    return {
+        "video_id": video_id,
+        "itag": 18,
+        "range": "bytes=0-1",
+        "results": results,
+    }
+
 @app.get("/diagnostics")
 def diagnostics():
     token_file = DATA_ROOT / "data" / "tokens.json"
