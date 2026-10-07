@@ -13,6 +13,8 @@ static NSMutableArray *TRBVideoIDs = nil;
 static NSMutableDictionary *TRBOriginalDidSelectIMPs = nil;
 static NSMutableSet *TRBHookedDelegateClasses = nil;
 static MPMoviePlayerController *TRBForcedPlayer = nil;
+static IMP TRBOriginalUserSelectPendingIMP = NULL;
+static IMP TRBOriginalPrivateSelectIMP = NULL;
 
 static void TRBLog(NSString *format, ...) {
     va_list args;
@@ -360,6 +362,110 @@ static void TRBPlayMappedVideo(NSString *videoID) {
     TRBLog(@"FORCE PLAY play sent");
 }
 
+
+static NSString *TRBVideoIDForTableIndexPath(UITableView *tableView, NSIndexPath *indexPath) {
+    if (!tableView || !indexPath) return nil;
+
+    NSInteger section = [indexPath section];
+    NSInteger row = [indexPath row];
+    NSInteger count = (NSInteger)[TRBVideoIDs count];
+    if (count <= 0 || section != 0) return nil;
+
+    NSInteger rows = [tableView numberOfRowsInSection:section];
+    NSInteger offset = (rows == count + 1) ? 1 : 0;
+    NSInteger mappedIndex = row - offset;
+
+    TRBLog(@"MAP CHECK table=%@ section=%ld row=%ld rows=%ld mapped=%ld offset=%ld",
+           NSStringFromClass([tableView class]),
+           (long)section,
+           (long)row,
+           (long)rows,
+           (long)count,
+           (long)offset);
+
+    if ((rows == count || rows == count + 1) &&
+        mappedIndex >= 0 && mappedIndex < count) {
+        return [TRBVideoIDs objectAtIndex:mappedIndex];
+    }
+
+    return nil;
+}
+
+typedef void (*TRBUserSelectPendingIMP)(id, SEL, NSIndexPath *);
+typedef void (*TRBPrivateSelectIMP)(id, SEL, NSIndexPath *, BOOL, UITableViewScrollPosition, BOOL);
+
+static void TRBUserSelectPendingReplacement(id self, SEL cmd, NSIndexPath *indexPath) {
+    UITableView *tableView = (UITableView *)self;
+    NSString *videoID = TRBVideoIDForTableIndexPath(tableView, indexPath);
+
+    TRBLog(@"PRIVATE USER SELECT table=%@ index=%@ video=%@",
+           NSStringFromClass([tableView class]),
+           indexPath,
+           videoID);
+
+    if ([videoID length]) {
+        [tableView deselectRowAtIndexPath:indexPath animated:NO];
+        TRBPlayMappedVideo(videoID);
+        return;
+    }
+
+    if (TRBOriginalUserSelectPendingIMP) {
+        ((TRBUserSelectPendingIMP)TRBOriginalUserSelectPendingIMP)(self, cmd, indexPath);
+    }
+}
+
+static void TRBPrivateSelectReplacement(id self,
+                                        SEL cmd,
+                                        NSIndexPath *indexPath,
+                                        BOOL animated,
+                                        UITableViewScrollPosition scrollPosition,
+                                        BOOL notifyDelegate) {
+    UITableView *tableView = (UITableView *)self;
+    NSString *videoID = TRBVideoIDForTableIndexPath(tableView, indexPath);
+
+    TRBLog(@"PRIVATE SELECT table=%@ index=%@ notify=%d video=%@",
+           NSStringFromClass([tableView class]),
+           indexPath,
+           notifyDelegate ? 1 : 0,
+           videoID);
+
+    if ([videoID length] && notifyDelegate) {
+        [tableView deselectRowAtIndexPath:indexPath animated:NO];
+        TRBPlayMappedVideo(videoID);
+        return;
+    }
+
+    if (TRBOriginalPrivateSelectIMP) {
+        ((TRBPrivateSelectIMP)TRBOriginalPrivateSelectIMP)(
+            self, cmd, indexPath, animated, scrollPosition, notifyDelegate
+        );
+    }
+}
+
+static void TRBInstallPrivateTableHooks(void) {
+    Class cls = [UITableView class];
+
+    SEL pendingSel = NSSelectorFromString(@"_userSelectRowAtPendingSelectionIndexPath:");
+    Method pendingMethod = class_getInstanceMethod(cls, pendingSel);
+    if (pendingMethod) {
+        TRBOriginalUserSelectPendingIMP = method_getImplementation(pendingMethod);
+        method_setImplementation(pendingMethod, (IMP)TRBUserSelectPendingReplacement);
+        TRBLog(@"HOOKED PRIVATE %@", NSStringFromSelector(pendingSel));
+    } else {
+        TRBLog(@"PRIVATE SELECTOR MISSING %@", NSStringFromSelector(pendingSel));
+    }
+
+    SEL selectSel = NSSelectorFromString(@"_selectRowAtIndexPath:animated:scrollPosition:notifyDelegate:");
+    Method selectMethod = class_getInstanceMethod(cls, selectSel);
+    if (selectMethod) {
+        TRBOriginalPrivateSelectIMP = method_getImplementation(selectMethod);
+        method_setImplementation(selectMethod, (IMP)TRBPrivateSelectReplacement);
+        TRBLog(@"HOOKED PRIVATE %@", NSStringFromSelector(selectSel));
+    } else {
+        TRBLog(@"PRIVATE SELECTOR MISSING %@", NSStringFromSelector(selectSel));
+    }
+}
+
 static void TRBCallOriginalDidSelect(id self, SEL cmd, UITableView *tableView, NSIndexPath *indexPath) {
     NSString *key = NSStringFromClass([self class]);
     NSValue *value = [TRBOriginalDidSelectIMPs objectForKey:key];
@@ -459,6 +565,7 @@ static void TRBInstallSelectionHook(id delegate) {
     FILE *fp = fopen("/tmp/TubeRepairIOS3Bridge.log", "w");
     if (fp) fclose(fp);
 
-    TRBLog(@"TubeRepairIOS3Bridge 1.1.0 loaded endpoint=%@ host=%@", TRBEndpoint, TRBEndpointHost);
+    TRBLog(@"TubeRepairIOS3Bridge 1.2.0 loaded endpoint=%@ host=%@", TRBEndpoint, TRBEndpointHost);
+    TRBInstallPrivateTableHooks();
     [pool drain];
 }
