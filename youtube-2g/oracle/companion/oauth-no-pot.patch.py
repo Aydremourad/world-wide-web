@@ -1,6 +1,6 @@
 from pathlib import Path
 
-p = Path("/src/src/lib/helpers/youtubePlayerReq.ts")
+p = Path("/app/src/lib/helpers/youtubePlayerReq.ts")
 s = p.read_text()
 
 s = s.replace(
