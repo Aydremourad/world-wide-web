@@ -63,6 +63,8 @@ RUN python -m pip install --no-cache-dir \
     "bgutil-ytdlp-pot-provider==2.0.0" \
     && mv /usr/local/bin/yt-dlp /usr/local/bin/yt-dlp-real
 
+COPY classic_search_ios3.jinja2 /app/modified-tuberepair/tuberepair/templates/classic/search.jinja2
+
 COPY yt_dlp_render.py /usr/local/bin/yt-dlp
 RUN chmod 0755 /usr/local/bin/yt-dlp
 
