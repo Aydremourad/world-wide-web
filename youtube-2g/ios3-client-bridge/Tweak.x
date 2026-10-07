@@ -10,8 +10,6 @@ static NSString *TRBEndpointHost = nil;
 static BOOL TRBInsideURLBuild = NO;
 static BOOL TRBCollectVideoIDs = NO;
 static NSMutableArray *TRBVideoIDs = nil;
-static NSMutableDictionary *TRBOriginalDidSelectIMPs = nil;
-static NSMutableSet *TRBHookedDelegateClasses = nil;
 static NSString *TRBPreparingVideoID = nil;
 static NSMutableSet *TRBPreparedVideoIDs = nil;
 static UITableView *TRBPendingTableView = nil;
@@ -355,7 +353,7 @@ static NSURL *TRBRewritePreparedMovieURL(NSURL *url) {
 
 %end
 
-typedef void (*TRBDidSelectIMP)(id, SEL, UITableView *, NSIndexPath *);
+typedef void (*TRBPrivateSelectIMP)(id, SEL, NSIndexPath *, BOOL, UITableViewScrollPosition, BOOL);
 
 static void TRBClearPendingSelection(void) {
     [TRBPendingTableView release];
@@ -567,29 +565,6 @@ static NSString *TRBVideoIDForTableIndexPath(UITableView *tableView, NSIndexPath
     return nil;
 }
 
-typedef void (*TRBUserSelectPendingIMP)(id, SEL, NSIndexPath *);
-typedef void (*TRBPrivateSelectIMP)(id, SEL, NSIndexPath *, BOOL, UITableViewScrollPosition, BOOL);
-
-static void TRBUserSelectPendingReplacement(id self, SEL cmd, NSIndexPath *indexPath) {
-    UITableView *tableView = (UITableView *)self;
-    NSString *videoID = TRBVideoIDForTableIndexPath(tableView, indexPath);
-
-    TRBLog(@"PRIVATE USER SELECT table=%@ index=%@ video=%@",
-           NSStringFromClass([tableView class]),
-           indexPath,
-           videoID);
-
-    if ([videoID length]) {
-        [tableView deselectRowAtIndexPath:indexPath animated:NO];
-        TRBPlayMappedVideo(videoID);
-        return;
-    }
-
-    if (TRBOriginalUserSelectPendingIMP) {
-        ((TRBUserSelectPendingIMP)TRBOriginalUserSelectPendingIMP)(self, cmd, indexPath);
-    }
-}
-
 static void TRBPrivateSelectReplacement(id self,
                                         SEL cmd,
                                         NSIndexPath *indexPath,
@@ -632,83 +607,6 @@ static void TRBInstallPrivateTableHooks(void) {
     }
 }
 
-static void TRBCallOriginalDidSelect(id self, SEL cmd, UITableView *tableView, NSIndexPath *indexPath) {
-    NSString *key = NSStringFromClass([self class]);
-    NSValue *value = [TRBOriginalDidSelectIMPs objectForKey:key];
-    IMP imp = value ? [value pointerValue] : NULL;
-
-    if (imp) {
-        ((TRBDidSelectIMP)imp)(self, cmd, tableView, indexPath);
-    }
-}
-
-static void TRBDidSelectReplacement(id self, SEL cmd, UITableView *tableView, NSIndexPath *indexPath) {
-    NSInteger section = [indexPath section];
-    NSInteger row = [indexPath row];
-    NSInteger count = (NSInteger)[TRBVideoIDs count];
-    NSInteger rows = 0;
-
-    if ([tableView respondsToSelector:@selector(numberOfRowsInSection:)]) {
-        rows = [tableView numberOfRowsInSection:section];
-    }
-
-    TRBLog(@"DID SELECT delegate=%@ section=%ld row=%ld tableRows=%ld mapped=%ld",
-           NSStringFromClass([self class]),
-           (long)section,
-           (long)row,
-           (long)rows,
-           (long)count);
-
-    if (count > 0 && section == 0) {
-        NSInteger offset = (rows == count + 1) ? 1 : 0;
-        NSInteger mappedIndex = row - offset;
-
-        if (mappedIndex >= 0 && mappedIndex < count &&
-            (rows == count || rows == count + 1)) {
-            NSString *videoID = [TRBVideoIDs objectAtIndex:mappedIndex];
-            TRBLog(@"DID SELECT mapped row %ld -> %@", (long)row, videoID);
-
-            // Apple's stock iOS 3 list transition is what is freezing.
-            // Bypass only that transition and hand the same server movie URL
-            // directly to Apple's own full-screen MPMoviePlayerController.
-            [tableView deselectRowAtIndexPath:indexPath animated:NO];
-            TRBPlayMappedVideo(videoID);
-            return;
-        }
-    }
-
-    TRBLog(@"DID SELECT not a mapped video list; calling Apple original");
-    TRBCallOriginalDidSelect(self, cmd, tableView, indexPath);
-}
-
-static void TRBInstallSelectionHook(id delegate) {
-    if (!delegate) return;
-
-    Class cls = [delegate class];
-    NSString *key = NSStringFromClass(cls);
-    if ([TRBHookedDelegateClasses containsObject:key]) return;
-
-    SEL sel = @selector(tableView:didSelectRowAtIndexPath:);
-    Method inheritedOrOwn = class_getInstanceMethod(cls, sel);
-    if (!inheritedOrOwn) return;
-
-    IMP oldIMP = method_getImplementation(inheritedOrOwn);
-    const char *types = method_getTypeEncoding(inheritedOrOwn);
-    if (!oldIMP || !types) return;
-
-    [TRBOriginalDidSelectIMPs setObject:[NSValue valueWithPointer:oldIMP] forKey:key];
-
-    // If the implementation is inherited, add an override on this exact
-    // delegate class. Otherwise replace only this class's method.
-    if (!class_addMethod(cls, sel, (IMP)TRBDidSelectReplacement, types)) {
-        Method own = class_getInstanceMethod(cls, sel);
-        method_setImplementation(own, (IMP)TRBDidSelectReplacement);
-    }
-
-    [TRBHookedDelegateClasses addObject:key];
-    TRBLog(@"HOOKED DIDSELECT %@", key);
-}
-
 %ctor {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     TRBEndpoint = [TRBLoadEndpoint() copy];
@@ -717,8 +615,6 @@ static void TRBInstallSelectionHook(id delegate) {
 
     TRBVideoIDs = [[NSMutableArray alloc] init];
     TRBPreparedVideoIDs = [[NSMutableSet alloc] init];
-    TRBOriginalDidSelectIMPs = [[NSMutableDictionary alloc] init];
-    TRBHookedDelegateClasses = [[NSMutableSet alloc] init];
 
     FILE *fp = fopen("/tmp/TubeRepairIOS3Bridge.log", "w");
     if (fp) fclose(fp);
