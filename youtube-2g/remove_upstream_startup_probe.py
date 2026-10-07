@@ -213,6 +213,82 @@ if featured_anchor not in video_text:
     raise SystemExit("Featured fallback anchor not found")
 video_text = video_text.replace(featured_anchor, featured_replacement, 1)
 
+
+# 2b) Add an asynchronous preparation endpoint for iOS 3. The stock
+# MPMoviePlayerController initializer blocks while probing a remote URL, so
+# feeding it /getvideo/<id> freezes YouTube while yt-dlp/ffmpeg are still
+# working. /prepare/<id> starts the existing conversion in a daemon thread
+# and returns immediately; the phone only opens /static/<id>.mp4 once ready.
+prepare_anchor = '''@video.route("/feeds/api/videos/<video_id>/related")
+'''
+prepare_code = r'''
+_prepare_states = {}
+_prepare_states_lock = threading.Lock()
+
+def _prepare_video_worker(video_id):
+    print("PREPARE VIDEO WORKER START:", video_id, flush=True)
+    try:
+        # Reuse the exact existing conversion/cache path. This function does
+        # not depend on request data and is protected by the same per-video
+        # lock and global download semaphore as normal playback.
+        getvideo(video_id)
+
+        ready_path = f"static/{video_id}.mp4"
+        ready = os.path.exists(ready_path) and os.path.getsize(ready_path) > 0
+
+        with _prepare_states_lock:
+            _prepare_states[video_id] = "ready" if ready else "error"
+
+        print("PREPARE VIDEO WORKER END:", video_id, "ready=", ready, flush=True)
+    except Exception as e:
+        with _prepare_states_lock:
+            _prepare_states[video_id] = "error"
+        print("PREPARE VIDEO WORKER ERROR:", video_id, repr(e), flush=True)
+
+@video.route("/prepare/<video_id>")
+def prepare_video(video_id):
+    if video_id == "login_prompt":
+        return Response(
+            json.dumps({"status": "error"}),
+            status=400,
+            mimetype="application/json",
+        )
+
+    ready_path = f"static/{video_id}.mp4"
+    if os.path.exists(ready_path) and os.path.getsize(ready_path) > 0:
+        with _prepare_states_lock:
+            _prepare_states[video_id] = "ready"
+        return Response(
+            json.dumps({
+                "status": "ready",
+                "url": f"/static/{video_id}.mp4",
+            }),
+            mimetype="application/json",
+        )
+
+    with _prepare_states_lock:
+        state = _prepare_states.get(video_id)
+        if state != "preparing":
+            _prepare_states[video_id] = "preparing"
+            threading.Thread(
+                target=_prepare_video_worker,
+                args=(video_id,),
+                daemon=True,
+            ).start()
+            state = "preparing"
+
+    status_code = 202 if state == "preparing" else 500
+    return Response(
+        json.dumps({"status": state or "preparing"}),
+        status=status_code,
+        mimetype="application/json",
+    )
+
+'''
+if prepare_anchor not in video_text:
+    raise SystemExit("Prepare route insertion anchor not found")
+video_text = video_text.replace(prepare_anchor, prepare_code + prepare_anchor, 1)
+
 video_path.write_text(video_text)
 print("Patched video.py backend access only; feed XML remains exact upstream")
 
