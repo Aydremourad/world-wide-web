@@ -9,7 +9,7 @@ fi
 
 echo "[1/5] Installing Docker..."
 $SUDO apt-get update
-$SUDO apt-get install -y ca-certificates curl git openssl
+$SUDO apt-get install -y ca-certificates curl git openssl gnupg
 $SUDO install -m 0755 -d /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | $SUDO gpg --dearmor -o /etc/apt/keyrings/docker.gpg
 $SUDO chmod a+r /etc/apt/keyrings/docker.gpg
