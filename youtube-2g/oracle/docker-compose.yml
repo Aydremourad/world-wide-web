@@ -35,6 +35,8 @@ services:
       CACHE_DIRECTORY: "/var/tmp/youtubei.js"
       SERVER_VERIFY_REQUESTS: "false"
       NETWORKING_IPV6_BLOCK: "${COMPANION_IPV6_BLOCK}"
+      YOUTUBE_SESSION_OAUTH_ENABLED: "true"
+      JOBS_YOUTUBE_SESSION_PO_TOKEN_ENABLED: "false"
     volumes:
       - companion-cache:/var/tmp
 
