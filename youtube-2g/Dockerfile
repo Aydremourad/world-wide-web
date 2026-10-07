@@ -1,3 +1,5 @@
+FROM denoland/deno:bin-2.9.2 AS deno-bin
+
 FROM python:3.11-slim-bookworm
 
 ARG MODIFIED_TUBEREPAIR_COMMIT=f94cea890ba94b8e92eccc02317f10b8439be144
@@ -18,6 +20,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        ca-certificates ffmpeg git nodejs \
     && rm -rf /var/lib/apt/lists/*
+
+COPY --from=deno-bin /deno /usr/local/bin/deno
 
 WORKDIR /app
 
