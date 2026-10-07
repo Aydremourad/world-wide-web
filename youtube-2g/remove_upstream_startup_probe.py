@@ -223,6 +223,7 @@ prepare_anchor = '''@video.route("/feeds/api/videos/<video_id>/related")
 '''
 prepare_code = r'''
 _prepare_states = {}
+_prepare_errors = {}
 _prepare_states_lock = threading.Lock()
 
 def _prepare_video_worker(video_id):
@@ -231,18 +232,27 @@ def _prepare_video_worker(video_id):
         # Reuse the exact existing conversion/cache path. This function does
         # not depend on request data and is protected by the same per-video
         # lock and global download semaphore as normal playback.
-        getvideo(video_id)
+        result = getvideo(video_id)
 
         ready_path = f"static/{video_id}.mp4"
         ready = os.path.exists(ready_path) and os.path.getsize(ready_path) > 0
 
+        detail = None
+        if not ready and isinstance(result, tuple) and result:
+            detail = str(result[0])
+
         with _prepare_states_lock:
             _prepare_states[video_id] = "ready" if ready else "error"
+            if ready:
+                _prepare_errors.pop(video_id, None)
+            else:
+                _prepare_errors[video_id] = detail or "Video preparation produced no playable file"
 
-        print("PREPARE VIDEO WORKER END:", video_id, "ready=", ready, flush=True)
+        print("PREPARE VIDEO WORKER END:", video_id, "ready=", ready, "detail=", detail, flush=True)
     except Exception as e:
         with _prepare_states_lock:
             _prepare_states[video_id] = "error"
+            _prepare_errors[video_id] = repr(e)
         print("PREPARE VIDEO WORKER ERROR:", video_id, repr(e), flush=True)
 
 @video.route("/prepare/<video_id>")
@@ -271,7 +281,10 @@ def prepare_video(video_id):
 
         if state == "error":
             return Response(
-                json.dumps({"status": "error"}),
+                json.dumps({
+                    "status": "error",
+                    "detail": _prepare_errors.get(video_id, "unknown playback error"),
+                }),
                 status=500,
                 mimetype="application/json",
             )
@@ -295,6 +308,125 @@ def prepare_video(video_id):
 if prepare_anchor not in video_text:
     raise SystemExit("Prepare route insertion anchor not found")
 video_text = video_text.replace(prepare_anchor, prepare_code + prepare_anchor, 1)
+
+
+# RENDER PLAYBACK FALLBACK PATCH
+# The upstream fallback tried the same client twice. Replace it with a real
+# no-cookie client ladder and a general low-resolution source selector. We
+# always transcode to 320x240, so a specific historic source format ID is not
+# required.
+old_download_block = '''            # Download
+            try:
+                print("TRYING NORMAL YT-DLP")
+
+                subprocess.run([
+                    "yt-dlp",
+                    "--extractor-args", "youtube:player_client=android",
+                    "-f", "18/36/17",
+                    "--no-playlist",
+                    "--no-warnings",
+                    "-o", temp_input,
+                    url
+                ],
+                check=True)
+
+            except subprocess.CalledProcessError as e:
+
+                print("NORMAL FAILED, TRYING ANDROID")
+
+                subprocess.run([
+                    "yt-dlp",
+                    "--extractor-args", "youtube:player_client=android",
+                    "-f", "18/36/17",
+                    "--no-playlist",
+                    "--no-warnings",
+                    "-o", temp_input,
+                    url
+                ],
+                check=True)
+'''
+
+new_download_block = '''            # Download using a real client fallback ladder.
+            # The wrapper maps the upstream "android" default to mweb+POT,
+            # while preserving explicit android_vr/web_safari fallbacks.
+            source_format = (
+                "best[height<=480][vcodec!=none][acodec!=none]/"
+                "best[height<=720][vcodec!=none][acodec!=none]/best"
+            )
+            download_clients = [
+                ("mweb+pot", "android"),
+                ("android_vr", "android_vr"),
+                ("web_safari", "web_safari"),
+            ]
+            downloaded = False
+            download_errors = []
+
+            for client_name, client_value in download_clients:
+                try:
+                    print("YT-DLP DOWNLOAD TRY:", client_name, flush=True)
+                    result = subprocess.run([
+                        "yt-dlp",
+                        "--extractor-args", f"youtube:player_client={client_value}",
+                        "-f", source_format,
+                        "--no-playlist",
+                        "--no-warnings",
+                        "-o", temp_input,
+                        url
+                    ],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=90)
+
+                    if os.path.exists(temp_input) and os.path.getsize(temp_input) > 0:
+                        print("YT-DLP DOWNLOAD SUCCEEDED:", client_name, flush=True)
+                        downloaded = True
+                        break
+
+                    download_errors.append(f"{client_name}: no output file")
+                except subprocess.CalledProcessError as e:
+                    detail = (e.stderr or e.stdout or str(e))[-1500:]
+                    print("YT-DLP DOWNLOAD FAILED:", client_name, detail, flush=True)
+                    download_errors.append(f"{client_name}: {detail}")
+                    if os.path.exists(temp_input):
+                        os.remove(temp_input)
+                except Exception as e:
+                    detail = repr(e)
+                    print("YT-DLP DOWNLOAD ERROR:", client_name, detail, flush=True)
+                    download_errors.append(f"{client_name}: {detail}")
+                    if os.path.exists(temp_input):
+                        os.remove(temp_input)
+
+            if not downloaded:
+                raise RuntimeError("All yt-dlp clients failed: " + " | ".join(download_errors))
+'''
+
+if old_download_block not in video_text:
+    raise SystemExit("Expected upstream yt-dlp fallback block not found")
+video_text = video_text.replace(old_download_block, new_download_block, 1)
+
+# Let the piped fast path choose any usable combined source instead of only
+# historic format IDs. If it fails, the disk-based ladder above takes over.
+video_text = video_text.replace(
+    '"-f", "18/36/17",',
+    '"-f", "best[height<=480][vcodec!=none][acodec!=none]/best",',
+    1
+)
+
+# Preserve the real exception text so /prepare can return it to the iPhone
+# diagnostic log instead of collapsing every failure to "Playback failed".
+old_getvideo_error = '''    except Exception as e:
+        print("HYBRID ERROR:", e)
+        return "Playback failed", 500
+'''
+new_getvideo_error = '''    except Exception as e:
+        detail = f"{type(e).__name__}: {e}"
+        print("HYBRID ERROR:", detail, flush=True)
+        return "Playback failed: " + detail, 500
+'''
+if old_getvideo_error not in video_text:
+    raise SystemExit("Expected getvideo error block not found")
+video_text = video_text.replace(old_getvideo_error, new_getvideo_error, 1)
 
 video_path.write_text(video_text)
 print("Patched video.py backend access only; feed XML remains exact upstream")
@@ -354,7 +486,7 @@ if '@static.route("/bridge-api-version")' not in static_text:
 
 @static.route("/bridge-api-version")
 def bridge_api_version():
-    return "prepare-v1", 200
+    return "prepare-v2", 200
 '''
 static_path.write_text(static_text)
 print("Ensured /healthz and /bridge-api-version routes exist")
