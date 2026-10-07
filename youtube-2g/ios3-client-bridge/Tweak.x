@@ -12,10 +12,14 @@ static BOOL TRBCollectVideoIDs = NO;
 static NSMutableArray *TRBVideoIDs = nil;
 static NSMutableDictionary *TRBOriginalDidSelectIMPs = nil;
 static NSMutableSet *TRBHookedDelegateClasses = nil;
-static MPMoviePlayerController *TRBForcedPlayer = nil;
-static UIActivityIndicatorView *TRBPrepareSpinner = nil;
 static NSString *TRBPreparingVideoID = nil;
-static IMP TRBOriginalUserSelectPendingIMP = NULL;
+static NSMutableSet *TRBPreparedVideoIDs = nil;
+static UITableView *TRBPendingTableView = nil;
+static NSIndexPath *TRBPendingIndexPath = nil;
+static BOOL TRBPendingAnimated = NO;
+static UITableViewScrollPosition TRBPendingScrollPosition = UITableViewScrollPositionNone;
+static BOOL TRBPendingNotifyDelegate = NO;
+static NSString *TRBPendingVideoID = nil;
 static IMP TRBOriginalPrivateSelectIMP = NULL;
 
 static void TRBLog(NSString *format, ...) {
@@ -316,16 +320,35 @@ static NSURLRequest *TRBRewriteRequest(NSURLRequest *request, NSString *source) 
 
 %end
 
+static NSURL *TRBRewritePreparedMovieURL(NSURL *url) {
+    NSString *videoID = TRBLocalVideoIDFromURL(url);
+    if (![videoID length] || ![TRBPreparedVideoIDs containsObject:videoID]) {
+        return url;
+    }
+
+    NSString *targetString = [NSString stringWithFormat:@"http://%@/static/%@.mp4",
+                              TRBEndpointHost, videoID];
+    NSURL *target = TRBURLWithStringNoRewrite(targetString);
+    if (target) {
+        TRBLog(@"PLAYER READY REWRITE %@ -> %@", [url absoluteString], targetString);
+        return target;
+    }
+
+    return url;
+}
+
 %hook MPMoviePlayerController
 
 - (id)initWithContentURL:(NSURL *)URL {
     NSURL *rewritten = TRBRewriteURL(URL, @"MPMoviePlayerController initWithContentURL:");
+    rewritten = TRBRewritePreparedMovieURL(rewritten);
     TRBLog(@"PLAYER init %@", [rewritten absoluteString]);
     return %orig(rewritten);
 }
 
 - (void)setContentURL:(NSURL *)URL {
     NSURL *rewritten = TRBRewriteURL(URL, @"MPMoviePlayerController setContentURL:");
+    rewritten = TRBRewritePreparedMovieURL(rewritten);
     TRBLog(@"PLAYER set %@", [rewritten absoluteString]);
     %orig(rewritten);
 }
@@ -334,71 +357,78 @@ static NSURLRequest *TRBRewriteRequest(NSURLRequest *request, NSString *source) 
 
 typedef void (*TRBDidSelectIMP)(id, SEL, UITableView *, NSIndexPath *);
 
+static void TRBClearPendingSelection(void) {
+    [TRBPendingTableView release];
+    TRBPendingTableView = nil;
+
+    [TRBPendingIndexPath release];
+    TRBPendingIndexPath = nil;
+
+    [TRBPendingVideoID release];
+    TRBPendingVideoID = nil;
+
+    TRBPendingAnimated = NO;
+    TRBPendingScrollPosition = UITableViewScrollPositionNone;
+    TRBPendingNotifyDelegate = NO;
+
+    [TRBPreparingVideoID release];
+    TRBPreparingVideoID = nil;
+}
+
 @interface TRBPrepareWorker : NSObject
 + (void)prepareVideo:(NSString *)videoID;
-+ (void)openReadyVideo:(NSString *)videoID;
++ (void)resumeAppleSelection:(NSString *)videoID;
 + (void)prepareFailed:(NSString *)videoID;
 @end
 
 @implementation TRBPrepareWorker
 
-+ (void)openReadyVideo:(NSString *)videoID {
-    if (![videoID length] || ![TRBEndpointHost length]) return;
++ (void)resumeAppleSelection:(NSString *)videoID {
+    TRBLog(@"PREPARE READY %@", videoID);
 
-    if (TRBPrepareSpinner) {
-        [TRBPrepareSpinner stopAnimating];
-        [TRBPrepareSpinner removeFromSuperview];
-        [TRBPrepareSpinner release];
-        TRBPrepareSpinner = nil;
-    }
-
-    [TRBPreparingVideoID release];
-    TRBPreparingVideoID = nil;
-
-    NSString *urlString = [NSString stringWithFormat:@"http://%@/static/%@.mp4",
-                           TRBEndpointHost, videoID];
-    NSURL *url = TRBURLWithStringNoRewrite(urlString);
-    TRBLog(@"READY OPEN %@", urlString);
-
-    if (TRBForcedPlayer) {
-        [TRBForcedPlayer stop];
-        [TRBForcedPlayer release];
-        TRBForcedPlayer = nil;
-    }
-
-    TRBLog(@"READY PLAYER INIT BEGIN %@", urlString);
-    TRBForcedPlayer = [[MPMoviePlayerController alloc] initWithContentURL:url];
-    TRBLog(@"READY PLAYER INIT END %@", TRBForcedPlayer);
-
-    if (!TRBForcedPlayer) {
-        TRBLog(@"READY PLAYER INIT FAILED");
+    if (![videoID length] ||
+        !TRBPendingVideoID ||
+        ![TRBPendingVideoID isEqualToString:videoID] ||
+        !TRBPendingTableView ||
+        !TRBPendingIndexPath ||
+        !TRBOriginalPrivateSelectIMP) {
+        TRBLog(@"PREPARE READY but no matching pending Apple selection");
+        TRBClearPendingSelection();
         return;
     }
 
-    [TRBForcedPlayer play];
-    TRBLog(@"READY PLAY SENT");
+    [TRBPreparedVideoIDs addObject:videoID];
+
+    UITableView *tableView = [TRBPendingTableView retain];
+    NSIndexPath *indexPath = [TRBPendingIndexPath retain];
+    BOOL animated = TRBPendingAnimated;
+    UITableViewScrollPosition scrollPosition = TRBPendingScrollPosition;
+    BOOL notifyDelegate = TRBPendingNotifyDelegate;
+
+    TRBClearPendingSelection();
+
+    TRBLog(@"RESUME APPLE SELECT index=%@ video=%@", indexPath, videoID);
+    ((TRBPrivateSelectIMP)TRBOriginalPrivateSelectIMP)(
+        tableView,
+        NSSelectorFromString(@"_selectRowAtIndexPath:animated:scrollPosition:notifyDelegate:"),
+        indexPath,
+        animated,
+        scrollPosition,
+        notifyDelegate
+    );
+
+    [indexPath release];
+    [tableView release];
 }
 
 + (void)prepareFailed:(NSString *)videoID {
-    if (TRBPrepareSpinner) {
-        [TRBPrepareSpinner stopAnimating];
-        [TRBPrepareSpinner removeFromSuperview];
-        [TRBPrepareSpinner release];
-        TRBPrepareSpinner = nil;
-    }
-
-    [TRBPreparingVideoID release];
-    TRBPreparingVideoID = nil;
     TRBLog(@"PREPARE FAILED %@", videoID);
 
-    UIAlertView *alert = [[UIAlertView alloc]
-        initWithTitle:@"YouTube"
-        message:@"This video could not be prepared."
-        delegate:nil
-        cancelButtonTitle:@"OK"
-        otherButtonTitles:nil];
-    [alert show];
-    [alert release];
+    if (TRBPendingTableView && TRBPendingIndexPath) {
+        [TRBPendingTableView deselectRowAtIndexPath:TRBPendingIndexPath animated:YES];
+    }
+
+    TRBClearPendingSelection();
 }
 
 + (void)prepareVideo:(NSString *)videoID {
@@ -452,7 +482,7 @@ typedef void (*TRBDidSelectIMP)(id, SEL, UITableView *, NSIndexPath *);
     }
 
     if (ready) {
-        [self performSelectorOnMainThread:@selector(openReadyVideo:)
+        [self performSelectorOnMainThread:@selector(resumeAppleSelection:)
                                withObject:videoID
                             waitUntilDone:NO];
     } else {
@@ -466,36 +496,43 @@ typedef void (*TRBDidSelectIMP)(id, SEL, UITableView *, NSIndexPath *);
 
 @end
 
-static void TRBPlayMappedVideo(NSString *videoID) {
-    if (![videoID length] || ![TRBEndpointHost length]) return;
+static void TRBPrepareMappedVideo(NSString *videoID,
+                                  UITableView *tableView,
+                                  NSIndexPath *indexPath,
+                                  BOOL animated,
+                                  UITableViewScrollPosition scrollPosition,
+                                  BOOL notifyDelegate) {
+    if (![videoID length] || !tableView || !indexPath) return;
+
+    if ([TRBPreparedVideoIDs containsObject:videoID]) {
+        TRBLog(@"ALREADY PREPARED %@", videoID);
+        ((TRBPrivateSelectIMP)TRBOriginalPrivateSelectIMP)(
+            tableView,
+            NSSelectorFromString(@"_selectRowAtIndexPath:animated:scrollPosition:notifyDelegate:"),
+            indexPath,
+            animated,
+            scrollPosition,
+            notifyDelegate
+        );
+        return;
+    }
 
     if (TRBPreparingVideoID && [TRBPreparingVideoID isEqualToString:videoID]) {
         TRBLog(@"PREPARE ALREADY RUNNING %@", videoID);
         return;
     }
 
-    [TRBPreparingVideoID release];
+    TRBClearPendingSelection();
+
     TRBPreparingVideoID = [videoID copy];
+    TRBPendingVideoID = [videoID copy];
+    TRBPendingTableView = [tableView retain];
+    TRBPendingIndexPath = [indexPath retain];
+    TRBPendingAnimated = animated;
+    TRBPendingScrollPosition = scrollPosition;
+    TRBPendingNotifyDelegate = notifyDelegate;
 
-    UIWindow *window = [[UIApplication sharedApplication] keyWindow];
-    if (window) {
-        if (TRBPrepareSpinner) {
-            [TRBPrepareSpinner stopAnimating];
-            [TRBPrepareSpinner removeFromSuperview];
-            [TRBPrepareSpinner release];
-        }
-
-        TRBPrepareSpinner = [[UIActivityIndicatorView alloc]
-            initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleWhiteLarge];
-        TRBPrepareSpinner.center = CGPointMake(
-            window.bounds.size.width / 2.0f,
-            window.bounds.size.height / 2.0f
-        );
-        [window addSubview:TRBPrepareSpinner];
-        [TRBPrepareSpinner startAnimating];
-    }
-
-    TRBLog(@"PREPARE BEGIN %@", videoID);
+    TRBLog(@"PREPARE BEGIN %@ (Apple UI held, not replaced)", videoID);
 
     [NSThread detachNewThreadSelector:@selector(prepareVideo:)
                              toTarget:[TRBPrepareWorker class]
@@ -569,8 +606,8 @@ static void TRBPrivateSelectReplacement(id self,
            videoID);
 
     if ([videoID length] && notifyDelegate) {
-        [tableView deselectRowAtIndexPath:indexPath animated:NO];
-        TRBPlayMappedVideo(videoID);
+        TRBPrepareMappedVideo(videoID, tableView, indexPath,
+                              animated, scrollPosition, notifyDelegate);
         return;
     }
 
@@ -583,25 +620,15 @@ static void TRBPrivateSelectReplacement(id self,
 
 static void TRBInstallPrivateTableHooks(void) {
     Class cls = [UITableView class];
-
-    SEL pendingSel = NSSelectorFromString(@"_userSelectRowAtPendingSelectionIndexPath:");
-    Method pendingMethod = class_getInstanceMethod(cls, pendingSel);
-    if (pendingMethod) {
-        TRBOriginalUserSelectPendingIMP = method_getImplementation(pendingMethod);
-        method_setImplementation(pendingMethod, (IMP)TRBUserSelectPendingReplacement);
-        TRBLog(@"HOOKED PRIVATE %@", NSStringFromSelector(pendingSel));
-    } else {
-        TRBLog(@"PRIVATE SELECTOR MISSING %@", NSStringFromSelector(pendingSel));
-    }
-
     SEL selectSel = NSSelectorFromString(@"_selectRowAtIndexPath:animated:scrollPosition:notifyDelegate:");
     Method selectMethod = class_getInstanceMethod(cls, selectSel);
+
     if (selectMethod) {
         TRBOriginalPrivateSelectIMP = method_getImplementation(selectMethod);
         method_setImplementation(selectMethod, (IMP)TRBPrivateSelectReplacement);
-        TRBLog(@"HOOKED PRIVATE %@", NSStringFromSelector(selectSel));
+        TRBLog(@"HOOKED STOCK-UI GATE %@", NSStringFromSelector(selectSel));
     } else {
-        TRBLog(@"PRIVATE SELECTOR MISSING %@", NSStringFromSelector(selectSel));
+        TRBLog(@"STOCK-UI SELECTOR MISSING %@", NSStringFromSelector(selectSel));
     }
 }
 
@@ -682,39 +709,6 @@ static void TRBInstallSelectionHook(id delegate) {
     TRBLog(@"HOOKED DIDSELECT %@", key);
 }
 
-%hook UITableView
-
-- (void)setDelegate:(id)delegate {
-    %orig(delegate);
-    TRBInstallSelectionHook(delegate);
-}
-
-- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event {
-    UITouch *touch = [touches anyObject];
-    NSIndexPath *indexPath = nil;
-
-    if (touch) {
-        CGPoint point = [touch locationInView:self];
-        indexPath = [self indexPathForRowAtPoint:point];
-    }
-
-    NSString *videoID = TRBVideoIDForTableIndexPath(self, indexPath);
-    TRBLog(@"TOUCH END table=%@ index=%@ video=%@",
-           NSStringFromClass([self class]),
-           indexPath,
-           videoID);
-
-    if ([videoID length]) {
-        [self deselectRowAtIndexPath:indexPath animated:NO];
-        TRBPlayMappedVideo(videoID);
-        return;
-    }
-
-    %orig(touches, event);
-}
-
-%end
-
 %ctor {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     TRBEndpoint = [TRBLoadEndpoint() copy];
@@ -722,13 +716,14 @@ static void TRBInstallSelectionHook(id delegate) {
     TRBEndpointHost = [[[endpointURL host] lowercaseString] copy];
 
     TRBVideoIDs = [[NSMutableArray alloc] init];
+    TRBPreparedVideoIDs = [[NSMutableSet alloc] init];
     TRBOriginalDidSelectIMPs = [[NSMutableDictionary alloc] init];
     TRBHookedDelegateClasses = [[NSMutableSet alloc] init];
 
     FILE *fp = fopen("/tmp/TubeRepairIOS3Bridge.log", "w");
     if (fp) fclose(fp);
 
-    TRBLog(@"TubeRepairIOS3Bridge 1.3.1 loaded endpoint=%@ host=%@", TRBEndpoint, TRBEndpointHost);
+    TRBLog(@"TubeRepairIOS3Bridge 1.4.0 loaded endpoint=%@ host=%@", TRBEndpoint, TRBEndpointHost);
     TRBInstallPrivateTableHooks();
     [pool drain];
 }
