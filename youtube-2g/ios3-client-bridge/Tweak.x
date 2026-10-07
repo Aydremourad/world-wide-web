@@ -390,6 +390,15 @@ typedef void (*TRBDidSelectIMP)(id, SEL, UITableView *, NSIndexPath *);
     [TRBPreparingVideoID release];
     TRBPreparingVideoID = nil;
     TRBLog(@"PREPARE FAILED %@", videoID);
+
+    UIAlertView *alert = [[UIAlertView alloc]
+        initWithTitle:@"YouTube"
+        message:@"This video could not be prepared."
+        delegate:nil
+        cancelButtonTitle:@"OK"
+        otherButtonTitles:nil];
+    [alert show];
+    [alert release];
 }
 
 + (void)prepareVideo:(NSString *)videoID {
@@ -431,6 +440,11 @@ typedef void (*TRBDidSelectIMP)(id, SEL, UITableView *, NSIndexPath *);
 
         if (status == 200 && [body rangeOfString:@"\"ready\""].location != NSNotFound) {
             ready = YES;
+            break;
+        }
+
+        if (status >= 400 || (body && [body rangeOfString:@"\"error\""].location != NSNotFound)) {
+            TRBLog(@"PREPARE SERVER ERROR status=%ld body=%@", (long)status, body);
             break;
         }
 
