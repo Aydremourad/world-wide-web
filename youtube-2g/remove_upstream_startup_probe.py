@@ -268,6 +268,14 @@ def prepare_video(video_id):
 
     with _prepare_states_lock:
         state = _prepare_states.get(video_id)
+
+        if state == "error":
+            return Response(
+                json.dumps({"status": "error"}),
+                status=500,
+                mimetype="application/json",
+            )
+
         if state != "preparing":
             _prepare_states[video_id] = "preparing"
             threading.Thread(
@@ -277,10 +285,9 @@ def prepare_video(video_id):
             ).start()
             state = "preparing"
 
-    status_code = 202 if state == "preparing" else 500
     return Response(
-        json.dumps({"status": state or "preparing"}),
-        status=status_code,
+        json.dumps({"status": "preparing"}),
+        status=202,
         mimetype="application/json",
     )
 
