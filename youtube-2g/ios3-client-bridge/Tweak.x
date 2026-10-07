@@ -102,7 +102,7 @@ static NSString *TRBVideoIDFromURL(NSURL *url) {
 static NSURL *TRBURLWithStringNoRewrite(NSString *string) {
     BOOL old = TRBInsideURLBuild;
     TRBInsideURLBuild = YES;
-    NSURL *url = TRBURLWithStringNoRewrite(string);
+    NSURL *url = [[[NSURL alloc] initWithString:string] autorelease];
     TRBInsideURLBuild = old;
     return url;
 }
@@ -136,7 +136,7 @@ static NSString *TRBRewriteString(NSString *string, NSString *source) {
     if (![string length]) return string;
     if ([string rangeOfString:@"youtube.com"].location == NSNotFound) return string;
 
-    NSURL *url = [[[NSURL alloc] initWithString:string] autorelease];
+    NSURL *url = TRBURLWithStringNoRewrite(string);
     NSURL *rewritten = TRBRewriteURL(url, source);
     if (rewritten != url) return [rewritten absoluteString];
     return string;
