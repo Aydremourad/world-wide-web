@@ -201,3 +201,41 @@ if batch_replacements < 1:
 video_text = video_text.replace(old_batch_resolve, new_batch_resolve)
 video_path.write_text(video_text)
 print("Made", batch_replacements, "batch resolver(s) reuse search cache")
+
+
+# 9) Backward-compatible playback aliases for stale feeds cached by iOS 3.
+video_text = video_path.read_text()
+getvideo_anchor = '''@video.route("/getvideo/<video_id>")
+@video.route("/<int:res>/getvideo/<video_id>")
+def getvideo(video_id, res=None):
+'''
+getvideo_replacement = '''@video.route("/getvideo/<video_id>")
+@video.route("/<int:res>/getvideo/<video_id>")
+@video.route("/video/sd/<video_id>")
+@video.route("/<int:res>/video/sd/<video_id>")
+def getvideo(video_id, res=None):
+'''
+if getvideo_anchor not in video_text:
+    raise SystemExit("Expected getvideo route decorators not found")
+video_text = video_text.replace(getvideo_anchor, getvideo_replacement, 1)
+video_path.write_text(video_text)
+print("Added stale-feed /video/sd playback aliases")
+
+# 10) Log every incoming iPhone request path before route handling.
+#     This is intentionally terse and contains no credentials/body data.
+main_path = Path("/app/modified-tuberepair/tuberepair/main.py")
+main_text = main_path.read_text()
+request_log_anchor = 'app = Flask(__name__)\n'
+if 'IPHONE REQUEST:' not in main_text:
+    if request_log_anchor not in main_text:
+        raise SystemExit("Expected Flask app creation anchor not found")
+    request_log_code = '''app = Flask(__name__)
+
+@app.before_request
+def _log_request_path():
+    from flask import request
+    print("IPHONE REQUEST:", request.method, request.path, flush=True)
+'''
+    main_text = main_text.replace(request_log_anchor, request_log_code, 1)
+    main_path.write_text(main_text)
+print("Enabled terse request-path logging")
