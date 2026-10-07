@@ -23,3 +23,5 @@ services:
         value: "false"
       - key: YOUTUBE_COOKIES_B64
         sync: false
+      - key: YOUTUBE_USER_AGENT
+        sync: false
