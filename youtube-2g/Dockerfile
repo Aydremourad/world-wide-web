@@ -33,7 +33,7 @@ RUN python -m pip install --no-cache-dir \
     yt-dlp \
     && mv /usr/local/bin/yt-dlp /usr/local/bin/yt-dlp-real
 
-COPY yt-dlp-proxy-wrapper.sh /usr/local/bin/yt-dlp
+COPY yt-dlp-wrapper.sh /usr/local/bin/yt-dlp
 RUN chmod 0755 /usr/local/bin/yt-dlp
 
 WORKDIR /app/modified-tuberepair/tuberepair
