@@ -4,6 +4,32 @@ from pathlib import Path
 p = Path("/app/tuberepair/api/video.py")
 s = p.read_text()
 
+# Make every yt-dlp subprocess use a persistent Netscape cookie jar when present.
+# TubeRepair's /var/data is already a persistent Docker volume on Oracle.
+cookie_helper = r'''
+_YTDLP_COOKIE_FILE = os.environ.get(
+    "YTDLP_COOKIE_FILE",
+    "/var/data/youtube-cookies.txt",
+)
+
+def _yt_dlp_auth_args():
+    if _YTDLP_COOKIE_FILE and os.path.exists(_YTDLP_COOKIE_FILE) and os.path.getsize(_YTDLP_COOKIE_FILE) > 0:
+        return ["--cookies", _YTDLP_COOKIE_FILE]
+    return []
+'''
+
+route_anchor = '@video.route("/getvideo/<video_id>")\n'
+if route_anchor not in s:
+    raise SystemExit("Could not find getvideo route anchor")
+
+s = s.replace(route_anchor, cookie_helper + "\n" + route_anchor, 1)
+
+# Inject cookie args after every yt-dlp executable in list-form subprocess calls.
+s = s.replace(
+    '"yt-dlp",\n',
+    '"yt-dlp",\n                *_yt_dlp_auth_args(),\n',
+)
+
 # Current yt-dlp recommended YouTube path: mweb + external PO-token provider.
 # bgutil's HTTP plugin auto-discovers its provider at 127.0.0.1:4416.
 s = s.replace(
