@@ -550,6 +550,30 @@ static void TRBInstallSelectionHook(id delegate) {
     TRBInstallSelectionHook(delegate);
 }
 
+- (void)touchesEnded:(NSSet *)touches withEvent:(UIEvent *)event {
+    UITouch *touch = [touches anyObject];
+    NSIndexPath *indexPath = nil;
+
+    if (touch) {
+        CGPoint point = [touch locationInView:self];
+        indexPath = [self indexPathForRowAtPoint:point];
+    }
+
+    NSString *videoID = TRBVideoIDForTableIndexPath(self, indexPath);
+    TRBLog(@"TOUCH END table=%@ index=%@ video=%@",
+           NSStringFromClass([self class]),
+           indexPath,
+           videoID);
+
+    if ([videoID length]) {
+        [self deselectRowAtIndexPath:indexPath animated:NO];
+        TRBPlayMappedVideo(videoID);
+        return;
+    }
+
+    %orig(touches, event);
+}
+
 %end
 
 %ctor {
