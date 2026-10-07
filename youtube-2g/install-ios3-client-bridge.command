@@ -61,14 +61,40 @@ if ! printf '%s\n' "$PREFLIGHT" | grep -F "$LINKER_SHIM/ld" >/dev/null; then
 fi
 
 echo "[preflight] OK: clang selected $LINKER_SHIM/ld"
+
+PROBE_C="$LINKER_SHIM/probe.c"
+PROBE_DYLIB="$LINKER_SHIM/probe.dylib"
+printf '%s\n' 'int tuberepair_armv6_link_probe(void) { return 1; }' > "$PROBE_C"
+
+echo "[preflight] Performing a real armv6 dylib link..."
+if ! clang \
+    -target armv6-apple-ios3.0 \
+    -isysroot "$THEOS/sdks/iPhoneOS3.1.3.sdk" \
+    -B"$LINKER_SHIM/" \
+    -dynamiclib \
+    -Wl,-segalign,4000 \
+    "$PROBE_C" \
+    -o "$PROBE_DYLIB"; then
+    echo "ERROR: real armv6 legacy-linker preflight failed."
+    exit 1
+fi
+
+if command -v file >/dev/null 2>&1; then
+    echo "[preflight] Output: $(file "$PROBE_DYLIB")"
+fi
+echo "[preflight] Real armv6 link succeeded."
+
 echo "[1/4] Building ARMv6 iOS 3 bridge with verified legacy linker..."
 
 cd "$BRIDGE_DIR"
 rm -rf packages .theos
 make clean
-make package FINALPACKAGE=1 \
+make package \
+    DEBUG=0 \
+    STRIP=0 \
     ARCHS=armv6 \
     TARGET=iphone:clang:3.1.3:3.0 \
+    LEGACYFLAGS="-Xlinker -segalign -Xlinker 4000" \
     TARGET_LD="clang -B$LINKER_SHIM/"
 
 DEB="$(ls -t packages/*.deb 2>/dev/null | head -n 1)"
