@@ -239,3 +239,27 @@ def _log_request_path():
     main_text = main_text.replace(request_log_anchor, request_log_code, 1)
     main_path.write_text(main_text)
 print("Enabled terse request-path logging")
+
+
+# 11) Keep classic-search row selection entirely inside TubeRepair.
+#     The stock iOS 3 search-results controller may use rel=alternate/mobile
+#     when a row is selected. Upstream points those at modern youtube.com,
+#     which TubeRepair does not rewrite and iOS 3 cannot negotiate reliably.
+classic_search_text = classic_search_path.read_text()
+external_alternate = 'href="https://www.youtube.com/watch?v={{info[\'videoId\']}}&amp;feature=youtube_gdata"'
+local_alternate = 'href="{{url}}/getvideo/{{info[\'videoId\']}}"'
+external_mobile = 'href="http://m.youtube.com/details?v={{info[\'videoId\']}}"'
+local_mobile = 'href="{{url}}/getvideo/{{info[\'videoId\']}}"'
+
+if external_alternate not in classic_search_text:
+    raise SystemExit("Expected external classic-search alternate link not found")
+if external_mobile not in classic_search_text:
+    raise SystemExit("Expected external classic-search mobile link not found")
+
+classic_search_text = classic_search_text.replace(
+    external_alternate, local_alternate, 1
+).replace(
+    external_mobile, local_mobile, 1
+)
+classic_search_path.write_text(classic_search_text)
+print("Routed classic-search alternate/mobile links through /getvideo")
