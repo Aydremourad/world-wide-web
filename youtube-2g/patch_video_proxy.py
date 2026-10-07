@@ -4,6 +4,17 @@ from pathlib import Path
 p = Path("/app/tuberepair/api/video.py")
 s = p.read_text()
 
+# Current yt-dlp recommended YouTube path: mweb + external PO-token provider.
+# bgutil's HTTP plugin auto-discovers its provider at 127.0.0.1:4416.
+s = s.replace(
+    '["--extractor-args", "youtube:player_client=android"]',
+    '["--extractor-args", "youtube:player_client=mweb"]'
+)
+s = s.replace(
+    '"--extractor-args", "youtube:player_client=android",',
+    '"--extractor-args", "youtube:player_client=mweb",'
+)
+
 route_anchor = '@video.route("/getvideo/<video_id>")\n'
 if route_anchor not in s:
     raise SystemExit("Could not find getvideo route anchor")
