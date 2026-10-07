@@ -24,7 +24,13 @@ while i < len(args):
             for part in parts:
                 key = part.split("=", 1)[0].strip().replace("-", "_")
                 if key == "player_client":
-                    out_parts.append("player_client=mweb")
+                    requested = part.split("=", 1)[1].strip() if "=" in part else ""
+                    # Upstream Modified TubeRepair hard-codes android. Map that
+                    # legacy default to the currently recommended mweb+POT path,
+                    # but preserve explicit fallback clients such as android_vr.
+                    if not requested or requested == "android":
+                        requested = "mweb"
+                    out_parts.append("player_client=" + requested)
                     saw_client = True
                     has_youtube_client = True
                 else:
