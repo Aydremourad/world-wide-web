@@ -25,6 +25,7 @@ services:
       SERVER_THREADS: "8"
       LOCAL_COMPANION_URL: ""
       INVIDIOUS_VIDEO_PROXIES: ""
+      YTDLP_COOKIE_FILE: "/var/data/youtube-cookies.txt"
       GOOGLE_CLIENT_ID: "${GOOGLE_CLIENT_ID:-}"
       GOOGLE_CLIENT_SECRET: "${GOOGLE_CLIENT_SECRET:-}"
     volumes:
