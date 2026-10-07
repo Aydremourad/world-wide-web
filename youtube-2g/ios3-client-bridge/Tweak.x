@@ -107,6 +107,14 @@ static NSURL *TRBURLWithStringNoRewrite(NSString *string) {
     return url;
 }
 
+static NSURL *TRBURLWithStringRelativeNoRewrite(NSString *string, NSURL *baseURL) {
+    BOOL old = TRBInsideURLBuild;
+    TRBInsideURLBuild = YES;
+    NSURL *url = [[[NSURL alloc] initWithString:string relativeToURL:baseURL] autorelease];
+    TRBInsideURLBuild = old;
+    return url;
+}
+
 static NSURL *TRBRewriteURL(NSURL *url, NSString *source) {
     if (!url || ![TRBEndpoint length]) return url;
 
@@ -170,6 +178,34 @@ static NSURLRequest *TRBRewriteRequest(NSURLRequest *request, NSString *source) 
     if (TRBInsideURLBuild) return %orig(URLString);
     NSString *rewritten = TRBRewriteString(URLString, @"-initWithString:");
     return %orig(rewritten);
+}
+
++ (id)URLWithString:(NSString *)URLString relativeToURL:(NSURL *)baseURL {
+    if (TRBInsideURLBuild) return %orig(URLString, baseURL);
+
+    NSURL *combined = TRBURLWithStringRelativeNoRewrite(URLString, baseURL);
+    NSURL *rewritten = TRBRewriteURL(combined, @"+URLWithString:relativeToURL:");
+
+    if (rewritten != combined &&
+        ![[rewritten absoluteString] isEqualToString:[combined absoluteString]]) {
+        return %orig([rewritten absoluteString], nil);
+    }
+
+    return %orig(URLString, baseURL);
+}
+
+- (id)initWithString:(NSString *)URLString relativeToURL:(NSURL *)baseURL {
+    if (TRBInsideURLBuild) return %orig(URLString, baseURL);
+
+    NSURL *combined = TRBURLWithStringRelativeNoRewrite(URLString, baseURL);
+    NSURL *rewritten = TRBRewriteURL(combined, @"-initWithString:relativeToURL:");
+
+    if (rewritten != combined &&
+        ![[rewritten absoluteString] isEqualToString:[combined absoluteString]]) {
+        return %orig([rewritten absoluteString], nil);
+    }
+
+    return %orig(URLString, baseURL);
 }
 
 %end
