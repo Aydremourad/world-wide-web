@@ -11,7 +11,7 @@ echo "[1/5] Installing Docker..."
 $SUDO apt-get update
 $SUDO apt-get install -y ca-certificates curl git openssl gnupg
 $SUDO install -m 0755 -d /etc/apt/keyrings
-curl -fsSL https://download.docker.com/linux/ubuntu/gpg | $SUDO gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | $SUDO gpg --dearmor --yes -o /etc/apt/keyrings/docker.gpg
 $SUDO chmod a+r /etc/apt/keyrings/docker.gpg
 . /etc/os-release
 echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $VERSION_CODENAME stable" | $SUDO tee /etc/apt/sources.list.d/docker.list >/dev/null
@@ -61,7 +61,10 @@ curl -fsS http://127.0.0.1:10000/healthz
 echo
 echo
 echo "Testing Companion route locally..."
-curl -sS -D - --max-time 30   -o /dev/null   'http://127.0.0.1:10000/getvideo/jNQXAC9IVRw' || true
+curl -sS -D - --max-time 30 \
+  --range 0-1 \
+  -o /dev/null \
+  'http://127.0.0.1:10000/getvideo/jNQXAC9IVRw' || true
 
 echo
 echo "Oracle TubeRepair stack is running on TCP 10000."
