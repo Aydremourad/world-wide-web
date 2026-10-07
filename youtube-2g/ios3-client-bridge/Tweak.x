@@ -1,8 +1,11 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <MediaPlayer/MediaPlayer.h>
+#include <stdio.h>
+#include <stdarg.h>
 
 static NSString *TRBEndpoint = nil;
+static BOOL TRBInsideURLBuild = NO;
 
 static void TRBLog(NSString *format, ...) {
     va_list args;
@@ -96,6 +99,14 @@ static NSString *TRBVideoIDFromURL(NSURL *url) {
     return nil;
 }
 
+static NSURL *TRBURLWithStringNoRewrite(NSString *string) {
+    BOOL old = TRBInsideURLBuild;
+    TRBInsideURLBuild = YES;
+    NSURL *url = TRBURLWithStringNoRewrite(string);
+    TRBInsideURLBuild = old;
+    return url;
+}
+
 static NSURL *TRBRewriteURL(NSURL *url, NSString *source) {
     if (!url || ![TRBEndpoint length]) return url;
 
@@ -106,7 +117,7 @@ static NSURL *TRBRewriteURL(NSURL *url, NSString *source) {
     if (![videoID length]) return url;
 
     NSString *targetString = [NSString stringWithFormat:@"%@/getvideo/%@", TRBEndpoint, videoID];
-    NSURL *target = [NSURL URLWithString:targetString];
+    NSURL *target = TRBURLWithStringNoRewrite(targetString);
 
     if (target) {
         TRBLog(@"REWRITE %@ %@ -> %@", source, absolute, targetString);
@@ -130,11 +141,13 @@ static NSString *TRBRewriteString(NSString *string, NSString *source) {
 %hook NSURL
 
 + (id)URLWithString:(NSString *)URLString {
+    if (TRBInsideURLBuild) return %orig(URLString);
     NSString *rewritten = TRBRewriteString(URLString, @"+URLWithString:");
     return %orig(rewritten);
 }
 
 - (id)initWithString:(NSString *)URLString {
+    if (TRBInsideURLBuild) return %orig(URLString);
     NSString *rewritten = TRBRewriteString(URLString, @"-initWithString:");
     return %orig(rewritten);
 }
