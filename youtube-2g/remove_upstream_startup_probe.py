@@ -408,3 +408,155 @@ print("Disabled", refresh_count, "forced whole-feed per-video enrichments")
 
 video_path.write_text(video_text)
 print("Routed direct video.py Invidious calls through failover")
+
+
+# 13) Remove direct modern youtube.com playback/navigation links from every
+#     feed template. iOS 3 can stall for a long time trying those URLs before
+#     it ever reaches our local media URL.
+import re
+for template in templates_root.rglob("*.jinja2"):
+    text = template.read_text()
+    original = text
+
+    text = re.sub(
+        r'https?://www\.youtube\.com/watch\?v=(\{\{[^}]+\}\})(?:&amp;feature=[^"\']+)?',
+        r'{{url}}/getvideo/\1',
+        text,
+    )
+    text = re.sub(
+        r'https?://m\.youtube\.com/details\?v=(\{\{[^}]+\}\})',
+        r'{{url}}/getvideo/\1',
+        text,
+    )
+
+    if text != original:
+        template.write_text(text)
+        print("Localized external playback links in:", template.relative_to(templates_root))
+
+# 14) The featured playlist loader was another direct one-instance request.
+video_text = video_path.read_text()
+old_playlist_fetch = '''    url = f"{config.URL}/api/v1/playlists/{playlist_id}"
+
+    try:
+        r = requests.get(url, timeout=10, headers={
+            "User-Agent": "Mozilla/5.0",
+            "Accept": "application/json"
+        })
+
+        print("PLAYLIST URL:", url)
+        print("STATUS:", r.status_code)
+        print("TEXT:", r.text[:500])
+
+        if not r.text.strip():
+            raise Exception("Invidious returned blank playlist")
+
+        playlist = r.json()
+'''
+new_playlist_fetch = '''    try:
+        playlist = get.fetch_api(f"/api/v1/playlists/{playlist_id}") or {}
+        print("PLAYLIST FAILOVER RESULT:", playlist_id, bool(playlist), flush=True)
+        if not playlist or playlist.get("error"):
+            raise Exception("All official Invidious instances failed playlist lookup")
+'''
+if old_playlist_fetch not in video_text:
+    raise SystemExit("Featured playlist direct request anchor not found")
+video_text = video_text.replace(old_playlist_fetch, new_playlist_fetch, 1)
+
+# If the whole official Invidious pool cannot search, use our local yt-dlp
+# mweb+PO-token stack rather than returning an empty feed.
+search_failover_anchor = '''        json_data = get.fetch_api(
+            "/api/v1/search",
+            params={
+                "q": raw_search_keyword,
+                "type": "video",
+                "page": invidious_page
+            }
+        ) or []
+'''
+search_failover_replacement = search_failover_anchor + '''
+        if not isinstance(json_data, list) or not json_data:
+            print("INVIDIOUS SEARCH POOL FAILED; USING YT-DLP SEARCH", flush=True)
+            result = subprocess.run(
+                [
+                    "yt-dlp",
+                    "--flat-playlist",
+                    "--dump-json",
+                    "--ignore-errors",
+                    "--no-warnings",
+                    f"ytsearch20:{raw_search_keyword}",
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+
+            fallback_items = []
+            for line in result.stdout.splitlines():
+                try:
+                    info = json.loads(line)
+                except Exception:
+                    continue
+
+                vid_id = info.get("id") or info.get("videoId")
+                if not vid_id:
+                    continue
+
+                fallback_items.append({
+                    "type": "video",
+                    "title": info.get("title") or "Untitled",
+                    "videoId": vid_id,
+                    "author": info.get("uploader") or info.get("channel") or "Unknown",
+                    "authorId": info.get("uploader_id") or info.get("channel_id") or "unknown",
+                    "lengthSeconds": int(info.get("duration") or 0),
+                    "viewCount": int(info.get("view_count") or 0),
+                    "published": int(info.get("timestamp") or 0),
+                    "description": info.get("description") or "",
+                })
+
+            json_data = fallback_items
+            print("YT-DLP SEARCH COUNT:", len(json_data), flush=True)
+'''
+if search_failover_anchor not in video_text:
+    raise SystemExit("Patched search failover anchor not found")
+video_text = video_text.replace(search_failover_anchor, search_failover_replacement, 1)
+
+# Featured has two curated Invidious playlist attempts. If both fail, resolve
+# the primary playlist through yt-dlp so Featured does not become unusable.
+featured_fallback_anchor = '''        entries = get_playlist_from_invidious(fallback_playlist_id)
+
+    random.shuffle(entries)
+'''
+featured_fallback_replacement = '''        entries = get_playlist_from_invidious(fallback_playlist_id)
+
+    if not entries:
+        print("INVIDIOUS PLAYLIST POOL FAILED; USING YT-DLP FEATURED FALLBACK", flush=True)
+        result = subprocess.run(
+            [
+                "yt-dlp",
+                "--flat-playlist",
+                "--dump-json",
+                "--ignore-errors",
+                "--no-warnings",
+                "--playlist-end", "30",
+                playlist_url,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        entries = []
+        for line in result.stdout.splitlines():
+            try:
+                entries.append(json.loads(line))
+            except Exception:
+                pass
+        print("YT-DLP FEATURED COUNT:", len(entries), flush=True)
+
+    random.shuffle(entries)
+'''
+if featured_fallback_anchor not in video_text:
+    raise SystemExit("Featured yt-dlp fallback anchor not found")
+video_text = video_text.replace(featured_fallback_anchor, featured_fallback_replacement, 1)
+
+video_path.write_text(video_text)
+print("Added yt-dlp fallback for search and Featured")
