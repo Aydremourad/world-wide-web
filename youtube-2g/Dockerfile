@@ -41,7 +41,8 @@ RUN python /tmp/patch_video_proxy.py && rm /tmp/patch_video_proxy.py
 # Upstream README requires yt-dlp + FFmpeg but its Dockerfile does not install
 # yt-dlp. Use the same current nightly that was already proven on this service.
 RUN python -m pip install --no-cache-dir -r /app/upstream-requirements.txt \
-    "yt-dlp[default] @ https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/2026.09.27.232945/yt-dlp.tar.gz#sha256=895f2e80f60a9e54ca8ee40328c0e788794481444bd17698521cfafc4b318afc"
+    "yt-dlp[default] @ https://github.com/yt-dlp/yt-dlp-nightly-builds/releases/download/2026.09.27.232945/yt-dlp.tar.gz#sha256=895f2e80f60a9e54ca8ee40328c0e788794481444bd17698521cfafc4b318afc" \
+    "bgutil-ytdlp-pot-provider"
 
 COPY modified_main.py /app/modified_main.py
 
