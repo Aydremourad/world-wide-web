@@ -32,6 +32,19 @@ s = s.replace(
 
 # Current yt-dlp recommended YouTube path: mweb + external PO-token provider.
 # bgutil's HTTP plugin auto-discovers its provider at 127.0.0.1:4416.
+#
+# iPhone 2G speed profile:
+# Prefer an already-small progressive source, and encode at 15 fps. The 2G
+# display/player does not benefit from spending Oracle CPU transcoding 30 fps
+# 360p input when our final file is only 320x240.
+s = s.replace(
+    '"-f", "18/36/17",',
+    '"-f", "b[height<=240][ext=mp4]/b[height<=240]/36/17/18",'
+)
+s = s.replace(
+    '"-vf", "scale=320:240",',
+    '"-vf", "fps=15,scale=320:240",'
+)
 s = s.replace(
     '["--extractor-args", "youtube:player_client=android"]',
     '["--extractor-args", "youtube:player_client=mweb"]'
