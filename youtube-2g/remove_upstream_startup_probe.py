@@ -152,3 +152,52 @@ video_text = video_text.replace(search_cache_anchor, search_cache_replacement, 1
 
 video_path.write_text(video_text)
 print("Enabled instant single-video cache for tapped search results")
+
+
+# 7) Fix the malformed GData batch URL advertised by classic search.
+classic_search_path = templates_root / "classic" / "search.jinja2"
+classic_search_text = classic_search_path.read_text()
+bad_batch_url = "{{url}}/feeds/api/videos//batch"
+good_batch_url = "{{url}}/feeds/api/videos/batch"
+if bad_batch_url not in classic_search_text:
+    raise SystemExit("Expected classic search double-slash batch URL not found")
+classic_search_path.write_text(
+    classic_search_text.replace(bad_batch_url, good_batch_url, 1)
+)
+print("Fixed classic search /feeds/api/videos//batch URL")
+
+# 8) Any GData batch request for a video that was just listed by search
+#    should resolve from the in-memory search cache first. The public
+#    Invidious /api/v1/videos endpoint is currently returning Companion
+#    startup errors, so it must not sit in the stock app's tap path.
+video_text = video_path.read_text()
+old_batch_resolve = '''    clean = []
+    for vid_id in video_ids:
+        data = get.fetch(f"{config.URL}/api/v1/videos/{vid_id}")
+        if not data:
+            continue
+        item = normalize_video(data)
+        if item:
+            clean.append(item)
+'''
+new_batch_resolve = '''    clean = []
+    for vid_id in video_ids:
+        item = _recent_search_items.get(vid_id)
+        if item is not None:
+            print("BATCH SEARCH CACHE HIT:", vid_id, flush=True)
+            clean.append(dict(item))
+            continue
+
+        data = get.fetch(f"{config.URL}/api/v1/videos/{vid_id}")
+        if not data:
+            continue
+        item = normalize_video(data)
+        if item:
+            clean.append(item)
+'''
+batch_replacements = video_text.count(old_batch_resolve)
+if batch_replacements < 1:
+    raise SystemExit("Expected batch video resolver block not found")
+video_text = video_text.replace(old_batch_resolve, new_batch_resolve)
+video_path.write_text(video_text)
+print("Made", batch_replacements, "batch resolver(s) reuse search cache")
