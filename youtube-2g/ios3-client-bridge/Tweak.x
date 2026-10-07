@@ -1,11 +1,18 @@
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <MediaPlayer/MediaPlayer.h>
+#import <objc/runtime.h>
 #include <stdio.h>
 #include <stdarg.h>
 
 static NSString *TRBEndpoint = nil;
+static NSString *TRBEndpointHost = nil;
 static BOOL TRBInsideURLBuild = NO;
+static BOOL TRBCollectVideoIDs = NO;
+static NSMutableArray *TRBVideoIDs = nil;
+static NSMutableDictionary *TRBOriginalDidSelectIMPs = nil;
+static NSMutableSet *TRBHookedDelegateClasses = nil;
+static MPMoviePlayerController *TRBForcedPlayer = nil;
 
 static void TRBLog(NSString *format, ...) {
     va_list args;
@@ -65,6 +72,43 @@ static NSString *TRBQueryValue(NSString *query, NSString *wantedKey) {
     return nil;
 }
 
+static BOOL TRBIsOurEndpointURL(NSURL *url) {
+    if (!url || ![TRBEndpointHost length]) return NO;
+    NSString *host = [[url host] lowercaseString];
+    return [host isEqualToString:[TRBEndpointHost lowercaseString]];
+}
+
+static NSString *TRBLocalVideoIDFromURL(NSURL *url) {
+    if (!TRBIsOurEndpointURL(url)) return nil;
+    NSString *path = [url path];
+    NSString *prefix = @"/getvideo/";
+    if (![path hasPrefix:prefix]) return nil;
+
+    NSString *videoID = [path substringFromIndex:[prefix length]];
+    NSRange slash = [videoID rangeOfString:@"/"];
+    if (slash.location != NSNotFound) {
+        videoID = [videoID substringToIndex:slash.location];
+    }
+    return [videoID length] ? videoID : nil;
+}
+
+static void TRBResetVideoMap(NSString *reason) {
+    [TRBVideoIDs removeAllObjects];
+    TRBCollectVideoIDs = YES;
+    TRBLog(@"VIDEO MAP RESET %@", reason);
+}
+
+static void TRBRememberVideoURL(NSURL *url) {
+    if (!TRBCollectVideoIDs) return;
+
+    NSString *videoID = TRBLocalVideoIDFromURL(url);
+    if (![videoID length]) return;
+    if ([TRBVideoIDs containsObject:videoID]) return;
+
+    [TRBVideoIDs addObject:videoID];
+    TRBLog(@"VIDEO MAP [%lu] %@", (unsigned long)([TRBVideoIDs count] - 1), videoID);
+}
+
 static NSString *TRBVideoIDFromURL(NSURL *url) {
     if (!url) return nil;
 
@@ -118,6 +162,8 @@ static NSURL *TRBURLWithStringRelativeNoRewrite(NSString *string, NSURL *baseURL
 static NSURL *TRBRewriteURL(NSURL *url, NSString *source) {
     if (!url || ![TRBEndpoint length]) return url;
 
+    TRBRememberVideoURL(url);
+
     NSString *absolute = [url absoluteString];
     if ([absolute rangeOfString:@"youtube"].location != NSNotFound ||
         [absolute hasPrefix:TRBEndpoint]) {
@@ -155,6 +201,17 @@ static NSURLRequest *TRBRewriteRequest(NSURLRequest *request, NSString *source) 
     if (!request) return request;
 
     NSURL *oldURL = [request URL];
+
+    if (TRBIsOurEndpointURL(oldURL)) {
+        NSString *path = [oldURL path];
+        NSString *query = [oldURL query];
+
+        if (([path hasPrefix:@"/feeds/api/videos"] &&
+             [query rangeOfString:@"q="].location != NSNotFound) ||
+            [path hasPrefix:@"/feeds/api/standardfeeds/"]) {
+            TRBResetVideoMap([oldURL absoluteString]);
+        }
+    }
     NSURL *newURL = TRBRewriteURL(oldURL, source);
     if (newURL == oldURL || [[newURL absoluteString] isEqualToString:[oldURL absoluteString]]) {
         return request;
@@ -271,13 +328,137 @@ static NSURLRequest *TRBRewriteRequest(NSURLRequest *request, NSString *source) 
 
 %end
 
+typedef void (*TRBDidSelectIMP)(id, SEL, UITableView *, NSIndexPath *);
+
+static void TRBPlayMappedVideo(NSString *videoID) {
+    if (![videoID length] || ![TRBEndpointHost length]) return;
+
+    NSString *urlString = [NSString stringWithFormat:@"http://%@/getvideo/%@",
+                           TRBEndpointHost, videoID];
+    NSURL *url = TRBURLWithStringNoRewrite(urlString);
+    if (!url) {
+        TRBLog(@"FORCE PLAY bad URL %@", urlString);
+        return;
+    }
+
+    TRBLog(@"FORCE PLAY %@", urlString);
+
+    if (TRBForcedPlayer) {
+        [TRBForcedPlayer stop];
+        [TRBForcedPlayer release];
+        TRBForcedPlayer = nil;
+    }
+
+    TRBForcedPlayer = [[MPMoviePlayerController alloc] initWithContentURL:url];
+    if (!TRBForcedPlayer) {
+        TRBLog(@"FORCE PLAY failed to create MPMoviePlayerController");
+        return;
+    }
+
+    // On iPhone OS 3.1 and earlier, play presents the movie full-screen.
+    [TRBForcedPlayer play];
+    TRBLog(@"FORCE PLAY play sent");
+}
+
+static void TRBCallOriginalDidSelect(id self, SEL cmd, UITableView *tableView, NSIndexPath *indexPath) {
+    NSString *key = NSStringFromClass([self class]);
+    NSValue *value = [TRBOriginalDidSelectIMPs objectForKey:key];
+    IMP imp = value ? [value pointerValue] : NULL;
+
+    if (imp) {
+        ((TRBDidSelectIMP)imp)(self, cmd, tableView, indexPath);
+    }
+}
+
+static void TRBDidSelectReplacement(id self, SEL cmd, UITableView *tableView, NSIndexPath *indexPath) {
+    NSInteger section = [indexPath section];
+    NSInteger row = [indexPath row];
+    NSInteger count = (NSInteger)[TRBVideoIDs count];
+    NSInteger rows = 0;
+
+    if ([tableView respondsToSelector:@selector(numberOfRowsInSection:)]) {
+        rows = [tableView numberOfRowsInSection:section];
+    }
+
+    TRBLog(@"DID SELECT delegate=%@ section=%ld row=%ld tableRows=%ld mapped=%ld",
+           NSStringFromClass([self class]),
+           (long)section,
+           (long)row,
+           (long)rows,
+           (long)count);
+
+    if (count > 0 && section == 0) {
+        NSInteger offset = (rows == count + 1) ? 1 : 0;
+        NSInteger mappedIndex = row - offset;
+
+        if (mappedIndex >= 0 && mappedIndex < count &&
+            (rows == count || rows == count + 1)) {
+            NSString *videoID = [TRBVideoIDs objectAtIndex:mappedIndex];
+            TRBLog(@"DID SELECT mapped row %ld -> %@", (long)row, videoID);
+
+            // Apple's stock iOS 3 list transition is what is freezing.
+            // Bypass only that transition and hand the same server movie URL
+            // directly to Apple's own full-screen MPMoviePlayerController.
+            [tableView deselectRowAtIndexPath:indexPath animated:NO];
+            TRBPlayMappedVideo(videoID);
+            return;
+        }
+    }
+
+    TRBLog(@"DID SELECT not a mapped video list; calling Apple original");
+    TRBCallOriginalDidSelect(self, cmd, tableView, indexPath);
+}
+
+static void TRBInstallSelectionHook(id delegate) {
+    if (!delegate) return;
+
+    Class cls = [delegate class];
+    NSString *key = NSStringFromClass(cls);
+    if ([TRBHookedDelegateClasses containsObject:key]) return;
+
+    SEL sel = @selector(tableView:didSelectRowAtIndexPath:);
+    Method inheritedOrOwn = class_getInstanceMethod(cls, sel);
+    if (!inheritedOrOwn) return;
+
+    IMP oldIMP = method_getImplementation(inheritedOrOwn);
+    const char *types = method_getTypeEncoding(inheritedOrOwn);
+    if (!oldIMP || !types) return;
+
+    [TRBOriginalDidSelectIMPs setObject:[NSValue valueWithPointer:oldIMP] forKey:key];
+
+    // If the implementation is inherited, add an override on this exact
+    // delegate class. Otherwise replace only this class's method.
+    if (!class_addMethod(cls, sel, (IMP)TRBDidSelectReplacement, types)) {
+        Method own = class_getInstanceMethod(cls, sel);
+        method_setImplementation(own, (IMP)TRBDidSelectReplacement);
+    }
+
+    [TRBHookedDelegateClasses addObject:key];
+    TRBLog(@"HOOKED DIDSELECT %@", key);
+}
+
+%hook UITableView
+
+- (void)setDelegate:(id)delegate {
+    %orig(delegate);
+    TRBInstallSelectionHook(delegate);
+}
+
+%end
+
 %ctor {
     NSAutoreleasePool *pool = [[NSAutoreleasePool alloc] init];
     TRBEndpoint = [TRBLoadEndpoint() copy];
+    NSURL *endpointURL = TRBURLWithStringNoRewrite(TRBEndpoint);
+    TRBEndpointHost = [[[endpointURL host] lowercaseString] copy];
+
+    TRBVideoIDs = [[NSMutableArray alloc] init];
+    TRBOriginalDidSelectIMPs = [[NSMutableDictionary alloc] init];
+    TRBHookedDelegateClasses = [[NSMutableSet alloc] init];
 
     FILE *fp = fopen("/tmp/TubeRepairIOS3Bridge.log", "w");
     if (fp) fclose(fp);
 
-    TRBLog(@"TubeRepairIOS3Bridge 1.0.0 loaded endpoint=%@", TRBEndpoint);
+    TRBLog(@"TubeRepairIOS3Bridge 1.1.0 loaded endpoint=%@ host=%@", TRBEndpoint, TRBEndpointHost);
     [pool drain];
 }
