@@ -44,6 +44,12 @@ RUN apt-get update \
 COPY --from=token-builder /usr/local/bin/node /usr/local/bin/node
 COPY --from=token-builder /opt/bgutil /opt/bgutil
 
+# Validate the exact runtime path used by yt-dlp's bgutil script provider.
+# This catches Node/native-module/provider packaging problems at image build
+# time instead of crashing the Render service during startup.
+RUN node --version \
+    && node /opt/bgutil/server/build/generate_once.js --version
+
 WORKDIR /app
 
 COPY remove_upstream_startup_probe.py /tmp/remove_upstream_startup_probe.py
@@ -68,9 +74,8 @@ COPY invidious_failover.py /app/modified-tuberepair/tuberepair/modules/invidious
 COPY yt_dlp_render.py /usr/local/bin/yt-dlp
 RUN chmod 0755 /usr/local/bin/yt-dlp
 
-COPY render_start.py /app/render_start.py
 
 WORKDIR /app/modified-tuberepair/tuberepair
 
 EXPOSE 10000
-CMD ["python", "/app/render_start.py"]
+CMD ["python", "main.py"]
