@@ -21,3 +21,5 @@ services:
         value: "true"
       - key: USE_REDIS
         value: "false"
+      - key: TUBEREPAIR_DATA_DIR
+        value: "/var/data"
