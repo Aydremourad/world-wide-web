@@ -1,0 +1,9 @@
+Package: com.aydre.tuberepairios3bridge
+Name: TubeRepair iOS 3 Bridge
+Version: 1.0.0
+Architecture: iphoneos-arm
+Description: iOS 3 stock YouTube playback bridge for TubeRepair.
+Maintainer: Aydre
+Author: Aydre
+Section: Tweaks
+Depends: mobilesubstrate, bag.xml.tuberepair
