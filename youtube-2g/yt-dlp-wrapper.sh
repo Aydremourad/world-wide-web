@@ -9,6 +9,11 @@ if [ -n "${YOUTUBE_COOKIES_B64:-}" ]; then
     TMP_COOKIE_FILE="${COOKIE_FILE}.$$"
     printf '%s' "$YOUTUBE_COOKIES_B64" | python -c 'import sys, base64; sys.stdout.buffer.write(base64.b64decode(sys.stdin.buffer.read(), validate=True))' > "$TMP_COOKIE_FILE"
     mv "$TMP_COOKIE_FILE" "$COOKIE_FILE"
+
+    if [ -n "${YOUTUBE_USER_AGENT:-}" ]; then
+        exec "$REAL_YTDLP" --cookies "$COOKIE_FILE" --user-agent "$YOUTUBE_USER_AGENT" "$@"
+    fi
+
     exec "$REAL_YTDLP" --cookies "$COOKIE_FILE" "$@"
 fi
 
