@@ -199,6 +199,11 @@ body_anchor = '''def getvideo(video_id, res=None):
         return "This isn't a real video — check its description for the login link.", 200
 '''
 body_replacement = '''def getvideo(video_id, res=None):
+    # YouTube IDs contain only A-Z, a-z, 0-9, "_" and "-".
+    # Strip accidental shell/URL escaping (notably a trailing backslash)
+    # before using the ID in filenames or redirects.
+    video_id = re.sub(r"[^A-Za-z0-9_-]", "", video_id)
+
     if video_id == "login_prompt":
         return "This isn't a real video — check its description for the login link.", 200
 
