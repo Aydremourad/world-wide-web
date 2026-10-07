@@ -263,3 +263,148 @@ classic_search_text = classic_search_text.replace(
 )
 classic_search_path.write_text(classic_search_text)
 print("Routed classic-search alternate/mobile links through /getvideo")
+
+
+# 12) Replace the single broken Invidious dependency with resilient
+#     failover across the official public instance list.
+get_path = Path("/app/modified-tuberepair/tuberepair/modules/get.py")
+get_text = get_path.read_text()
+
+if "from modules import invidious_failover" not in get_text:
+    get_text = get_text.replace(
+        "from modules import helpers\n",
+        "from modules import helpers\nfrom modules import invidious_failover\n",
+        1
+    )
+
+fetch_start = get_text.find("# simplify requests")
+fetch_end = get_text.find("# If error logging is enable")
+if fetch_start < 0 or fetch_end < 0 or fetch_end <= fetch_start:
+    raise SystemExit("Could not locate upstream get.fetch block")
+
+new_fetch_block = '''# simplify requests
+def fetch(url):
+    data = invidious_failover.fetch_url(
+        url,
+        session=session,
+        proxies=helpers.proxies,
+        timeout=5,
+    )
+    if data is None:
+        print_with_seperator('ALL OFFICIAL INVIDIOUS INSTANCES FAILED!', 'red')
+    return data
+
+def fetch_api(path, params=None):
+    return invidious_failover.fetch_path(
+        path,
+        params=params,
+        session=session,
+        proxies=helpers.proxies,
+        timeout=5,
+    )
+
+'''
+get_text = get_text[:fetch_start] + new_fetch_block + get_text[fetch_end:]
+get_path.write_text(get_text)
+print("Installed official Invidious failover in modules/get.py")
+
+# Route every direct Invidious call in api/video.py through get.fetch_api().
+video_text = video_path.read_text()
+
+old_related = '''        r = requests.get(
+            f"{config.URL}/api/v1/videos/{video_id}",
+            timeout=10
+        )
+
+        data = r.json()
+'''
+new_related = '''        data = get.fetch_api(f"/api/v1/videos/{video_id}") or {}
+'''
+if old_related not in video_text:
+    raise SystemExit("Related-video direct Invidious request anchor not found")
+video_text = video_text.replace(old_related, new_related, 1)
+
+old_channel_name = '''        r = requests.get(
+            f"{config.URL}/api/v1/channels/{channel_id}",
+            timeout=10,
+        )
+        print("GET_CHANNEL_NAME_FROM_ID status:", channel_id, r.status_code, flush=True)
+        if not r.ok:
+            print("GET_CHANNEL_NAME_FROM_ID body:", r.text[:300], flush=True)
+            return None
+        data = r.json()
+'''
+new_channel_name = '''        data = get.fetch_api(f"/api/v1/channels/{channel_id}") or {}
+        print("GET_CHANNEL_NAME_FROM_ID fetched:", channel_id, bool(data), flush=True)
+        if not data or data.get("error"):
+            return None
+'''
+if old_channel_name not in video_text:
+    raise SystemExit("Channel-name direct Invidious request anchor not found")
+video_text = video_text.replace(old_channel_name, new_channel_name, 1)
+
+old_channel_id = '''        r = requests.get(
+            f"{config.URL}/api/v1/search",
+            params={
+                "q": name,
+                "type": "channel"
+            },
+            timeout=10
+        )
+
+        data = r.json()
+'''
+new_channel_id = '''        data = get.fetch_api(
+            "/api/v1/search",
+            params={
+                "q": name,
+                "type": "channel"
+            }
+        ) or []
+'''
+if old_channel_id not in video_text:
+    raise SystemExit("Channel-ID direct Invidious request anchor not found")
+video_text = video_text.replace(old_channel_id, new_channel_id, 1)
+
+old_search = '''        r = requests.get(
+            f"{config.URL}/api/v1/search",
+            params={
+                "q": raw_search_keyword,
+                "type": "video",
+                "page": invidious_page
+            },
+            headers={
+                "User-Agent": "Mozilla/5.0",
+                "Accept": "application/json"
+            },
+            timeout=10
+        )
+
+        r.raise_for_status()
+        json_data = r.json()
+'''
+new_search = '''        json_data = get.fetch_api(
+            "/api/v1/search",
+            params={
+                "q": raw_search_keyword,
+                "type": "video",
+                "page": invidious_page
+            }
+        ) or []
+'''
+if old_search not in video_text:
+    raise SystemExit("Search direct Invidious request anchor not found")
+video_text = video_text.replace(old_search, new_search, 1)
+
+# Featured/Most Viewed already receive useful metadata in their list result.
+# Do not force a second live /videos/<id> request for every item; only enrich
+# entries that are actually missing fields.
+refresh_count = video_text.count("enrich_view_counts(data, force_refresh=True)")
+video_text = video_text.replace(
+    "enrich_view_counts(data, force_refresh=True)",
+    "enrich_view_counts(data, force_refresh=False)"
+)
+print("Disabled", refresh_count, "forced whole-feed per-video enrichments")
+
+video_path.write_text(video_text)
+print("Routed direct video.py Invidious calls through failover")
