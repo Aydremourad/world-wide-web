@@ -56,6 +56,7 @@ def healthz():
         "server": "Modified TubeRepair",
         "upstream_commit": os.environ.get("MODIFIED_TUBEREPAIR_COMMIT", "unknown"),
         "version": getattr(config, "VERSION", "unknown"),
+        "playback_backend": "invidious-range-proxy-v1",
     }
 
 @app.get("/diagnostics")
@@ -65,6 +66,7 @@ def diagnostics():
         "server": "Modified TubeRepair for iOS 3",
         "upstream_commit": os.environ.get("MODIFIED_TUBEREPAIR_COMMIT", "unknown"),
         "version": getattr(config, "VERSION", "unknown"),
+        "playback_backend": "invidious-range-proxy-v1",
         "medium_quality": bool(getattr(config, "MEDIUM_QUALITY", True)),
         "hls_resolution": int(getattr(config, "HLS_RESOLUTION", 720)),
         "persistent_data_root": str(DATA_ROOT),
