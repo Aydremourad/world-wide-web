@@ -46,14 +46,14 @@ if not has_youtube_client:
 
 # Current yt-dlp guidance for YouTube:
 # - mweb client
-# - external PO-token provider for GVS
+# - local bgutil script PO-token provider for GVS
 # - supported JS runtime/EJS
 # - browser impersonation for TLS-level client fingerprinting
 prefix = [
     "--ignore-config",
     "--js-runtimes", "node",
     "--impersonate", "chrome",
-    "--extractor-args", "youtubepot-bgutilhttp:base_url=http://127.0.0.1:4416",
+    "--extractor-args", "youtubepot-bgutilscript:server_home=/opt/bgutil/server",
 ]
 
 os.execv(REAL_YTDLP, [REAL_YTDLP, *prefix, *rewritten])
