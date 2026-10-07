@@ -25,7 +25,9 @@ services:
       - tuberepair-data:/var/data
 
   companion:
-    image: quay.io/invidious/invidious-companion:latest
+    build:
+      context: ./companion
+      dockerfile: Dockerfile
     restart: unless-stopped
     network_mode: host
     environment:
